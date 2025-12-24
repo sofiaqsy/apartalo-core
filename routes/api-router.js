@@ -172,12 +172,12 @@ router.get('/conversaciones/:businessId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Conversaciones_Asesor!A:F');
-    
+
     const conversaciones = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const estadoConv = row[4] || '';
-      
+
       if (!estado || estadoConv === estado) {
         conversaciones.push({
           id: row[0],
@@ -219,7 +219,7 @@ router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, r
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Mensajes!A:F');
-    
+
     const mensajes = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -273,11 +273,11 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Conversaciones_Asesor!A:E');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === conversacionId) {
         await sheets.updateCell(`Conversaciones_Asesor!E${i + 1}`, estado);
-        
+
         return res.json({
           success: true,
           conversacionId,
@@ -317,12 +317,12 @@ router.get('/pedidos/:businessId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Pedidos!A:R');
-    
+
     const pedidos = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const estadoPedido = row[9] || '';
-      
+
       // Filtrar por estado
       if (estado && estadoPedido !== estado) continue;
 
@@ -375,11 +375,11 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Pedidos!A:L');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         const updates = [];
-        
+
         if (estado) {
           updates.push({ range: `Pedidos!J${i + 1}`, value: estado });
         }
@@ -395,7 +395,7 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
         if (notificarCliente && estado) {
           const whatsapp = new WhatsAppService(negocio.whatsapp);
           const clienteWhatsapp = rows[i][3];
-          
+
           const mensajesEstado = {
             'CONFIRMADO': `✅ Tu pedido *${pedidoId}* ha sido confirmado. ¡Gracias!`,
             'EN_PREPARACION': `📦 Tu pedido *${pedidoId}* está en preparación.`,
@@ -450,7 +450,7 @@ router.get('/clientes/:businessId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:K');
-    
+
     let clientes = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -478,7 +478,7 @@ router.get('/clientes/:businessId', async (req, res) => {
         const matchWhatsapp = cliente.whatsapp.includes(buscar);
         const matchEmpresa = cliente.empresa.toLowerCase().includes(searchLower);
         const matchTelefono = cliente.telefono.includes(buscar);
-        
+
         if (!matchNombre && !matchWhatsapp && !matchEmpresa && !matchTelefono) continue;
       }
 
@@ -528,7 +528,7 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
     // Buscar cliente
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:K');
     let cliente = null;
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         cliente = {
@@ -601,7 +601,7 @@ router.post('/clientes/:businessId', async (req, res) => {
     // Verificar que el whatsapp no exista
     const clienteExistente = await sheets.buscarCliente(whatsapp);
     if (clienteExistente) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Ya existe un cliente con ese WhatsApp',
         clienteExistente: clienteExistente.id
       });
@@ -671,11 +671,11 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:K');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         const updates = [];
-        
+
         if (whatsapp !== undefined) updates.push({ range: `Clientes!B${i + 1}`, value: whatsapp.replace(/[^0-9]/g, '') });
         if (nombre !== undefined) updates.push({ range: `Clientes!C${i + 1}`, value: nombre });
         if (telefono !== undefined) updates.push({ range: `Clientes!D${i + 1}`, value: telefono });
@@ -723,7 +723,7 @@ router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:B');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         // Marcar como eliminado cambiando el ID
@@ -853,7 +853,7 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
     // Buscar cliente
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:B');
     let whatsappCliente = null;
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         whatsappCliente = rows[i][1];
@@ -908,10 +908,10 @@ router.get('/negocios', (req, res) => {
 router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
   try {
     let { whatsapp } = req.params;
-    
+
     // Limpiar número (solo dígitos)
     whatsapp = whatsapp.replace(/[^0-9]/g, '');
-    
+
     // Si tiene 9 dígitos, agregar código de Perú
     if (whatsapp.length === 9) {
       whatsapp = '51' + whatsapp;
@@ -921,52 +921,23 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
 
     // Buscar en todos los negocios
     const negocios = negociosService.getAll();
-    
+
     for (const negocio of negocios) {
-      // Verificar si el WhatsApp coincide con el del negocio
-      const whatsappNegocio = negocio.whatsapp?.phoneNumber?.replace(/[^0-9]/g, '') || '';
-      
-      if (whatsappNegocio === whatsapp) {
-        console.log(`✅ Negocio encontrado: ${negocio.nombre}`);
+      // Primero: Buscar por whatsapp.admin (columna H del Excel de Negocios)
+      const whatsappAdmin = (negocio.whatsapp?.admin || '').replace(/[^0-9]/g, '');
+
+      if (whatsappAdmin && whatsappAdmin === whatsapp) {
+        console.log(`✅ Negocio encontrado por WhatsApp Admin: ${negocio.nombre}`);
         return res.json({
           encontrado: true,
           negocio: {
             id: negocio.id,
             nombre: negocio.nombre,
             flujo: negocio.flujo,
-            features: negocio.features
+            features: negocio.features,
+            whatsappAdmin: whatsappAdmin
           }
         });
-      }
-
-      // También buscar en la hoja de configuración del negocio
-      // (por si el dueño tiene un número diferente al del bot)
-      try {
-        const sheets = new SheetsService(negocio.spreadsheetId);
-        await sheets.initialize();
-        
-        // Buscar en hoja Configuracion si existe
-        const configRows = await sheets.getRows(negocio.spreadsheetId, 'Configuracion!A:B').catch(() => []);
-        
-        for (const row of configRows) {
-          if (row[0] === 'whatsapp_admin' || row[0] === 'whatsapp_dueno') {
-            const adminWhatsapp = (row[1] || '').replace(/[^0-9]/g, '');
-            if (adminWhatsapp === whatsapp) {
-              console.log(`✅ Negocio encontrado por admin: ${negocio.nombre}`);
-              return res.json({
-                encontrado: true,
-                negocio: {
-                  id: negocio.id,
-                  nombre: negocio.nombre,
-                  flujo: negocio.flujo,
-                  features: negocio.features
-                }
-              });
-            }
-          }
-        }
-      } catch (e) {
-        // Ignorar errores de sheets individuales
       }
     }
 
@@ -1025,7 +996,7 @@ router.get('/productos/:businessId', async (req, res) => {
     // Filtrar por búsqueda
     if (buscar) {
       const searchLower = buscar.toLowerCase();
-      productos = productos.filter(p => 
+      productos = productos.filter(p =>
         p.nombre.toLowerCase().includes(searchLower) ||
         p.codigo.toLowerCase().includes(searchLower) ||
         (p.descripcion || '').toLowerCase().includes(searchLower)
@@ -1177,11 +1148,11 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Inventario!A:I');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === codigo) {
         const updates = [];
-        
+
         if (nombre !== undefined) updates.push({ range: `Inventario!B${i + 1}`, value: nombre });
         if (descripcion !== undefined) updates.push({ range: `Inventario!C${i + 1}`, value: descripcion });
         if (precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: precio });
@@ -1234,10 +1205,10 @@ router.delete('/productos/:businessId/:codigo', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Inventario!A:H');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === codigo) {
-        
+
         if (force === 'true') {
           // Eliminar permanentemente (marcar fila vacía)
           // En Sheets no podemos eliminar filas fácilmente, así que marcamos como ELIMINADO
@@ -1290,7 +1261,7 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
     await sheets.initialize();
 
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Inventario!A:F');
-    
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === codigo) {
         const stockActual = parseInt(rows[i][4]) || 0;

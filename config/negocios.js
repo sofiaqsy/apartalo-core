@@ -32,7 +32,7 @@ class NegociosService {
 
       this.initialized = true;
       console.log(`✅ ${this.negocios.size} negocio(s) cargado(s)`);
-      
+
       return true;
     } catch (error) {
       console.error('❌ Error cargando negocios:', error.message);
@@ -46,7 +46,7 @@ class NegociosService {
   async loadFromSheets(sheetsService) {
     const rows = await sheetsService.getRows(
       config.google.masterSpreadsheetId,
-      'Negocios!A:L'
+      'Negocios!A:M'
     );
 
     if (!rows || rows.length <= 1) {
@@ -58,7 +58,7 @@ class NegociosService {
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const negocio = this.parseNegocioRow(row);
-      
+
       if (negocio && negocio.estado === 'ACTIVO') {
         this.negocios.set(negocio.id, negocio);
         console.log(`   ✅ ${negocio.nombre} (${negocio.whatsapp.tipo})`);
@@ -70,35 +70,36 @@ class NegociosService {
    * Parsear fila de Sheets a objeto negocio
    * Columnas esperadas:
    * A: ID, B: Nombre, C: WhatsappTipo, D: PhoneId, E: Token,
-   * F: SpreadsheetId, G: WebhookPath, H: Flujo, I: Features,
-   * J: Prefijo, K: Estado, L: ConfigExtra (JSON)
+   * F: SpreadsheetId, G: WebhookPath, H: WhatsappAdmin, I: Flujo,
+   * J: Features, K: Prefijo, L: Estado, M: ConfigExtra (JSON)
    */
   parseNegocioRow(row) {
     if (!row[0]) return null;
 
     const whatsappTipo = row[2] || 'COMPARTIDO';
-    
+
     return {
       id: row[0],
       nombre: row[1] || row[0],
-      
+
       whatsapp: {
         tipo: whatsappTipo,
-        phoneId: whatsappTipo === 'PROPIO' 
-          ? row[3] 
+        phoneId: whatsappTipo === 'PROPIO'
+          ? row[3]
           : config.whatsappShared.phoneId,
         token: whatsappTipo === 'PROPIO'
           ? row[4]
           : config.whatsappShared.token,
         webhookPath: row[6] || `/webhook/${row[0]}`,
-        prefijo: row[9] || row[0].substring(0, 4).toUpperCase()
+        admin: row[7] || null,
+        prefijo: row[10] || row[0].substring(0, 4).toUpperCase()
       },
-      
+
       spreadsheetId: row[5],
-      flujo: row[7] || 'ESTANDAR',
-      features: this.parseFeatures(row[8]),
-      estado: row[10] || 'ACTIVO',
-      configExtra: this.parseJSON(row[11])
+      flujo: row[8] || 'ESTANDAR',
+      features: this.parseFeatures(row[9]),
+      estado: row[11] || 'ACTIVO',
+      configExtra: this.parseJSON(row[12])
     };
   }
 
