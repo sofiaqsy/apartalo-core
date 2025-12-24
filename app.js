@@ -19,12 +19,13 @@ const negociosService = require('./config/negocios');
 
 // Servicios core
 const SheetsService = require('./core/services/sheets-service');
-const driveService = require('./core/services/drive-service');
+const DriveService = require('./core/services/drive-service');
 const stateManager = require('./core/services/state-manager');
 
 // Rutas
 const webhookRouter = require('./routes/webhook-router');
 const apiRouter = require('./routes/api-router');
+const uploadRouter = require('./routes/upload-router');
 
 // Inicializar Express
 const app = express();
@@ -39,9 +40,20 @@ const io = new Server(server, {
 });
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' })); // Aumentar límite para imágenes base64
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// CORS para la app móvil
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // ============================================
 // RUTAS
@@ -59,7 +71,8 @@ app.get('/', (req, res) => {
       webhook: '/webhook/:businessId',
       webhookShared: '/webhook',
       health: '/health',
-      api: '/api'
+      api: '/api',
+      upload: '/api/upload/:businessId'
     }
   });
 });
@@ -79,6 +92,9 @@ app.use('/webhook', webhookRouter);
 
 // API para panel admin y asesor
 app.use('/api', apiRouter);
+
+// Upload de imágenes a Google Drive
+app.use('/api/upload', uploadRouter);
 
 // Catálogo web público
 app.get('/catalogo/:businessId', (req, res) => {
@@ -141,8 +157,13 @@ async function initialize() {
   console.log('📦 Cargando servicios...');
   
   // Google Drive
-  const driveOk = await driveService.initialize();
-  console.log(`   ${driveOk ? '✅' : '⚠️'} Google Drive`);
+  try {
+    const driveService = new DriveService();
+    await driveService.initialize();
+    console.log('   ✅ Google Drive');
+  } catch (e) {
+    console.log('   ⚠️ Google Drive:', e.message);
+  }
 
   // 2. Cargar negocios
   console.log('\n🏪 Cargando negocios...');
@@ -186,6 +207,7 @@ async function initialize() {
 ║   📱 Webhook compartido: /webhook                        ║
 ║   📊 Admin: /admin/:businessId                           ║
 ║   🛒 Catálogo: /catalogo/:businessId                     ║
+║   📤 Upload: /api/upload/:businessId                     ║
 ║   ❤️ Health: /health                                     ║
 ║                                                          ║
 ║   📦 Negocios: ${negocios.length.toString().padEnd(40)}║
