@@ -900,6 +900,89 @@ router.get('/negocios', (req, res) => {
 });
 
 /**
+ * GET /api/negocios/por-whatsapp/:whatsapp
+ * 
+ * Buscar negocio por número de WhatsApp del dueño
+ * Usado para login en la app móvil
+ */
+router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
+  try {
+    let { whatsapp } = req.params;
+    
+    // Limpiar número (solo dígitos)
+    whatsapp = whatsapp.replace(/[^0-9]/g, '');
+    
+    // Si tiene 9 dígitos, agregar código de Perú
+    if (whatsapp.length === 9) {
+      whatsapp = '51' + whatsapp;
+    }
+
+    console.log(`🔍 Buscando negocio para WhatsApp: ${whatsapp}`);
+
+    // Buscar en todos los negocios
+    const negocios = negociosService.getAll();
+    
+    for (const negocio of negocios) {
+      // Verificar si el WhatsApp coincide con el del negocio
+      const whatsappNegocio = negocio.whatsapp?.phoneNumber?.replace(/[^0-9]/g, '') || '';
+      
+      if (whatsappNegocio === whatsapp) {
+        console.log(`✅ Negocio encontrado: ${negocio.nombre}`);
+        return res.json({
+          encontrado: true,
+          negocio: {
+            id: negocio.id,
+            nombre: negocio.nombre,
+            flujo: negocio.flujo,
+            features: negocio.features
+          }
+        });
+      }
+
+      // También buscar en la hoja de configuración del negocio
+      // (por si el dueño tiene un número diferente al del bot)
+      try {
+        const sheets = new SheetsService(negocio.spreadsheetId);
+        await sheets.initialize();
+        
+        // Buscar en hoja Configuracion si existe
+        const configRows = await sheets.getRows(negocio.spreadsheetId, 'Configuracion!A:B').catch(() => []);
+        
+        for (const row of configRows) {
+          if (row[0] === 'whatsapp_admin' || row[0] === 'whatsapp_dueno') {
+            const adminWhatsapp = (row[1] || '').replace(/[^0-9]/g, '');
+            if (adminWhatsapp === whatsapp) {
+              console.log(`✅ Negocio encontrado por admin: ${negocio.nombre}`);
+              return res.json({
+                encontrado: true,
+                negocio: {
+                  id: negocio.id,
+                  nombre: negocio.nombre,
+                  flujo: negocio.flujo,
+                  features: negocio.features
+                }
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Ignorar errores de sheets individuales
+      }
+    }
+
+    console.log(`❌ No se encontró negocio para: ${whatsapp}`);
+    res.json({
+      encontrado: false,
+      mensaje: 'No se encontró ningún negocio asociado a este número'
+    });
+
+  } catch (error) {
+    console.error('❌ Error buscando negocio:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/negocios/reload
  */
 router.post('/negocios/reload', async (req, res) => {
