@@ -922,9 +922,20 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
     // Buscar en todos los negocios
     const negocios = negociosService.getAll();
 
+    console.log(`📊 Total negocios cargados: ${negocios.length}`);
+
     for (const negocio of negocios) {
+      // DEBUG: Ver el objeto whatsapp completo
+      console.log(`📋 Negocio: ${negocio.id}`);
+      console.log(`   - whatsapp objeto:`, JSON.stringify(negocio.whatsapp, null, 2));
+      console.log(`   - whatsapp.admin raw:`, negocio.whatsapp?.admin);
+
       // Primero: Buscar por whatsapp.admin (columna H del Excel de Negocios)
       const whatsappAdmin = (negocio.whatsapp?.admin || '').replace(/[^0-9]/g, '');
+
+      console.log(`   - whatsappAdmin limpio: "${whatsappAdmin}"`);
+      console.log(`   - whatsapp buscado: "${whatsapp}"`);
+      console.log(`   - ¿Match?: ${whatsappAdmin === whatsapp}`);
 
       if (whatsappAdmin && whatsappAdmin === whatsapp) {
         console.log(`✅ Negocio encontrado por WhatsApp Admin: ${negocio.nombre}`);
