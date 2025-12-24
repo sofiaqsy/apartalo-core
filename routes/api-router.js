@@ -931,9 +931,14 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
       console.log(`   - whatsapp.admin raw:`, negocio.whatsapp?.admin);
 
       // Primero: Buscar por whatsapp.admin (columna H del Excel de Negocios)
-      const whatsappAdmin = (negocio.whatsapp?.admin || '').replace(/[^0-9]/g, '');
+      let whatsappAdmin = (negocio.whatsapp?.admin || '').toString().replace(/[^0-9]/g, '');
 
-      console.log(`   - whatsappAdmin limpio: "${whatsappAdmin}"`);
+      // Normalizar: Si tiene 9 dígitos, agregar código de Perú
+      if (whatsappAdmin.length === 9) {
+        whatsappAdmin = '51' + whatsappAdmin;
+      }
+
+      console.log(`   - whatsappAdmin normalizado: "${whatsappAdmin}"`);
       console.log(`   - whatsapp buscado: "${whatsapp}"`);
       console.log(`   - ¿Match?: ${whatsappAdmin === whatsapp}`);
 
