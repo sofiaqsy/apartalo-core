@@ -1,173 +1,202 @@
 /**
  * APARTALO CORE - Google Drive Service
  * 
- * Servicio para subir archivos a Google Drive
- * - Comprobantes de pago
- * - Imágenes de productos
+ * Servicio para subir imágenes a Google Drive
+ * Las imágenes se guardan en una carpeta compartida
+ * y se obtiene URL pública para mostrar en la app
  */
 
 const { google } = require('googleapis');
+const stream = require('stream');
 const config = require('../../config');
 
 class DriveService {
   constructor() {
     this.drive = null;
-    this.auth = null;
-    this.initialized = false;
-    this.defaultFolderId = config.google.driveFolderId;
+    this.folderId = config.google.driveFolderId;
   }
 
   /**
-   * Inicializar conexión con Google Drive
+   * Inicializar autenticación con Google Drive
    */
   async initialize() {
+    if (this.drive) return;
+
     try {
-      if (!config.google.serviceAccountKey) {
-        console.log('⚠️ Google Drive no configurado');
-        return false;
+      const serviceAccountKey = config.google.serviceAccountKey;
+      
+      if (!serviceAccountKey) {
+        throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY no configurado');
       }
 
-      const credentials = JSON.parse(config.google.serviceAccountKey);
+      const credentials = JSON.parse(serviceAccountKey);
 
-      this.auth = new google.auth.GoogleAuth({
+      const auth = new google.auth.GoogleAuth({
         credentials,
         scopes: ['https://www.googleapis.com/auth/drive.file']
       });
 
-      this.drive = google.drive({ version: 'v3', auth: this.auth });
-      this.initialized = true;
-
-      console.log('✅ DriveService inicializado');
-      return true;
+      this.drive = google.drive({ version: 'v3', auth });
+      console.log('✅ Google Drive Service inicializado');
     } catch (error) {
       console.error('❌ Error inicializando Drive:', error.message);
-      return false;
+      throw error;
     }
   }
 
   /**
-   * Subir archivo a Drive
-   * @param {Buffer} fileBuffer - Contenido del archivo
+   * Subir imagen a Google Drive
+   * 
+   * @param {Buffer} fileBuffer - Buffer de la imagen
    * @param {string} fileName - Nombre del archivo
-   * @param {string} mimeType - Tipo MIME
-   * @param {string} folderId - Carpeta destino (opcional)
+   * @param {string} mimeType - Tipo MIME (image/jpeg, image/png)
+   * @param {string} businessId - ID del negocio (para organizar en carpetas)
+   * @returns {object} { fileId, url, name }
    */
-  async uploadFile(fileBuffer, fileName, mimeType, folderId = null) {
-    if (!this.initialized) {
-      console.log('⚠️ Drive no inicializado');
-      return null;
-    }
+  async uploadImage(fileBuffer, fileName, mimeType, businessId = 'general') {
+    await this.initialize();
 
     try {
-      const { Readable } = require('stream');
-      const stream = Readable.from(fileBuffer);
+      // Crear nombre único
+      const timestamp = Date.now();
+      const uniqueName = `${businessId}_${timestamp}_${fileName}`;
 
-      const fileMetadata = {
-        name: fileName,
-        parents: [folderId || this.defaultFolderId]
-      };
+      // Obtener o crear carpeta del negocio
+      const folderId = await this.getOrCreateFolder(businessId);
 
-      const media = {
-        mimeType,
-        body: stream
-      };
+      // Crear stream desde buffer
+      const bufferStream = new stream.PassThrough();
+      bufferStream.end(fileBuffer);
 
+      // Subir archivo
       const response = await this.drive.files.create({
-        resource: fileMetadata,
-        media,
-        fields: 'id, webViewLink, webContentLink'
+        requestBody: {
+          name: uniqueName,
+          mimeType: mimeType,
+          parents: [folderId]
+        },
+        media: {
+          mimeType: mimeType,
+          body: bufferStream
+        },
+        fields: 'id, name, webViewLink, webContentLink'
       });
 
-      // Hacer público el archivo
+      const fileId = response.data.id;
+
+      // Hacer el archivo público
       await this.drive.permissions.create({
-        fileId: response.data.id,
-        resource: {
+        fileId: fileId,
+        requestBody: {
           role: 'reader',
           type: 'anyone'
         }
       });
 
-      console.log(`✅ Archivo subido: ${fileName}`);
+      // Obtener URL pública directa
+      const publicUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+
+      console.log(`✅ Imagen subida: ${uniqueName}`);
 
       return {
-        id: response.data.id,
-        viewLink: response.data.webViewLink,
-        downloadLink: response.data.webContentLink,
-        directLink: `https://drive.google.com/uc?export=view&id=${response.data.id}`
-      };
-    } catch (error) {
-      console.error('❌ Error subiendo archivo:', error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Subir imagen desde base64
-   */
-  async uploadBase64Image(base64Data, fileName, folderId = null) {
-    // Remover prefijo data:image/...;base64,
-    const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
-    const buffer = Buffer.from(base64Clean, 'base64');
-
-    // Detectar tipo de imagen
-    let mimeType = 'image/jpeg';
-    if (base64Data.includes('image/png')) mimeType = 'image/png';
-    if (base64Data.includes('image/gif')) mimeType = 'image/gif';
-    if (base64Data.includes('image/webp')) mimeType = 'image/webp';
-
-    return await this.uploadFile(buffer, fileName, mimeType, folderId);
-  }
-
-  /**
-   * Crear carpeta en Drive
-   */
-  async createFolder(folderName, parentId = null) {
-    if (!this.initialized) return null;
-
-    try {
-      const fileMetadata = {
-        name: folderName,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: parentId ? [parentId] : [this.defaultFolderId]
+        fileId: fileId,
+        url: publicUrl,
+        name: uniqueName,
+        webViewLink: response.data.webViewLink
       };
 
-      const response = await this.drive.files.create({
-        resource: fileMetadata,
-        fields: 'id'
-      });
-
-      console.log(`✅ Carpeta creada: ${folderName}`);
-      return response.data.id;
     } catch (error) {
-      console.error('❌ Error creando carpeta:', error.message);
-      return null;
+      console.error('❌ Error subiendo imagen:', error.message);
+      throw error;
     }
   }
 
   /**
    * Obtener o crear carpeta para un negocio
    */
-  async getOrCreateBusinessFolder(businessId, businessName) {
-    if (!this.initialized) return this.defaultFolderId;
+  async getOrCreateFolder(businessId) {
+    await this.initialize();
+
+    // Si no hay carpeta raíz configurada, usar la raíz de Drive
+    const parentId = this.folderId || 'root';
 
     try {
-      // Buscar si existe
-      const response = await this.drive.files.list({
-        q: `name='${businessName}' and mimeType='application/vnd.google-apps.folder' and '${this.defaultFolderId}' in parents`,
+      // Buscar si ya existe la carpeta
+      const searchResponse = await this.drive.files.list({
+        q: `name='${businessId}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
         fields: 'files(id, name)'
       });
 
-      if (response.data.files.length > 0) {
-        return response.data.files[0].id;
+      if (searchResponse.data.files.length > 0) {
+        return searchResponse.data.files[0].id;
       }
 
-      // Crear nueva
-      return await this.createFolder(businessName);
+      // Crear carpeta nueva
+      const folderResponse = await this.drive.files.create({
+        requestBody: {
+          name: businessId,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [parentId]
+        },
+        fields: 'id'
+      });
+
+      console.log(`📁 Carpeta creada para negocio: ${businessId}`);
+      return folderResponse.data.id;
+
     } catch (error) {
-      console.error('❌ Error obteniendo carpeta:', error.message);
-      return this.defaultFolderId;
+      console.error('❌ Error con carpeta:', error.message);
+      // Si falla, usar carpeta raíz
+      return parentId;
+    }
+  }
+
+  /**
+   * Eliminar archivo de Drive
+   */
+  async deleteFile(fileId) {
+    await this.initialize();
+
+    try {
+      await this.drive.files.delete({ fileId });
+      console.log(`🗑️ Archivo eliminado: ${fileId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error eliminando archivo:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Listar archivos de un negocio
+   */
+  async listFiles(businessId, limit = 50) {
+    await this.initialize();
+
+    try {
+      const folderId = await this.getOrCreateFolder(businessId);
+
+      const response = await this.drive.files.list({
+        q: `'${folderId}' in parents and trashed=false`,
+        fields: 'files(id, name, mimeType, createdTime, size)',
+        pageSize: limit,
+        orderBy: 'createdTime desc'
+      });
+
+      return response.data.files.map(file => ({
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        createdAt: file.createdTime,
+        size: file.size,
+        url: `https://drive.google.com/uc?export=view&id=${file.id}`
+      }));
+
+    } catch (error) {
+      console.error('❌ Error listando archivos:', error.message);
+      return [];
     }
   }
 }
 
-module.exports = new DriveService();
+module.exports = DriveService;
