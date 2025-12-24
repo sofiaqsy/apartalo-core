@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - ApartaLo Core</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-100);
+      color: var(--gray-900);
+      min-height: 100vh;
+    }
+    .header {
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header h1 { font-size: 1.25rem; color: var(--primary); }
+    .header select {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--gray-300);
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .container {
+      display: flex;
+      min-height: calc(100vh - 60px);
+    }
+    .sidebar {
+      width: 220px;
+      background: white;
+      border-right: 1px solid var(--gray-200);
+      padding: 1rem 0;
+    }
+    .sidebar a {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      color: var(--gray-700);
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+    .sidebar a:hover, .sidebar a.active {
+      background: var(--gray-100);
+      color: var(--primary);
+    }
+    .sidebar a.active { border-right: 3px solid var(--primary); font-weight: 600; }
+    .main {
+      flex: 1;
+      padding: 1.5rem;
+      overflow-y: auto;
+    }
+    .section { display: none; }
+    .section.active { display: block; }
+    .card {
+      background: white;
+      border-radius: 0.75rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 1.5rem;
+    }
+    .card-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-header h2 { font-size: 1rem; font-weight: 600; }
+    .card-body { padding: 1.5rem; }
+    .toolbar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .search-box {
+      flex: 1;
+      min-width: 200px;
+      position: relative;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 0.625rem 1rem 0.625rem 2.5rem;
+      border: 1px solid var(--gray-300);
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .search-box::before {
+      content: "🔍";
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.875rem;
+    }
+    .btn {
+      padding: 0.625rem 1rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-success { background: var(--success); color: white; }
+    .btn-warning { background: var(--warning); color: white; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-outline {
+      background: white;
+      border: 1px solid var(--gray-300);
+      color: var(--gray-700);
+    }
+    .btn-outline:hover { background: var(--gray-50); }
+    .btn-sm { padding: 0.375rem 0.75rem; font-size: 0.75rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--gray-200);
+    }
+    th {
+      background: var(--gray-50);
+      font-weight: 600;
+      color: var(--gray-700);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+    }
+    tr:hover { background: var(--gray-50); }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .badge-success { background: #d1fae5; color: #065f46; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .badge-gray { background: var(--gray-200); color: var(--gray-700); }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal.active { display: flex; }
+    .modal-content {
+      background: white;
+      border-radius: 0.75rem;
+      width: 90%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 { font-size: 1rem; }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: var(--gray-500);
+    }
+    .modal-body { padding: 1.5rem; }
+    .modal-footer {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+    }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.375rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--gray-700);
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%;
+      padding: 0.625rem;
+      border: 1px solid var(--gray-300);
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+    }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: white;
+      padding: 1.25rem;
+      border-radius: 0.75rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .stat-card .value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--gray-900);
+    }
+    .stat-card .label {
+      font-size: 0.875rem;
+      color: var(--gray-500);
+      margin-top: 0.25rem;
+    }
+    .actions { display: flex; gap: 0.5rem; }
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: var(--gray-500);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 1rem 1.5rem;
+      border-radius: 0.5rem;
+      color: white;
+      font-size: 0.875rem;
+      z-index: 300;
+      animation: slideIn 0.3s ease;
+    }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+    @keyframes slideIn {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      color: var(--gray-500);
+    }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .form-row { grid-template-columns: 1fr; }
+      .toolbar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>📦 ApartaLo Admin</h1>
+    <select id="businessSelect" onchange="cambiarNegocio()">
+      <option value="">Cargando negocios...</option>
+    </select>
+  </header>
+
+  <div class="container">
+    <nav class="sidebar">
+      <a href="#" data-section="dashboard" class="active">📊 Dashboard</a>
+      <a href="#" data-section="productos">📦 Productos</a>
+      <a href="#" data-section="clientes">👥 Clientes</a>
+      <a href="#" data-section="pedidos">🛒 Pedidos</a>
+      <a href="#" data-section="conversaciones">💬 Conversaciones</a>
+    </nav>
+
+    <main class="main">
+      <!-- Dashboard -->
+      <section id="dashboard" class="section active">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="value" id="statProductos">-</div>
+            <div class="label">Productos activos</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="statClientes">-</div>
+            <div class="label">Clientes registrados</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="statPedidos">-</div>
+            <div class="label">Pedidos pendientes</div>
+          </div>
+          <div class="stat-card">
+            <div class="value" id="statConversaciones">-</div>
+            <div class="label">Chats activos</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Productos -->
+      <section id="productos" class="section">
+        <div class="card">
+          <div class="card-header">
+            <h2>📦 Inventario</h2>
+            <button class="btn btn-primary" onclick="abrirModalProducto()">+ Nuevo Producto</button>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <div class="search-box">
+                <input type="text" id="buscarProducto" placeholder="Buscar producto..." oninput="buscarProductos()">
+              </div>
+              <select id="filtroEstadoProducto" onchange="cargarProductos()">
+                <option value="">Todos los estados</option>
+                <option value="ACTIVO">Activo</option>
+                <option value="PUBLICADO">Publicado</option>
+                <option value="INACTIVO">Inactivo</option>
+              </select>
+            </div>
+            <div id="tablaProductos">
+              <div class="loading">Cargando productos...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Clientes -->
+      <section id="clientes" class="section">
+        <div class="card">
+          <div class="card-header">
+            <h2>👥 Clientes</h2>
+            <button class="btn btn-primary" onclick="abrirModalCliente()">+ Nuevo Cliente</button>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <div class="search-box">
+                <input type="text" id="buscarCliente" placeholder="Buscar cliente..." oninput="buscarClientes()">
+              </div>
+            </div>
+            <div id="tablaClientes">
+              <div class="loading">Cargando clientes...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pedidos -->
+      <section id="pedidos" class="section">
+        <div class="card">
+          <div class="card-header">
+            <h2>🛒 Pedidos</h2>
+          </div>
+          <div class="card-body">
+            <div class="toolbar">
+              <select id="filtroEstadoPedido" onchange="cargarPedidos()">
+                <option value="">Todos</option>
+                <option value="PENDIENTE_PAGO">Pendiente pago</option>
+                <option value="PENDIENTE_VALIDACION">Validando</option>
+                <option value="CONFIRMADO">Confirmado</option>
+                <option value="EN_PREPARACION">En preparación</option>
+                <option value="ENVIADO">Enviado</option>
+                <option value="ENTREGADO">Entregado</option>
+              </select>
+            </div>
+            <div id="tablaPedidos">
+              <div class="loading">Cargando pedidos...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Conversaciones -->
+      <section id="conversaciones" class="section">
+        <div class="card">
+          <div class="card-header">
+            <h2>💬 Conversaciones</h2>
+          </div>
+          <div class="card-body">
+            <div id="listaConversaciones">
+              <div class="loading">Cargando conversaciones...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal Producto -->
+  <div id="modalProducto" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalProductoTitulo">Nuevo Producto</h3>
+        <button class="modal-close" onclick="cerrarModal('modalProducto')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="formProducto">
+          <input type="hidden" id="prodEditar">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Código *</label>
+              <input type="text" id="prodCodigo" required placeholder="CAF-001">
+            </div>
+            <div class="form-group">
+              <label>Precio *</label>
+              <input type="number" id="prodPrecio" required step="0.01" placeholder="0.00">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="prodNombre" required placeholder="Nombre del producto">
+          </div>
+          <div class="form-group">
+            <label>Descripción</label>
+            <textarea id="prodDescripcion" placeholder="Descripción del producto"></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Stock *</label>
+              <input type="number" id="prodStock" required placeholder="0">
+            </div>
+            <div class="form-group">
+              <label>Estado</label>
+              <select id="prodEstado">
+                <option value="ACTIVO">Activo</option>
+                <option value="PUBLICADO">Publicado</option>
+                <option value="INACTIVO">Inactivo</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Categoría</label>
+            <input type="text" id="prodCategoria" placeholder="Categoría">
+          </div>
+          <div class="form-group">
+            <label>URL Imagen</label>
+            <input type="url" id="prodImagen" placeholder="https://...">
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="cerrarModal('modalProducto')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarProducto()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Cliente -->
+  <div id="modalCliente" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalClienteTitulo">Nuevo Cliente</h3>
+        <button class="modal-close" onclick="cerrarModal('modalCliente')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="formCliente">
+          <input type="hidden" id="cliEditar">
+          <div class="form-row">
+            <div class="form-group">
+              <label>WhatsApp *</label>
+              <input type="text" id="cliWhatsapp" required placeholder="51999999999">
+            </div>
+            <div class="form-group">
+              <label>Teléfono</label>
+              <input type="text" id="cliTelefono" placeholder="999999999">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="cliNombre" required placeholder="Nombre completo">
+          </div>
+          <div class="form-group">
+            <label>Empresa</label>
+            <input type="text" id="cliEmpresa" placeholder="Nombre de empresa/negocio">
+          </div>
+          <div class="form-group">
+            <label>Dirección</label>
+            <input type="text" id="cliDireccion" placeholder="Dirección completa">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Ciudad</label>
+              <input type="text" id="cliCiudad" placeholder="Ciudad/Distrito">
+            </div>
+            <div class="form-group">
+              <label>Departamento</label>
+              <input type="text" id="cliDepartamento" placeholder="Departamento">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Notas</label>
+            <textarea id="cliNotas" placeholder="Notas internas sobre el cliente"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="cerrarModal('modalCliente')">Cancelar</button>
+        <button class="btn btn-primary" onclick="guardarCliente()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Mensaje -->
+  <div id="modalMensaje" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Enviar Mensaje</h3>
+        <button class="modal-close" onclick="cerrarModal('modalMensaje')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="mensajeDestinatario" style="margin-bottom: 1rem; color: var(--gray-500);"></p>
+        <div class="form-group">
+          <label>Mensaje</label>
+          <textarea id="mensajeTexto" placeholder="Escribe tu mensaje..." rows="4"></textarea>
+        </div>
+        <input type="hidden" id="mensajeWhatsapp">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="cerrarModal('modalMensaje')">Cancelar</button>
+        <button class="btn btn-success" onclick="enviarMensaje()">📤 Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Estado global
+    let businessId = '';
+    let productos = [];
+    let clientes = [];
+    let pedidos = [];
+
+    // Inicialización
+    document.addEventListener('DOMContentLoaded', () => {
+      cargarNegocios();
+      setupNavigation();
+    });
+
+    // Navegación
+    function setupNavigation() {
+      document.querySelectorAll('.sidebar a').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const section = link.dataset.section;
+          
+          document.querySelectorAll('.sidebar a').forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+          
+          document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+          document.getElementById(section).classList.add('active');
+          
+          cargarSeccion(section);
+        });
+      });
+    }
+
+    function cargarSeccion(section) {
+      if (!businessId) return;
+      
+      switch(section) {
+        case 'dashboard': cargarDashboard(); break;
+        case 'productos': cargarProductos(); break;
+        case 'clientes': cargarClientes(); break;
+        case 'pedidos': cargarPedidos(); break;
+        case 'conversaciones': cargarConversaciones(); break;
+      }
+    }
+
+    // Negocios
+    async function cargarNegocios() {
+      try {
+        const res = await fetch('/api/negocios');
+        const negocios = await res.json();
+        
+        const select = document.getElementById('businessSelect');
+        select.innerHTML = negocios.map(n => 
+          `<option value="${n.id}">${n.nombre}</option>`
+        ).join('');
+        
+        if (negocios.length > 0) {
+          businessId = negocios[0].id;
+          cargarDashboard();
+        }
+      } catch (err) {
+        console.error('Error cargando negocios:', err);
+      }
+    }
+
+    function cambiarNegocio() {
+      businessId = document.getElementById('businessSelect').value;
+      cargarDashboard();
+    }
+
+    // Dashboard
+    async function cargarDashboard() {
+      try {
+        const [prodRes, cliRes, pedRes] = await Promise.all([
+          fetch(`/api/productos/${businessId}?estado=ACTIVO`),
+          fetch(`/api/clientes/${businessId}`),
+          fetch(`/api/pedidos/${businessId}`)
+        ]);
+        
+        const prodData = await prodRes.json();
+        const cliData = await cliRes.json();
+        const pedData = await pedRes.json();
+        
+        document.getElementById('statProductos').textContent = prodData.total || 0;
+        document.getElementById('statClientes').textContent = cliData.total || 0;
+        document.getElementById('statPedidos').textContent = 
+          pedData.pedidos?.filter(p => !['ENTREGADO','CANCELADO'].includes(p.estado)).length || 0;
+        document.getElementById('statConversaciones').textContent = '-';
+      } catch (err) {
+        console.error('Error cargando dashboard:', err);
+      }
+    }
+
+    // ===================== PRODUCTOS =====================
+    async function cargarProductos() {
+      const estado = document.getElementById('filtroEstadoProducto').value;
+      const container = document.getElementById('tablaProductos');
+      container.innerHTML = '<div class="loading">Cargando...</div>';
+      
+      try {
+        const res = await fetch(`/api/productos/${businessId}${estado ? `?estado=${estado}` : ''}`);
+        const data = await res.json();
+        productos = data.productos || [];
+        
+        if (productos.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">📦</div>
+              <p>No hay productos</p>
+            </div>`;
+          return;
+        }
+        
+        container.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Nombre</th>
+                <th>Precio</th>
+                <th>Stock</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${productos.map(p => `
+                <tr>
+                  <td><strong>${p.codigo}</strong></td>
+                  <td>${p.nombre}</td>
+                  <td>S/ ${p.precio.toFixed(2)}</td>
+                  <td>${p.disponible} / ${p.stock}</td>
+                  <td><span class="badge badge-${getBadgeClass(p.estado)}">${p.estado}</span></td>
+                  <td class="actions">
+                    <button class="btn btn-outline btn-sm" onclick="editarProducto('${p.codigo}')">✏️</button>
+                    <button class="btn btn-outline btn-sm" onclick="eliminarProducto('${p.codigo}')">🗑️</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+      } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Error cargando productos</p></div>`;
+      }
+    }
+
+    function buscarProductos() {
+      const buscar = document.getElementById('buscarProducto').value.toLowerCase();
+      const filtrados = productos.filter(p => 
+        p.codigo.toLowerCase().includes(buscar) ||
+        p.nombre.toLowerCase().includes(buscar)
+      );
+      renderProductos(filtrados);
+    }
+
+    function renderProductos(lista) {
+      const container = document.getElementById('tablaProductos');
+      if (lista.length === 0) {
+        container.innerHTML = `<div class="empty-state"><p>No se encontraron productos</p></div>`;
+        return;
+      }
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Código</th><th>Nombre</th><th>Precio</th><th>Stock</th><th>Estado</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            ${lista.map(p => `
+              <tr>
+                <td><strong>${p.codigo}</strong></td>
+                <td>${p.nombre}</td>
+                <td>S/ ${p.precio.toFixed(2)}</td>
+                <td>${p.disponible} / ${p.stock}</td>
+                <td><span class="badge badge-${getBadgeClass(p.estado)}">${p.estado}</span></td>
+                <td class="actions">
+                  <button class="btn btn-outline btn-sm" onclick="editarProducto('${p.codigo}')">✏️</button>
+                  <button class="btn btn-outline btn-sm" onclick="eliminarProducto('${p.codigo}')">🗑️</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function abrirModalProducto() {
+      document.getElementById('modalProductoTitulo').textContent = 'Nuevo Producto';
+      document.getElementById('formProducto').reset();
+      document.getElementById('prodEditar').value = '';
+      document.getElementById('prodCodigo').disabled = false;
+      document.getElementById('modalProducto').classList.add('active');
+    }
+
+    function editarProducto(codigo) {
+      const prod = productos.find(p => p.codigo === codigo);
+      if (!prod) return;
+      
+      document.getElementById('modalProductoTitulo').textContent = 'Editar Producto';
+      document.getElementById('prodEditar').value = codigo;
+      document.getElementById('prodCodigo').value = prod.codigo;
+      document.getElementById('prodCodigo').disabled = true;
+      document.getElementById('prodNombre').value = prod.nombre;
+      document.getElementById('prodDescripcion').value = prod.descripcion || '';
+      document.getElementById('prodPrecio').value = prod.precio;
+      document.getElementById('prodStock').value = prod.stock;
+      document.getElementById('prodEstado').value = prod.estado;
+      document.getElementById('prodCategoria').value = prod.categoria || '';
+      document.getElementById('prodImagen').value = prod.imagenUrl || '';
+      document.getElementById('modalProducto').classList.add('active');
+    }
+
+    async function guardarProducto() {
+      const editando = document.getElementById('prodEditar').value;
+      const data = {
+        codigo: document.getElementById('prodCodigo').value,
+        nombre: document.getElementById('prodNombre').value,
+        descripcion: document.getElementById('prodDescripcion').value,
+        precio: parseFloat(document.getElementById('prodPrecio').value),
+        stock: parseInt(document.getElementById('prodStock').value),
+        estado: document.getElementById('prodEstado').value,
+        categoria: document.getElementById('prodCategoria').value,
+        imagenUrl: document.getElementById('prodImagen').value
+      };
+      
+      try {
+        const url = editando 
+          ? `/api/productos/${businessId}/${editando}`
+          : `/api/productos/${businessId}`;
+        
+        const res = await fetch(url, {
+          method: editando ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        
+        const result = await res.json();
+        
+        if (res.ok) {
+          toast(editando ? 'Producto actualizado' : 'Producto creado', 'success');
+          cerrarModal('modalProducto');
+          cargarProductos();
+        } else {
+          toast(result.error || 'Error', 'error');
+        }
+      } catch (err) {
+        toast('Error guardando producto', 'error');
+      }
+    }
+
+    async function eliminarProducto(codigo) {
+      if (!confirm(`¿Eliminar producto ${codigo}?`)) return;
+      
+      try {
+        const res = await fetch(`/api/productos/${businessId}/${codigo}`, { method: 'DELETE' });
+        if (res.ok) {
+          toast('Producto eliminado', 'success');
+          cargarProductos();
+        }
+      } catch (err) {
+        toast('Error eliminando', 'error');
+      }
+    }
+
+    // ===================== CLIENTES =====================
+    async function cargarClientes() {
+      const container = document.getElementById('tablaClientes');
+      container.innerHTML = '<div class="loading">Cargando...</div>';
+      
+      try {
+        const res = await fetch(`/api/clientes/${businessId}`);
+        const data = await res.json();
+        clientes = data.clientes || [];
+        
+        if (clientes.length === 0) {
+          container.innerHTML = `<div class="empty-state"><div class="icon">👥</div><p>No hay clientes</p></div>`;
+          return;
+        }
+        
+        renderClientes(clientes);
+      } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Error cargando clientes</p></div>`;
+      }
+    }
+
+    function buscarClientes() {
+      const buscar = document.getElementById('buscarCliente').value.toLowerCase();
+      const filtrados = clientes.filter(c => 
+        c.nombre.toLowerCase().includes(buscar) ||
+        c.whatsapp.includes(buscar) ||
+        (c.empresa || '').toLowerCase().includes(buscar)
+      );
+      renderClientes(filtrados);
+    }
+
+    function renderClientes(lista) {
+      const container = document.getElementById('tablaClientes');
+      if (lista.length === 0) {
+        container.innerHTML = `<div class="empty-state"><p>No se encontraron clientes</p></div>`;
+        return;
+      }
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Nombre</th><th>WhatsApp</th><th>Empresa</th><th>Ciudad</th><th>Registro</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            ${lista.map(c => `
+              <tr>
+                <td><strong>${c.nombre}</strong></td>
+                <td>${c.whatsapp}</td>
+                <td>${c.empresa || '-'}</td>
+                <td>${c.ciudad || '-'}</td>
+                <td>${c.fechaRegistro || '-'}</td>
+                <td class="actions">
+                  <button class="btn btn-success btn-sm" onclick="abrirModalMensaje('${c.whatsapp}', '${c.nombre}')">💬</button>
+                  <button class="btn btn-outline btn-sm" onclick="editarCliente('${c.id}')">✏️</button>
+                  <button class="btn btn-outline btn-sm" onclick="eliminarCliente('${c.id}')">🗑️</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>`;
+    }
+
+    function abrirModalCliente() {
+      document.getElementById('modalClienteTitulo').textContent = 'Nuevo Cliente';
+      document.getElementById('formCliente').reset();
+      document.getElementById('cliEditar').value = '';
+      document.getElementById('cliWhatsapp').disabled = false;
+      document.getElementById('modalCliente').classList.add('active');
+    }
+
+    function editarCliente(id) {
+      const cli = clientes.find(c => c.id === id);
+      if (!cli) return;
+      
+      document.getElementById('modalClienteTitulo').textContent = 'Editar Cliente';
+      document.getElementById('cliEditar').value = id;
+      document.getElementById('cliWhatsapp').value = cli.whatsapp;
+      document.getElementById('cliWhatsapp').disabled = true;
+      document.getElementById('cliNombre').value = cli.nombre;
+      document.getElementById('cliTelefono').value = cli.telefono || '';
+      document.getElementById('cliEmpresa').value = cli.empresa || '';
+      document.getElementById('cliDireccion').value = cli.direccion || '';
+      document.getElementById('cliCiudad').value = cli.ciudad || '';
+      document.getElementById('cliDepartamento').value = cli.departamento || '';
+      document.getElementById('cliNotas').value = cli.notas || '';
+      document.getElementById('modalCliente').classList.add('active');
+    }
+
+    async function guardarCliente() {
+      const editando = document.getElementById('cliEditar').value;
+      const data = {
+        whatsapp: document.getElementById('cliWhatsapp').value,
+        nombre: document.getElementById('cliNombre').value,
+        telefono: document.getElementById('cliTelefono').value,
+        empresa: document.getElementById('cliEmpresa').value,
+        direccion: document.getElementById('cliDireccion').value,
+        ciudad: document.getElementById('cliCiudad').value,
+        departamento: document.getElementById('cliDepartamento').value,
+        notas: document.getElementById('cliNotas').value
+      };
+      
+      try {
+        const url = editando 
+          ? `/api/clientes/${businessId}/${editando}`
+          : `/api/clientes/${businessId}`;
+        
+        const res = await fetch(url, {
+          method: editando ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        
+        const result = await res.json();
+        
+        if (res.ok) {
+          toast(editando ? 'Cliente actualizado' : 'Cliente creado', 'success');
+          cerrarModal('modalCliente');
+          cargarClientes();
+        } else {
+          toast(result.error || 'Error', 'error');
+        }
+      } catch (err) {
+        toast('Error guardando cliente', 'error');
+      }
+    }
+
+    async function eliminarCliente(id) {
+      if (!confirm('¿Eliminar este cliente?')) return;
+      
+      try {
+        const res = await fetch(`/api/clientes/${businessId}/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          toast('Cliente eliminado', 'success');
+          cargarClientes();
+        }
+      } catch (err) {
+        toast('Error eliminando', 'error');
+      }
+    }
+
+    // ===================== PEDIDOS =====================
+    async function cargarPedidos() {
+      const estado = document.getElementById('filtroEstadoPedido').value;
+      const container = document.getElementById('tablaPedidos');
+      container.innerHTML = '<div class="loading">Cargando...</div>';
+      
+      try {
+        const res = await fetch(`/api/pedidos/${businessId}${estado ? `?estado=${estado}` : ''}`);
+        const data = await res.json();
+        pedidos = data.pedidos || [];
+        
+        if (pedidos.length === 0) {
+          container.innerHTML = `<div class="empty-state"><div class="icon">🛒</div><p>No hay pedidos</p></div>`;
+          return;
+        }
+        
+        container.innerHTML = `
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Cliente</th><th>Total</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>
+            </thead>
+            <tbody>
+              ${pedidos.map(p => `
+                <tr>
+                  <td><strong>${p.id}</strong></td>
+                  <td>${p.cliente}<br><small style="color:var(--gray-500)">${p.whatsapp}</small></td>
+                  <td>S/ ${p.total.toFixed(2)}</td>
+                  <td><span class="badge badge-${getBadgeClass(p.estado)}">${p.estado}</span></td>
+                  <td>${p.fecha}</td>
+                  <td class="actions">
+                    <button class="btn btn-success btn-sm" onclick="abrirModalMensaje('${p.whatsapp}', '${p.cliente}')">💬</button>
+                    <select class="btn btn-outline btn-sm" onchange="cambiarEstadoPedido('${p.id}', this.value)" style="padding:0.25rem">
+                      <option value="">Cambiar...</option>
+                      <option value="CONFIRMADO">✅ Confirmar</option>
+                      <option value="EN_PREPARACION">📦 Preparar</option>
+                      <option value="ENVIADO">🚚 Enviado</option>
+                      <option value="ENTREGADO">✅ Entregado</option>
+                      <option value="CANCELADO">❌ Cancelar</option>
+                    </select>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+      } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Error cargando pedidos</p></div>`;
+      }
+    }
+
+    async function cambiarEstadoPedido(pedidoId, nuevoEstado) {
+      if (!nuevoEstado) return;
+      
+      try {
+        const res = await fetch(`/api/pedidos/${businessId}/${pedidoId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ estado: nuevoEstado, notificarCliente: true })
+        });
+        
+        if (res.ok) {
+          toast('Estado actualizado', 'success');
+          cargarPedidos();
+        }
+      } catch (err) {
+        toast('Error actualizando', 'error');
+      }
+    }
+
+    // ===================== CONVERSACIONES =====================
+    async function cargarConversaciones() {
+      const container = document.getElementById('listaConversaciones');
+      container.innerHTML = '<div class="loading">Cargando...</div>';
+      
+      try {
+        const res = await fetch(`/api/conversaciones/${businessId}?estado=ACTIVA`);
+        const data = await res.json();
+        
+        if (!data.conversaciones || data.conversaciones.length === 0) {
+          container.innerHTML = `<div class="empty-state"><div class="icon">💬</div><p>No hay conversaciones activas</p></div>`;
+          return;
+        }
+        
+        container.innerHTML = data.conversaciones.map(c => `
+          <div style="padding:1rem; border-bottom:1px solid var(--gray-200); display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong>${c.cliente}</strong><br>
+              <small style="color:var(--gray-500)">${c.whatsapp} | ${c.fecha}</small>
+            </div>
+            <div class="actions">
+              <button class="btn btn-success btn-sm" onclick="abrirModalMensaje('${c.whatsapp}', '${c.cliente}')">💬 Responder</button>
+              <button class="btn btn-outline btn-sm" onclick="cerrarConversacion('${c.id}')">Cerrar</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Error cargando</p></div>`;
+      }
+    }
+
+    async function cerrarConversacion(id) {
+      try {
+        await fetch(`/api/conversaciones/${businessId}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ estado: 'CERRADA' })
+        });
+        toast('Conversación cerrada', 'success');
+        cargarConversaciones();
+      } catch (err) {
+        toast('Error', 'error');
+      }
+    }
+
+    // ===================== MENSAJES =====================
+    function abrirModalMensaje(whatsapp, nombre) {
+      document.getElementById('mensajeDestinatario').textContent = `Para: ${nombre} (${whatsapp})`;
+      document.getElementById('mensajeWhatsapp').value = whatsapp;
+      document.getElementById('mensajeTexto').value = '';
+      document.getElementById('modalMensaje').classList.add('active');
+    }
+
+    async function enviarMensaje() {
+      const whatsapp = document.getElementById('mensajeWhatsapp').value;
+      const mensaje = document.getElementById('mensajeTexto').value;
+      
+      if (!mensaje.trim()) {
+        toast('Escribe un mensaje', 'error');
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/mensaje', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId, to: whatsapp, message: mensaje })
+        });
+        
+        if (res.ok) {
+          toast('Mensaje enviado', 'success');
+          cerrarModal('modalMensaje');
+        } else {
+          toast('Error enviando', 'error');
+        }
+      } catch (err) {
+        toast('Error enviando', 'error');
+      }
+    }
+
+    // ===================== UTILIDADES =====================
+    function cerrarModal(id) {
+      document.getElementById(id).classList.remove('active');
+    }
+
+    function getBadgeClass(estado) {
+      const map = {
+        'ACTIVO': 'success', 'PUBLICADO': 'info', 'INACTIVO': 'gray',
+        'PENDIENTE_PAGO': 'warning', 'PENDIENTE_VALIDACION': 'warning',
+        'CONFIRMADO': 'success', 'EN_PREPARACION': 'info',
+        'ENVIADO': 'info', 'ENTREGADO': 'success', 'CANCELADO': 'danger'
+      };
+      return map[estado] || 'gray';
+    }
+
+    function toast(msg, type = 'success') {
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 3000);
+    }
+
+    // Cerrar modales con Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
+      }
+    });
+  </script>
+</body>
+</html>
