@@ -1,22 +1,28 @@
 /**
- * CLIENTES ROUTER - Estructura extendida
+ * CLIENTES ROUTER - Estructura completa para Finca Rosal
  * 
  * Columnas en Google Sheets (Clientes):
  * A: ID
  * B: WhatsApp
- * C: NombreNegocio (empresa/cafetería)
+ * C: NombreNegocio (cafetería/empresa)
  * D: NombreResponsable (persona de contacto)
  * E: Telefono
  * F: Email
  * G: Direccion
  * H: Departamento
- * I: Ciudad
+ * I: Distrito/Ciudad
  * J: FechaRegistro
  * K: UltimaCompra
- * L: TotalPedidos (calculado)
- * M: TotalComprado (calculado - S/)
- * N: TotalKg (calculado)
- * O: Notas
+ * L: TotalPedidos
+ * M: TotalComprado (S/)
+ * N: TotalKg
+ * O: TipoEnvio (NACIONAL/LOCAL)
+ * P: EmpresaEnvio (Shalom, Olva, etc)
+ * Q: LocalEnvio (agencia/sucursal)
+ * R: DireccionEnvio
+ * S: DistritoEnvio
+ * T: DepartamentoEnvio
+ * U: Notas
  */
 
 const express = require('express');
@@ -27,7 +33,7 @@ const WhatsAppService = require('../core/services/whatsapp-service');
 
 /**
  * GET /api/clientes/:businessId
- * Listar clientes con estructura extendida
+ * Listar clientes con estructura completa
  */
 router.get('/:businessId', async (req, res) => {
   try {
@@ -42,7 +48,7 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:O');
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:U');
 
     let clientes = [];
     for (let i = 1; i < rows.length; i++) {
@@ -58,13 +64,20 @@ router.get('/:businessId', async (req, res) => {
         email: row[5] || '',
         direccion: row[6] || '',
         departamento: row[7] || '',
-        ciudad: row[8] || '',
+        distrito: row[8] || '',
         fechaRegistro: row[9] || '',
         ultimaCompra: row[10] || '',
         totalPedidos: parseInt(row[11]) || 0,
         totalComprado: parseFloat(row[12]) || 0,
         totalKg: parseFloat(row[13]) || 0,
-        notas: row[14] || '',
+        // Datos de envío homologados
+        tipoEnvio: row[14] || '',
+        empresaEnvio: row[15] || '',
+        localEnvio: row[16] || '',
+        direccionEnvio: row[17] || '',
+        distritoEnvio: row[18] || '',
+        departamentoEnvio: row[19] || '',
+        notas: row[20] || '',
         rowIndex: i + 1
       };
 
@@ -75,9 +88,10 @@ router.get('/:businessId', async (req, res) => {
         const matchResponsable = cliente.nombreResponsable.toLowerCase().includes(searchLower);
         const matchWhatsapp = cliente.whatsapp.includes(buscar);
         const matchTelefono = cliente.telefono.includes(buscar);
-        const matchEmail = cliente.email.toLowerCase().includes(searchLower);
+        const matchEmail = (cliente.email || '').toLowerCase().includes(searchLower);
+        const matchEmpresa = (cliente.empresaEnvio || '').toLowerCase().includes(searchLower);
 
-        if (!matchNegocio && !matchResponsable && !matchWhatsapp && !matchTelefono && !matchEmail) continue;
+        if (!matchNegocio && !matchResponsable && !matchWhatsapp && !matchTelefono && !matchEmail && !matchEmpresa) continue;
       }
 
       if (departamento && cliente.departamento !== departamento) continue;
@@ -137,7 +151,7 @@ router.get('/:businessId/:clienteId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:O');
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:U');
     let cliente = null;
     let rowIndex = -1;
 
@@ -153,13 +167,19 @@ router.get('/:businessId/:clienteId', async (req, res) => {
           email: rows[i][5] || '',
           direccion: rows[i][6] || '',
           departamento: rows[i][7] || '',
-          ciudad: rows[i][8] || '',
+          distrito: rows[i][8] || '',
           fechaRegistro: rows[i][9] || '',
           ultimaCompra: rows[i][10] || '',
           totalPedidos: parseInt(rows[i][11]) || 0,
           totalComprado: parseFloat(rows[i][12]) || 0,
           totalKg: parseFloat(rows[i][13]) || 0,
-          notas: rows[i][14] || '',
+          tipoEnvio: rows[i][14] || '',
+          empresaEnvio: rows[i][15] || '',
+          localEnvio: rows[i][16] || '',
+          direccionEnvio: rows[i][17] || '',
+          distritoEnvio: rows[i][18] || '',
+          departamentoEnvio: rows[i][19] || '',
+          notas: rows[i][20] || '',
           rowIndex
         };
         break;
@@ -196,7 +216,7 @@ router.get('/:businessId/:clienteId', async (req, res) => {
 
 /**
  * POST /api/clientes/:businessId
- * Crear nuevo cliente con estructura extendida
+ * Crear nuevo cliente con estructura completa
  */
 router.post('/:businessId', async (req, res) => {
   try {
@@ -209,7 +229,14 @@ router.post('/:businessId', async (req, res) => {
       email,
       direccion, 
       departamento, 
-      ciudad, 
+      distrito,
+      // Datos de envío
+      tipoEnvio,
+      empresaEnvio,
+      localEnvio,
+      direccionEnvio,
+      distritoEnvio,
+      departamentoEnvio,
       notas 
     } = req.body;
 
@@ -231,35 +258,47 @@ router.post('/:businessId', async (req, res) => {
     await sheets.initialize();
 
     // Verificar que el whatsapp no exista
-    const whatsappLimpio = whatsapp.replace(/[^0-9]/g, '');
-    const clienteExistente = await sheets.buscarCliente(whatsappLimpio);
-    if (clienteExistente) {
-      return res.status(400).json({
-        error: 'Ya existe un cliente con ese WhatsApp',
-        clienteExistente: clienteExistente.id
-      });
+    const whatsappLimpio = whatsapp.replace(/[^0-9+]/g, '');
+    
+    // Buscar si ya existe
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:B');
+    for (let i = 1; i < rows.length; i++) {
+      const existingWa = (rows[i][1] || '').replace(/[^0-9]/g, '');
+      const newWa = whatsappLimpio.replace(/[^0-9]/g, '');
+      if (existingWa === newWa && !rows[i][0].includes('_DELETED')) {
+        return res.status(400).json({
+          error: 'Ya existe un cliente con ese WhatsApp',
+          clienteExistente: rows[i][0]
+        });
+      }
     }
 
     const clienteId = `CLI-${Date.now().toString().slice(-6)}`;
     const fechaHoy = new Date().toLocaleDateString('es-PE');
 
-    // Estructura: ID, WhatsApp, NombreNegocio, NombreResponsable, Telefono, Email, Direccion, Depto, Ciudad, FechaReg, UltimaCompra, TotalPedidos, TotalComprado, TotalKg, Notas
+    // Estructura completa: 21 columnas (A-U)
     const valores = [
-      clienteId,
-      whatsappLimpio,
-      nombreNegocio || '',
-      nombreResponsable || '',
-      telefono || '',
-      email || '',
-      direccion || '',
-      departamento || '',
-      ciudad || '',
-      fechaHoy,
-      '', // UltimaCompra
-      0,  // TotalPedidos
-      0,  // TotalComprado
-      0,  // TotalKg
-      notas || ''
+      clienteId,                    // A: ID
+      whatsappLimpio,               // B: WhatsApp
+      nombreNegocio || '',          // C: NombreNegocio
+      nombreResponsable || '',      // D: NombreResponsable
+      telefono || '',               // E: Telefono
+      email || '',                  // F: Email
+      direccion || '',              // G: Direccion
+      departamento || '',           // H: Departamento
+      distrito || '',               // I: Distrito
+      fechaHoy,                     // J: FechaRegistro
+      '',                           // K: UltimaCompra
+      0,                            // L: TotalPedidos
+      0,                            // M: TotalComprado
+      0,                            // N: TotalKg
+      tipoEnvio || '',              // O: TipoEnvio
+      empresaEnvio || '',           // P: EmpresaEnvio
+      localEnvio || '',             // Q: LocalEnvio
+      direccionEnvio || '',         // R: DireccionEnvio
+      distritoEnvio || '',          // S: DistritoEnvio
+      departamentoEnvio || '',      // T: DepartamentoEnvio
+      notas || ''                   // U: Notas
     ];
 
     await sheets.appendRow('Clientes', valores);
@@ -276,8 +315,14 @@ router.post('/:businessId', async (req, res) => {
         email: email || '',
         direccion: direccion || '',
         departamento: departamento || '',
-        ciudad: ciudad || '',
+        distrito: distrito || '',
         fechaRegistro: fechaHoy,
+        tipoEnvio: tipoEnvio || '',
+        empresaEnvio: empresaEnvio || '',
+        localEnvio: localEnvio || '',
+        direccionEnvio: direccionEnvio || '',
+        distritoEnvio: distritoEnvio || '',
+        departamentoEnvio: departamentoEnvio || '',
         notas: notas || ''
       }
     });
@@ -303,7 +348,13 @@ router.put('/:businessId/:clienteId', async (req, res) => {
       email,
       direccion, 
       departamento, 
-      ciudad, 
+      distrito,
+      tipoEnvio,
+      empresaEnvio,
+      localEnvio,
+      direccionEnvio,
+      distritoEnvio,
+      departamentoEnvio,
       notas 
     } = req.body;
 
@@ -315,21 +366,28 @@ router.put('/:businessId/:clienteId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:O');
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:U');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         const updates = [];
+        const rowNum = i + 1;
 
-        if (whatsapp !== undefined) updates.push({ range: `Clientes!B${i + 1}`, value: whatsapp.replace(/[^0-9]/g, '') });
-        if (nombreNegocio !== undefined) updates.push({ range: `Clientes!C${i + 1}`, value: nombreNegocio });
-        if (nombreResponsable !== undefined) updates.push({ range: `Clientes!D${i + 1}`, value: nombreResponsable });
-        if (telefono !== undefined) updates.push({ range: `Clientes!E${i + 1}`, value: telefono });
-        if (email !== undefined) updates.push({ range: `Clientes!F${i + 1}`, value: email });
-        if (direccion !== undefined) updates.push({ range: `Clientes!G${i + 1}`, value: direccion });
-        if (departamento !== undefined) updates.push({ range: `Clientes!H${i + 1}`, value: departamento });
-        if (ciudad !== undefined) updates.push({ range: `Clientes!I${i + 1}`, value: ciudad });
-        if (notas !== undefined) updates.push({ range: `Clientes!O${i + 1}`, value: notas });
+        if (whatsapp !== undefined) updates.push({ range: `Clientes!B${rowNum}`, value: whatsapp.replace(/[^0-9+]/g, '') });
+        if (nombreNegocio !== undefined) updates.push({ range: `Clientes!C${rowNum}`, value: nombreNegocio });
+        if (nombreResponsable !== undefined) updates.push({ range: `Clientes!D${rowNum}`, value: nombreResponsable });
+        if (telefono !== undefined) updates.push({ range: `Clientes!E${rowNum}`, value: telefono });
+        if (email !== undefined) updates.push({ range: `Clientes!F${rowNum}`, value: email });
+        if (direccion !== undefined) updates.push({ range: `Clientes!G${rowNum}`, value: direccion });
+        if (departamento !== undefined) updates.push({ range: `Clientes!H${rowNum}`, value: departamento });
+        if (distrito !== undefined) updates.push({ range: `Clientes!I${rowNum}`, value: distrito });
+        if (tipoEnvio !== undefined) updates.push({ range: `Clientes!O${rowNum}`, value: tipoEnvio });
+        if (empresaEnvio !== undefined) updates.push({ range: `Clientes!P${rowNum}`, value: empresaEnvio });
+        if (localEnvio !== undefined) updates.push({ range: `Clientes!Q${rowNum}`, value: localEnvio });
+        if (direccionEnvio !== undefined) updates.push({ range: `Clientes!R${rowNum}`, value: direccionEnvio });
+        if (distritoEnvio !== undefined) updates.push({ range: `Clientes!S${rowNum}`, value: distritoEnvio });
+        if (departamentoEnvio !== undefined) updates.push({ range: `Clientes!T${rowNum}`, value: departamentoEnvio });
+        if (notas !== undefined) updates.push({ range: `Clientes!U${rowNum}`, value: notas });
 
         if (updates.length > 0) {
           await sheets.batchUpdate(updates);
@@ -390,7 +448,7 @@ router.delete('/:businessId/:clienteId', async (req, res) => {
 
 /**
  * POST /api/clientes/:businessId/importar
- * Importar clientes con estructura extendida
+ * Importar clientes con estructura completa
  */
 router.post('/:businessId/importar', async (req, res) => {
   try {
@@ -409,6 +467,16 @@ router.post('/:businessId/importar', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
+    // Obtener clientes existentes
+    const existingRows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:B');
+    const existingWhatsapps = new Set();
+    for (let i = 1; i < existingRows.length; i++) {
+      if (!existingRows[i][0].includes('_DELETED')) {
+        const wa = (existingRows[i][1] || '').replace(/[^0-9]/g, '');
+        if (wa) existingWhatsapps.add(wa);
+      }
+    }
+
     const resultados = {
       creados: [],
       existentes: [],
@@ -423,9 +491,8 @@ router.post('/:businessId/importar', async (req, res) => {
         }
 
         const whatsappLimpio = cli.whatsapp.replace(/[^0-9]/g, '');
-        const existente = await sheets.buscarCliente(whatsappLimpio);
-
-        if (existente) {
+        
+        if (existingWhatsapps.has(whatsappLimpio)) {
           resultados.existentes.push(whatsappLimpio);
           continue;
         }
@@ -437,21 +504,32 @@ router.post('/:businessId/importar', async (req, res) => {
           clienteId,
           whatsappLimpio,
           cli.nombreNegocio || cli.empresa || cli.nombre || '',
-          cli.nombreResponsable || '',
+          cli.nombreResponsable || cli.responsable || '',
           cli.telefono || '',
           cli.email || '',
           cli.direccion || '',
           cli.departamento || '',
-          cli.ciudad || '',
+          cli.distrito || cli.ciudad || '',
           fechaHoy,
           cli.ultimaCompra || '',
           cli.totalPedidos || 0,
           cli.totalComprado || 0,
           cli.totalKg || 0,
+          cli.tipoEnvio || '',
+          cli.empresaEnvio || '',
+          cli.localEnvio || '',
+          cli.direccionEnvio || '',
+          cli.distritoEnvio || '',
+          cli.departamentoEnvio || '',
           cli.notas || ''
         ]);
 
         resultados.creados.push(whatsappLimpio);
+        existingWhatsapps.add(whatsappLimpio);
+        
+        // Pequeña pausa para evitar rate limits
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
       } catch (e) {
         resultados.errores.push({ whatsapp: cli.whatsapp, error: e.message });
       }
@@ -476,7 +554,6 @@ router.post('/:businessId/importar', async (req, res) => {
 
 /**
  * POST /api/clientes/:businessId/:clienteId/mensaje
- * Enviar mensaje directo a un cliente
  */
 router.post('/:businessId/:clienteId/mensaje', async (req, res) => {
   try {
@@ -541,7 +618,7 @@ router.post('/:businessId/:clienteId/actualizar-stats', async (req, res) => {
     await sheets.initialize();
 
     // Buscar cliente
-    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:O');
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:U');
     let clienteRow = -1;
     let whatsapp = '';
 
@@ -569,10 +646,9 @@ router.post('/:businessId/:clienteId/actualizar-stats', async (req, res) => {
     const totalPedidos = pedidos.length;
     const totalComprado = pedidos.reduce((sum, p) => sum + (p.total || 0), 0);
     
-    // Calcular total Kg (si los productos tienen peso)
+    // Calcular total Kg
     let totalKg = 0;
     for (const pedido of pedidos) {
-      // Intentar extraer kg del campo productos
       const productos = pedido.productos || '';
       const kgMatch = productos.match(/(\d+(?:\.\d+)?)\s*kg/gi);
       if (kgMatch) {
