@@ -26,6 +26,7 @@ const stateManager = require('./core/services/state-manager');
 const webhookRouter = require('./routes/webhook-router');
 const apiRouter = require('./routes/api-router');
 const uploadRouter = require('./routes/upload-router');
+const clientesRouter = require('./routes/clientes-router');
 
 // Inicializar Express
 const app = express();
@@ -72,6 +73,7 @@ app.get('/', (req, res) => {
       webhookShared: '/webhook',
       health: '/health',
       api: '/api',
+      clientes: '/api/clientes/:businessId',
       upload: '/api/upload/:businessId'
     }
   });
@@ -90,8 +92,11 @@ app.get('/health', (req, res) => {
 // Webhook de WhatsApp
 app.use('/webhook', webhookRouter);
 
-// API para panel admin y asesor
+// API general (productos, pedidos, negocios, etc.)
 app.use('/api', apiRouter);
+
+// API específica para clientes (con estructura extendida)
+app.use('/api/clientes', clientesRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
@@ -208,6 +213,7 @@ async function initialize() {
 ║   📊 Admin: /admin/:businessId                           ║
 ║   🛒 Catálogo: /catalogo/:businessId                     ║
 ║   📤 Upload: /api/upload/:businessId                     ║
+║   👥 Clientes: /api/clientes/:businessId                 ║
 ║   ❤️ Health: /health                                     ║
 ║                                                          ║
 ║   📦 Negocios: ${negocios.length.toString().padEnd(40)}║
