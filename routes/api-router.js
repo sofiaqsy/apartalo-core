@@ -19,9 +19,6 @@ const SheetsService = require('../core/services/sheets-service');
 
 /**
  * POST /api/mensaje
- * 
- * Permite al asesor/admin enviar mensaje a un cliente
- * Body: { businessId, to, message, conversacionId? }
  */
 router.post('/mensaje', async (req, res) => {
   try {
@@ -33,19 +30,14 @@ router.post('/mensaje', async (req, res) => {
       });
     }
 
-    // Obtener negocio
     const negocio = negociosService.getById(businessId);
     if (!negocio) {
       return res.status(404).json({ error: 'Negocio no encontrado' });
     }
 
-    // Crear servicio WhatsApp
     const whatsapp = new WhatsAppService(negocio.whatsapp);
-
-    // Enviar mensaje
     const result = await whatsapp.sendMessage(to, message);
 
-    // Guardar en historial si hay conversacionId
     if (conversacionId) {
       const sheets = new SheetsService(negocio.spreadsheetId);
       await sheets.initialize();
@@ -81,9 +73,6 @@ router.post('/mensaje', async (req, res) => {
 
 /**
  * POST /api/mensaje/imagen
- * 
- * Enviar imagen a cliente
- * Body: { businessId, to, imageUrl, caption? }
  */
 router.post('/mensaje/imagen', async (req, res) => {
   try {
@@ -116,9 +105,6 @@ router.post('/mensaje/imagen', async (req, res) => {
 
 /**
  * POST /api/mensaje/botones
- * 
- * Enviar mensaje con botones
- * Body: { businessId, to, text, buttons: [{id, title}] }
  */
 router.post('/mensaje/botones', async (req, res) => {
   try {
@@ -153,11 +139,6 @@ router.post('/mensaje/botones', async (req, res) => {
 // CONVERSACIONES (Asesor)
 // ============================================
 
-/**
- * GET /api/conversaciones/:businessId
- * 
- * Listar conversaciones activas
- */
 router.get('/conversaciones/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -201,11 +182,6 @@ router.get('/conversaciones/:businessId', async (req, res) => {
   }
 });
 
-/**
- * GET /api/conversaciones/:businessId/:conversacionId/mensajes
- * 
- * Obtener mensajes de una conversación
- */
 router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, res) => {
   try {
     const { businessId, conversacionId } = req.params;
@@ -228,14 +204,13 @@ router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, r
           id: row[0],
           conversacionId: row[1],
           timestamp: row[2],
-          tipo: row[3], // CLIENTE o ASESOR
+          tipo: row[3],
           mensaje: row[4],
           de: row[5]
         });
       }
     }
 
-    // Ordenar por timestamp
     mensajes.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     res.json({
@@ -250,11 +225,6 @@ router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, r
   }
 });
 
-/**
- * PUT /api/conversaciones/:businessId/:conversacionId
- * 
- * Actualizar estado de conversación (cerrar, reabrir)
- */
 router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
   try {
     const { businessId, conversacionId } = req.params;
@@ -298,15 +268,10 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
 // PEDIDOS
 // ============================================
 
-/**
- * GET /api/pedidos/:businessId
- * 
- * Listar pedidos
- */
 router.get('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado, desde, hasta } = req.query;
+    const { estado } = req.query;
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) {
@@ -323,7 +288,6 @@ router.get('/pedidos/:businessId', async (req, res) => {
       const row = rows[i];
       const estadoPedido = row[9] || '';
 
-      // Filtrar por estado
       if (estado && estadoPedido !== estado) continue;
 
       pedidos.push({
@@ -342,7 +306,6 @@ router.get('/pedidos/:businessId', async (req, res) => {
       });
     }
 
-    // Ordenar por fecha descendente
     pedidos.reverse();
 
     res.json({
@@ -356,11 +319,6 @@ router.get('/pedidos/:businessId', async (req, res) => {
   }
 });
 
-/**
- * PUT /api/pedidos/:businessId/:pedidoId
- * 
- * Actualizar pedido (estado, observaciones)
- */
 router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
@@ -391,7 +349,6 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
           await sheets.batchUpdate(updates);
         }
 
-        // Notificar al cliente si se solicita
         if (notificarCliente && estado) {
           const whatsapp = new WhatsAppService(negocio.whatsapp);
           const clienteWhatsapp = rows[i][3];
@@ -430,12 +387,6 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
 // CLIENTES - CRUD COMPLETO
 // ============================================
 
-/**
- * GET /api/clientes/:businessId
- * 
- * Listar clientes con filtros
- * Query: buscar, departamento, ordenar
- */
 router.get('/clientes/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -454,7 +405,7 @@ router.get('/clientes/:businessId', async (req, res) => {
     let clientes = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      if (!row[0]) continue; // Saltar filas vacías
+      if (!row[0]) continue;
 
       const cliente = {
         id: row[0] || '',
@@ -471,7 +422,6 @@ router.get('/clientes/:businessId', async (req, res) => {
         rowIndex: i + 1
       };
 
-      // Filtrar por búsqueda
       if (buscar) {
         const searchLower = buscar.toLowerCase();
         const matchNombre = cliente.nombre.toLowerCase().includes(searchLower);
@@ -482,13 +432,11 @@ router.get('/clientes/:businessId', async (req, res) => {
         if (!matchNombre && !matchWhatsapp && !matchEmpresa && !matchTelefono) continue;
       }
 
-      // Filtrar por departamento
       if (departamento && cliente.departamento !== departamento) continue;
 
       clientes.push(cliente);
     }
 
-    // Ordenar
     if (ordenar === 'nombre') {
       clientes.sort((a, b) => a.nombre.localeCompare(b.nombre));
     } else if (ordenar === 'reciente') {
@@ -508,11 +456,6 @@ router.get('/clientes/:businessId', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clientes/:businessId/:clienteId
- * 
- * Obtener un cliente específico con su historial de pedidos
- */
 router.get('/clientes/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -525,7 +468,6 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Buscar cliente
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:K');
     let cliente = null;
 
@@ -553,12 +495,11 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
       return res.status(404).json({ error: 'Cliente no encontrado' });
     }
 
-    // Obtener pedidos del cliente
     const pedidos = await sheets.getPedidosByWhatsapp(cliente.whatsapp);
 
     res.json({
       cliente,
-      pedidos: pedidos.slice(0, 20), // Últimos 20 pedidos
+      pedidos: pedidos.slice(0, 20),
       estadisticas: {
         totalPedidos: pedidos.length,
         totalComprado: pedidos.reduce((sum, p) => sum + p.total, 0),
@@ -572,18 +513,11 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clientes/:businessId
- * 
- * Crear nuevo cliente
- * Body: { whatsapp, nombre, telefono?, direccion?, departamento?, ciudad?, empresa?, notas? }
- */
 router.post('/clientes/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
     const { whatsapp, nombre, telefono, direccion, departamento, ciudad, empresa, notas } = req.body;
 
-    // Validaciones
     if (!whatsapp || !nombre) {
       return res.status(400).json({
         error: 'Campos requeridos: whatsapp, nombre'
@@ -598,7 +532,6 @@ router.post('/clientes/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Verificar que el whatsapp no exista
     const clienteExistente = await sheets.buscarCliente(whatsapp);
     if (clienteExistente) {
       return res.status(400).json({
@@ -607,12 +540,9 @@ router.post('/clientes/:businessId', async (req, res) => {
       });
     }
 
-    // Generar ID
     const clienteId = `CLI-${Date.now().toString().slice(-6)}`;
     const fechaHoy = new Date().toLocaleDateString('es-PE');
 
-    // Crear cliente
-    // Estructura: ID, WhatsApp, Nombre, Telefono, Direccion, FechaRegistro, UltimaCompra, Departamento, Ciudad, Empresa, Notas
     const valores = [
       clienteId,
       whatsapp.replace(/[^0-9]/g, ''),
@@ -620,7 +550,7 @@ router.post('/clientes/:businessId', async (req, res) => {
       telefono || '',
       direccion || '',
       fechaHoy,
-      '', // UltimaCompra vacía
+      '',
       departamento || '',
       ciudad || '',
       empresa || '',
@@ -652,11 +582,6 @@ router.post('/clientes/:businessId', async (req, res) => {
   }
 });
 
-/**
- * PUT /api/clientes/:businessId/:clienteId
- * 
- * Actualizar cliente existente
- */
 router.put('/clientes/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -705,11 +630,6 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/clientes/:businessId/:clienteId
- * 
- * Eliminar cliente
- */
 router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -726,7 +646,6 @@ router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
-        // Marcar como eliminado cambiando el ID
         await sheets.updateCell(`Clientes!A${i + 1}`, `${clienteId}_DELETED_${Date.now()}`);
 
         return res.json({
@@ -745,11 +664,6 @@ router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clientes/:businessId/importar
- * 
- * Importar múltiples clientes
- */
 router.post('/clientes/:businessId/importar', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -828,15 +742,10 @@ router.post('/clientes/:businessId/importar', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clientes/:businessId/:clienteId/mensaje
- * 
- * Enviar mensaje directo a un cliente
- */
 router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
-    const { mensaje, tipo } = req.body;
+    const { mensaje } = req.body;
 
     if (!mensaje) {
       return res.status(400).json({ error: 'Campo requerido: mensaje' });
@@ -850,7 +759,6 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Buscar cliente
     const rows = await sheets.getRows(negocio.spreadsheetId, 'Clientes!A:B');
     let whatsappCliente = null;
 
@@ -865,7 +773,6 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
       return res.status(404).json({ error: 'Cliente no encontrado' });
     }
 
-    // Enviar mensaje
     const whatsapp = new WhatsAppService(negocio.whatsapp);
     const result = await whatsapp.sendMessage(whatsappCliente, mensaje);
 
@@ -885,9 +792,6 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
 // NEGOCIOS
 // ============================================
 
-/**
- * GET /api/negocios
- */
 router.get('/negocios', (req, res) => {
   const negocios = negociosService.getAll().map(n => ({
     id: n.id,
@@ -899,51 +803,29 @@ router.get('/negocios', (req, res) => {
   res.json(negocios);
 });
 
-/**
- * GET /api/negocios/por-whatsapp/:whatsapp
- * 
- * Buscar negocio por número de WhatsApp del dueño
- * Usado para login en la app móvil
- */
 router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
   try {
     let { whatsapp } = req.params;
 
-    // Limpiar número (solo dígitos)
     whatsapp = whatsapp.replace(/[^0-9]/g, '');
 
-    // Si tiene 9 dígitos, agregar código de Perú
     if (whatsapp.length === 9) {
       whatsapp = '51' + whatsapp;
     }
 
     console.log(`🔍 Buscando negocio para WhatsApp: ${whatsapp}`);
 
-    // Buscar en todos los negocios
     const negocios = negociosService.getAll();
 
-    console.log(`📊 Total negocios cargados: ${negocios.length}`);
-
     for (const negocio of negocios) {
-      // DEBUG: Ver el objeto whatsapp completo
-      console.log(`📋 Negocio: ${negocio.id}`);
-      console.log(`   - whatsapp objeto:`, JSON.stringify(negocio.whatsapp, null, 2));
-      console.log(`   - whatsapp.admin raw:`, negocio.whatsapp?.admin);
-
-      // Primero: Buscar por whatsapp.admin (columna H del Excel de Negocios)
       let whatsappAdmin = (negocio.whatsapp?.admin || '').toString().replace(/[^0-9]/g, '');
 
-      // Normalizar: Si tiene 9 dígitos, agregar código de Perú
       if (whatsappAdmin.length === 9) {
         whatsappAdmin = '51' + whatsappAdmin;
       }
 
-      console.log(`   - whatsappAdmin normalizado: "${whatsappAdmin}"`);
-      console.log(`   - whatsapp buscado: "${whatsapp}"`);
-      console.log(`   - ¿Match?: ${whatsappAdmin === whatsapp}`);
-
       if (whatsappAdmin && whatsappAdmin === whatsapp) {
-        console.log(`✅ Negocio encontrado por WhatsApp Admin: ${negocio.nombre}`);
+        console.log(`✅ Negocio encontrado: ${negocio.nombre}`);
         return res.json({
           encontrado: true,
           negocio: {
@@ -957,7 +839,6 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
       }
     }
 
-    console.log(`❌ No se encontró negocio para: ${whatsapp}`);
     res.json({
       encontrado: false,
       mensaje: 'No se encontró ningún negocio asociado a este número'
@@ -969,9 +850,6 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
   }
 });
 
-/**
- * POST /api/negocios/reload
- */
 router.post('/negocios/reload', async (req, res) => {
   try {
     const config = require('../config');
@@ -985,19 +863,24 @@ router.post('/negocios/reload', async (req, res) => {
 });
 
 // ============================================
-// PRODUCTOS
+// PRODUCTOS - CON PAGINACIÓN
 // ============================================
 
 /**
  * GET /api/productos/:businessId
  * 
- * Listar productos con filtros opcionales
- * Query params: estado, buscar, ordenar
+ * Listar productos con paginación y filtros
+ * Query params: 
+ *   - estado: filtrar por estado
+ *   - buscar: búsqueda por nombre/código
+ *   - ordenar: precio_asc, precio_desc, stock, nombre
+ *   - pagina: número de página (default: 1)
+ *   - limite: productos por página (default: 20)
  */
 router.get('/productos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado, buscar, ordenar } = req.query;
+    const { estado, buscar, ordenar, pagina = 1, limite = 20 } = req.query;
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) {
@@ -1019,7 +902,10 @@ router.get('/productos/:businessId', async (req, res) => {
       );
     }
 
-    // Ordenar
+    // Invertir orden (más recientes primero - los últimos agregados a la hoja)
+    productos.reverse();
+
+    // Ordenar si se especifica
     if (ordenar === 'precio_asc') {
       productos.sort((a, b) => a.precio - b.precio);
     } else if (ordenar === 'precio_desc') {
@@ -1030,9 +916,23 @@ router.get('/productos/:businessId', async (req, res) => {
       productos.sort((a, b) => a.nombre.localeCompare(b.nombre));
     }
 
+    // Paginación
+    const total = productos.length;
+    const paginaNum = parseInt(pagina) || 1;
+    const limiteNum = parseInt(limite) || 20;
+    const totalPaginas = Math.ceil(total / limiteNum);
+    const inicio = (paginaNum - 1) * limiteNum;
+    const fin = inicio + limiteNum;
+
+    const productosPaginados = productos.slice(inicio, fin);
+
     res.json({
-      total: productos.length,
-      productos
+      total,
+      pagina: paginaNum,
+      limite: limiteNum,
+      totalPaginas,
+      hayMas: paginaNum < totalPaginas,
+      productos: productosPaginados
     });
 
   } catch (error) {
@@ -1041,11 +941,6 @@ router.get('/productos/:businessId', async (req, res) => {
   }
 });
 
-/**
- * GET /api/productos/:businessId/:codigo
- * 
- * Obtener un producto específico
- */
 router.get('/productos/:businessId/:codigo', async (req, res) => {
   try {
     const { businessId, codigo } = req.params;
@@ -1073,18 +968,11 @@ router.get('/productos/:businessId/:codigo', async (req, res) => {
   }
 });
 
-/**
- * POST /api/productos/:businessId
- * 
- * Crear nuevo producto
- * Body: { codigo, nombre, descripcion?, precio, stock, imagenUrl?, estado? }
- */
 router.post('/productos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
     const { codigo, nombre, descripcion, precio, stock, imagenUrl, estado, categoria } = req.body;
 
-    // Validaciones
     if (!codigo || !nombre || precio === undefined || stock === undefined) {
       return res.status(400).json({
         error: 'Campos requeridos: codigo, nombre, precio, stock'
@@ -1099,21 +987,18 @@ router.post('/productos/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Verificar que el código no exista
     const productos = await sheets.getProductos();
     if (productos.find(p => p.codigo === codigo)) {
       return res.status(400).json({ error: 'Ya existe un producto con ese código' });
     }
 
-    // Crear producto
-    // Estructura: Codigo, Nombre, Descripcion, Precio, Stock, StockReservado, ImagenUrl, Estado, Categoria
     const valores = [
       codigo,
       nombre,
       descripcion || '',
       precio,
       stock,
-      0, // StockReservado
+      0,
       imagenUrl || '',
       estado || 'ACTIVO',
       categoria || ''
@@ -1144,12 +1029,6 @@ router.post('/productos/:businessId', async (req, res) => {
   }
 });
 
-/**
- * PUT /api/productos/:businessId/:codigo
- * 
- * Actualizar producto existente
- * Body: { nombre?, descripcion?, precio?, stock?, imagenUrl?, estado?, categoria? }
- */
 router.put('/productos/:businessId/:codigo', async (req, res) => {
   try {
     const { businessId, codigo } = req.params;
@@ -1181,7 +1060,6 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
           await sheets.batchUpdate(updates);
         }
 
-        // Obtener producto actualizado
         const productosActualizados = await sheets.getProductos();
         const productoActualizado = productosActualizados.find(p => p.codigo === codigo);
 
@@ -1201,12 +1079,6 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
   }
 });
 
-/**
- * DELETE /api/productos/:businessId/:codigo
- * 
- * Eliminar producto (cambiar estado a ELIMINADO)
- * Query param: ?force=true para eliminar permanentemente
- */
 router.delete('/productos/:businessId/:codigo', async (req, res) => {
   try {
     const { businessId, codigo } = req.params;
@@ -1226,12 +1098,9 @@ router.delete('/productos/:businessId/:codigo', async (req, res) => {
       if (rows[i][0] === codigo) {
 
         if (force === 'true') {
-          // Eliminar permanentemente (marcar fila vacía)
-          // En Sheets no podemos eliminar filas fácilmente, así que marcamos como ELIMINADO
           await sheets.updateCell(`Inventario!H${i + 1}`, 'ELIMINADO');
           await sheets.updateCell(`Inventario!A${i + 1}`, `${codigo}_DELETED_${Date.now()}`);
         } else {
-          // Soft delete - cambiar estado a INACTIVO
           await sheets.updateCell(`Inventario!H${i + 1}`, 'INACTIVO');
         }
 
@@ -1251,12 +1120,6 @@ router.delete('/productos/:businessId/:codigo', async (req, res) => {
   }
 });
 
-/**
- * POST /api/productos/:businessId/:codigo/stock
- * 
- * Ajustar stock (sumar o restar)
- * Body: { cantidad, operacion: 'agregar' | 'restar' | 'establecer', motivo? }
- */
 router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
   try {
     const { businessId, codigo } = req.params;
@@ -1299,13 +1162,12 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
 
         await sheets.updateCell(`Inventario!E${i + 1}`, nuevoStock);
 
-        // Registrar movimiento (opcional - si existe hoja MovimientosStock)
         try {
           await sheets.appendRow('MovimientosStock', [
             `MOV-${Date.now()}`,
             new Date().toISOString(),
             codigo,
-            rows[i][1], // nombre
+            rows[i][1],
             operacion,
             cantidad,
             stockActual,
@@ -1335,12 +1197,6 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
   }
 });
 
-/**
- * POST /api/productos/:businessId/importar
- * 
- * Importar múltiples productos
- * Body: { productos: [{codigo, nombre, precio, stock, ...}] }
- */
 router.post('/productos/:businessId/importar', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -1358,7 +1214,6 @@ router.post('/productos/:businessId/importar', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Obtener productos existentes
     const existentes = await sheets.getProductos();
     const codigosExistentes = new Set(existentes.map(p => p.codigo));
 
@@ -1376,7 +1231,6 @@ router.post('/productos/:businessId/importar', async (req, res) => {
         }
 
         if (codigosExistentes.has(prod.codigo)) {
-          // Actualizar existente
           const rows = await sheets.getRows(negocio.spreadsheetId, 'Inventario!A:I');
           for (let i = 1; i < rows.length; i++) {
             if (rows[i][0] === prod.codigo) {
@@ -1390,7 +1244,6 @@ router.post('/productos/:businessId/importar', async (req, res) => {
           }
           resultados.actualizados.push(prod.codigo);
         } else {
-          // Crear nuevo
           await sheets.appendRow('Inventario', [
             prod.codigo,
             prod.nombre,
