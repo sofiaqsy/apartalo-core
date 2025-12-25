@@ -27,6 +27,7 @@ const webhookRouter = require('./routes/webhook-router');
 const apiRouter = require('./routes/api-router');
 const uploadRouter = require('./routes/upload-router');
 const clientesRouter = require('./routes/clientes-router');
+const pedidosRouter = require('./routes/pedidos-router');
 
 // Inicializar Express
 const app = express();
@@ -74,6 +75,7 @@ app.get('/', (req, res) => {
       health: '/health',
       api: '/api',
       clientes: '/api/clientes/:businessId',
+      pedidos: '/api/pedidos/:businessId',
       upload: '/api/upload/:businessId'
     }
   });
@@ -93,13 +95,16 @@ app.get('/health', (req, res) => {
 app.use('/webhook', webhookRouter);
 
 // IMPORTANTE: Registrar rutas específicas ANTES de las generales
-// API específica para clientes (con estructura extendida para Finca Rosal)
+// API específica para clientes (con estructura extendida)
 app.use('/api/clientes', clientesRouter);
+
+// API específica para pedidos (con creación desde app)
+app.use('/api/pedidos', pedidosRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
 
-// API general (productos, pedidos, negocios, etc.) - DESPUÉS de las específicas
+// API general (productos, negocios, etc.) - DESPUÉS de las específicas
 app.use('/api', apiRouter);
 
 // Catálogo web público
@@ -215,6 +220,7 @@ async function initialize() {
 ║   🛒 Catálogo: /catalogo/:businessId                     ║
 ║   📤 Upload: /api/upload/:businessId                     ║
 ║   👥 Clientes: /api/clientes/:businessId                 ║
+║   📦 Pedidos: /api/pedidos/:businessId                   ║
 ║   ❤️ Health: /health                                     ║
 ║                                                          ║
 ║   📦 Negocios: ${negocios.length.toString().padEnd(40)}║
