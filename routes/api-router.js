@@ -319,6 +319,104 @@ router.get('/pedidos/:businessId', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/pedidos/:businessId
+ * 
+ * Crear nuevo pedido desde la app
+ * Body: { whatsapp, cliente?, direccion?, productos, total, observaciones?, notificarCliente? }
+ */
+router.post('/pedidos/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { whatsapp, cliente, direccion, productos, total, observaciones, notificarCliente } = req.body;
+
+    // Validaciones
+    if (!whatsapp || !productos || total === undefined) {
+      return res.status(400).json({
+        error: 'Campos requeridos: whatsapp, productos, total'
+      });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    // Generar ID de pedido
+    const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
+    const ahora = new Date();
+
+    // Formatear productos para guardar
+    let productosStr = '';
+    if (Array.isArray(productos)) {
+      productosStr = productos.map(p => `${p.cantidad}x ${p.nombre}`).join(', ');
+    } else {
+      productosStr = productos;
+    }
+
+    // Estructura de columnas según la hoja Pedidos:
+    // A: ID, B: Fecha, C: Hora, D: WhatsApp, E: Cliente, F: Telefono, G: Direccion, 
+    // H: Productos, I: Total, J: Estado, K: VoucherURLs, L: Observaciones, M: Origen
+    const valores = [
+      pedidoId,                                              // A: ID
+      ahora.toLocaleDateString('es-PE'),                     // B: Fecha
+      ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }), // C: Hora
+      (whatsapp || '').toString().replace(/[^0-9]/g, ''),    // D: WhatsApp
+      cliente || '',                                         // E: Cliente
+      '',                                                    // F: Teléfono
+      direccion || '',                                       // G: Dirección
+      productosStr,                                          // H: Productos
+      total,                                                 // I: Total
+      'PENDIENTE',                                           // J: Estado
+      '',                                                    // K: VoucherURLs
+      observaciones || '',                                   // L: Observaciones
+      'APP'                                                  // M: Origen
+    ];
+
+    await sheets.appendRow('Pedidos', valores);
+
+    // Notificar al cliente si se solicita
+    if (notificarCliente) {
+      try {
+        const whatsappService = new WhatsAppService(negocio.whatsapp);
+        const mensaje = `✅ *Pedido Registrado*\n\n` +
+          `📦 Pedido: *${pedidoId}*\n` +
+          `💰 Total: *S/ ${parseFloat(total).toFixed(2)}*\n` +
+          `📝 Productos: ${productosStr}\n\n` +
+          `¡Gracias por tu compra! Te avisaremos cuando esté listo.`;
+        
+        await whatsappService.sendMessage(whatsapp, mensaje);
+      } catch (notifError) {
+        console.log('⚠️ Error notificando cliente:', notifError.message);
+        // No fallar el pedido por error de notificación
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      mensaje: 'Pedido creado',
+      pedido: {
+        id: pedidoId,
+        fecha: ahora.toLocaleDateString('es-PE'),
+        hora: ahora.toLocaleTimeString('es-PE'),
+        whatsapp,
+        cliente,
+        productos: productosStr,
+        total,
+        estado: 'PENDIENTE',
+        origen: 'APP'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error creando pedido:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
@@ -350,20 +448,24 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
         }
 
         if (notificarCliente && estado) {
-          const whatsapp = new WhatsAppService(negocio.whatsapp);
-          const clienteWhatsapp = rows[i][3];
+          try {
+            const whatsapp = new WhatsAppService(negocio.whatsapp);
+            const clienteWhatsapp = rows[i][3];
 
-          const mensajesEstado = {
-            'CONFIRMADO': `✅ Tu pedido *${pedidoId}* ha sido confirmado. ¡Gracias!`,
-            'EN_PREPARACION': `📦 Tu pedido *${pedidoId}* está en preparación.`,
-            'ENVIADO': `🚚 Tu pedido *${pedidoId}* ha sido enviado. ¡Pronto llegará!`,
-            'ENTREGADO': `✅ Tu pedido *${pedidoId}* ha sido entregado. ¡Gracias por tu compra!`,
-            'CANCELADO': `❌ Tu pedido *${pedidoId}* ha sido cancelado.`
-          };
+            const mensajesEstado = {
+              'CONFIRMADO': `✅ Tu pedido *${pedidoId}* ha sido confirmado. ¡Gracias!`,
+              'EN_PREPARACION': `📦 Tu pedido *${pedidoId}* está en preparación.`,
+              'ENVIADO': `🚚 Tu pedido *${pedidoId}* ha sido enviado. ¡Pronto llegará!`,
+              'ENTREGADO': `✅ Tu pedido *${pedidoId}* ha sido entregado. ¡Gracias por tu compra!`,
+              'CANCELADO': `❌ Tu pedido *${pedidoId}* ha sido cancelado.`
+            };
 
-          const mensaje = mensajesEstado[estado];
-          if (mensaje) {
-            await whatsapp.sendMessage(clienteWhatsapp, mensaje);
+            const mensaje = mensajesEstado[estado];
+            if (mensaje) {
+              await whatsapp.sendMessage(clienteWhatsapp, mensaje);
+            }
+          } catch (notifError) {
+            console.log('⚠️ Error notificando cliente:', notifError.message);
           }
         }
 
