@@ -92,14 +92,15 @@ app.get('/health', (req, res) => {
 // Webhook de WhatsApp
 app.use('/webhook', webhookRouter);
 
-// API general (productos, pedidos, negocios, etc.)
-app.use('/api', apiRouter);
-
-// API específica para clientes (con estructura extendida)
+// IMPORTANTE: Registrar rutas específicas ANTES de las generales
+// API específica para clientes (con estructura extendida para Finca Rosal)
 app.use('/api/clientes', clientesRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
+
+// API general (productos, pedidos, negocios, etc.) - DESPUÉS de las específicas
+app.use('/api', apiRouter);
 
 // Catálogo web público
 app.get('/catalogo/:businessId', (req, res) => {
