@@ -1101,12 +1101,18 @@ router.post('/productos/:businessId', async (req, res) => {
       return res.status(400).json({ error: 'Ya existe un producto con ese código' });
     }
 
+    // IMPORTANTE: Asegurar que precio sea número decimal
+    const precioNumero = parseFloat(precio);
+    const stockNumero = parseInt(stock) || 0;
+
+    console.log(`💰 Creando producto: ${nombre} - Precio: ${precioNumero} (original: ${precio})`);
+
     const valores = [
       codigo,
       nombre,
       descripcion || '',
-      precio,
-      stock,
+      precioNumero,  // Usar el número parseado
+      stockNumero,
       0,
       imagenUrl || '',
       estado || 'ACTIVO',
@@ -1122,13 +1128,13 @@ router.post('/productos/:businessId', async (req, res) => {
         codigo,
         nombre,
         descripcion: descripcion || '',
-        precio,
-        stock,
+        precio: precioNumero,
+        stock: stockNumero,
         stockReservado: 0,
         imagenUrl: imagenUrl || '',
         estado: estado || 'ACTIVO',
         categoria: categoria || '',
-        disponible: stock
+        disponible: stockNumero
       }
     });
 
@@ -1159,8 +1165,15 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
 
         if (nombre !== undefined) updates.push({ range: `Inventario!B${i + 1}`, value: nombre });
         if (descripcion !== undefined) updates.push({ range: `Inventario!C${i + 1}`, value: descripcion });
-        if (precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: precio });
-        if (stock !== undefined) updates.push({ range: `Inventario!E${i + 1}`, value: stock });
+        
+        // IMPORTANTE: Asegurar que precio sea número decimal
+        if (precio !== undefined) {
+          const precioNumero = parseFloat(precio);
+          console.log(`💰 Actualizando precio: ${precioNumero} (original: ${precio})`);
+          updates.push({ range: `Inventario!D${i + 1}`, value: precioNumero });
+        }
+        
+        if (stock !== undefined) updates.push({ range: `Inventario!E${i + 1}`, value: parseInt(stock) || 0 });
         if (imagenUrl !== undefined) updates.push({ range: `Inventario!G${i + 1}`, value: imagenUrl });
         if (estado !== undefined) updates.push({ range: `Inventario!H${i + 1}`, value: estado });
         if (categoria !== undefined) updates.push({ range: `Inventario!I${i + 1}`, value: categoria });
@@ -1345,8 +1358,8 @@ router.post('/productos/:businessId/importar', async (req, res) => {
             if (rows[i][0] === prod.codigo) {
               const updates = [];
               if (prod.nombre) updates.push({ range: `Inventario!B${i + 1}`, value: prod.nombre });
-              if (prod.precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: prod.precio });
-              if (prod.stock !== undefined) updates.push({ range: `Inventario!E${i + 1}`, value: prod.stock });
+              if (prod.precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: parseFloat(prod.precio) });
+              if (prod.stock !== undefined) updates.push({ range: `Inventario!E${i + 1}`, value: parseInt(prod.stock) || 0 });
               if (updates.length > 0) await sheets.batchUpdate(updates);
               break;
             }
@@ -1357,8 +1370,8 @@ router.post('/productos/:businessId/importar', async (req, res) => {
             prod.codigo,
             prod.nombre,
             prod.descripcion || '',
-            prod.precio || 0,
-            prod.stock || 0,
+            parseFloat(prod.precio) || 0,
+            parseInt(prod.stock) || 0,
             0,
             prod.imagenUrl || '',
             prod.estado || 'ACTIVO',
