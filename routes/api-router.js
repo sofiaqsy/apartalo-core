@@ -268,6 +268,14 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
 // PEDIDOS
 // ============================================
 
+/**
+ * GET /api/pedidos/:businessId
+ * 
+ * Estructura de hoja Pedidos:
+ * A: ID, B: Fecha, C: Hora, D: WhatsApp, E: Cliente, F: Telefono, G: Direccion,
+ * H: Productos, I: Total, J: Estado, K: VoucherURLs, L: Observaciones,
+ * M: Departamento, N: Ciudad, O: TipoEnvio, P: MetodoEnvio, Q: DetalleEnvio, R: CostoEnvio, S: Origen
+ */
 router.get('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -281,29 +289,38 @@ router.get('/pedidos/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows(negocio.spreadsheetId, 'Pedidos!A:R');
+    // Leer hasta columna S (19 columnas)
+    const rows = await sheets.getRows(negocio.spreadsheetId, 'Pedidos!A:S');
 
     const pedidos = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
+      if (!row[0]) continue; // Saltar filas vacías
+      
       const estadoPedido = row[9] || '';
 
       if (estado && estadoPedido !== estado) continue;
 
       pedidos.push({
-        id: row[0],
-        fecha: row[1],
-        hora: row[2],
-        whatsapp: row[3],
-        cliente: row[4],
-        telefono: row[5],
-        direccion: row[6],
-        productos: row[7],
+        id: row[0] || '',
+        fecha: row[1] || '',
+        hora: row[2] || '',
+        whatsapp: row[3] || '',
+        cliente: row[4] || '',
+        telefono: row[5] || '',
+        direccion: row[6] || '',
+        productos: row[7] || '',
         total: parseFloat(row[8]) || 0,
         estado: estadoPedido,
-        voucherUrls: row[10],
-        observaciones: row[11],
-        origen: row[12] || 'APP'
+        voucherUrls: row[10] || '',
+        observaciones: row[11] || '',
+        departamento: row[12] || '',
+        ciudad: row[13] || '',
+        tipoEnvio: row[14] || '',
+        metodoEnvio: row[15] || '',
+        detalleEnvio: row[16] || '',
+        costoEnvio: parseFloat(row[17]) || 0,
+        origen: row[18] || 'APP'
       });
     }
 
@@ -325,11 +342,33 @@ router.get('/pedidos/:businessId', async (req, res) => {
  * 
  * Crear nuevo pedido desde la app
  * Body: { whatsapp, cliente?, direccion?, productos, total, observaciones?, estado?, origen?, notificarCliente? }
+ * 
+ * Estructura de hoja Pedidos (19 columnas A-S):
+ * A: ID, B: Fecha, C: Hora, D: WhatsApp, E: Cliente, F: Telefono, G: Direccion,
+ * H: Productos, I: Total, J: Estado, K: VoucherURLs, L: Observaciones,
+ * M: Departamento, N: Ciudad, O: TipoEnvio, P: MetodoEnvio, Q: DetalleEnvio, R: CostoEnvio, S: Origen
  */
 router.post('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, cliente, direccion, productos, total, observaciones, estado, origen, notificarCliente } = req.body;
+    const { 
+      whatsapp, 
+      cliente, 
+      telefono,
+      direccion, 
+      productos, 
+      total, 
+      observaciones, 
+      estado, 
+      origen, 
+      notificarCliente,
+      departamento,
+      ciudad,
+      tipoEnvio,
+      metodoEnvio,
+      detalleEnvio,
+      costoEnvio
+    } = req.body;
 
     // Validaciones
     if (!whatsapp || !productos || total === undefined) {
@@ -353,7 +392,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     // Formatear productos para guardar
     let productosStr = '';
     if (Array.isArray(productos)) {
-      productosStr = productos.map(p => `${p.cantidad}x ${p.nombre}`).join(', ');
+      productosStr = JSON.stringify(productos);
     } else {
       productosStr = productos;
     }
@@ -362,23 +401,27 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const estadoFinal = estado || 'PENDIENTE';
     const origenFinal = origen || 'APP';
 
-    // Estructura de columnas según la hoja Pedidos:
-    // A: ID, B: Fecha, C: Hora, D: WhatsApp, E: Cliente, F: Telefono, G: Direccion, 
-    // H: Productos, I: Total, J: Estado, K: VoucherURLs, L: Observaciones, M: Origen
+    // Estructura completa de 19 columnas (A-S)
     const valores = [
       pedidoId,                                              // A: ID
       ahora.toLocaleDateString('es-PE'),                     // B: Fecha
       ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }), // C: Hora
       (whatsapp || '').toString().replace(/[^0-9]/g, ''),    // D: WhatsApp
       cliente || '',                                         // E: Cliente
-      '',                                                    // F: Teléfono
+      telefono || '',                                        // F: Teléfono
       direccion || '',                                       // G: Dirección
-      productosStr,                                          // H: Productos
-      total,                                                 // I: Total
+      productosStr,                                          // H: Productos (JSON)
+      parseFloat(total) || 0,                                // I: Total
       estadoFinal,                                           // J: Estado
       '',                                                    // K: VoucherURLs
       observaciones || '',                                   // L: Observaciones
-      origenFinal                                            // M: Origen
+      departamento || '',                                    // M: Departamento
+      ciudad || '',                                          // N: Ciudad
+      tipoEnvio || '',                                       // O: TipoEnvio
+      metodoEnvio || '',                                     // P: MetodoEnvio
+      detalleEnvio || '',                                    // Q: DetalleEnvio
+      parseFloat(costoEnvio) || 0,                           // R: CostoEnvio
+      origenFinal                                            // S: Origen
     ];
 
     await sheets.appendRow('Pedidos', valores);
@@ -387,10 +430,17 @@ router.post('/pedidos/:businessId', async (req, res) => {
     if (notificarCliente && whatsapp !== '000000000') {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
+        
+        // Formatear productos para mensaje
+        let productosMsg = productosStr;
+        if (Array.isArray(productos)) {
+          productosMsg = productos.map(p => `${p.cantidad}x ${p.nombre}`).join(', ');
+        }
+        
         const mensaje = `✅ *Pedido Registrado*\n\n` +
           `📦 Pedido: *${pedidoId}*\n` +
           `💰 Total: *S/ ${parseFloat(total).toFixed(2)}*\n` +
-          `📝 Productos: ${productosStr}\n\n` +
+          `📝 Productos: ${productosMsg}\n\n` +
           `¡Gracias por tu compra! Te avisaremos cuando esté listo.`;
         
         await whatsappService.sendMessage(whatsapp, mensaje);
@@ -412,7 +462,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
         whatsapp,
         cliente,
         productos: productosStr,
-        total,
+        total: parseFloat(total) || 0,
         estado: estadoFinal,
         origen: origenFinal
       }
