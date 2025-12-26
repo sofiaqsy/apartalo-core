@@ -76,17 +76,21 @@ class SheetsService {
 
   /**
    * Agregar fila al final de una hoja
+   * IMPORTANTE: Usa rango A1 para asegurar que siempre empiece desde columna A
    */
   async appendRow(sheetName, values) {
     if (!this.initialized) return false;
 
     try {
+      // Usar rango A1 notation específico para forzar inserción desde columna A
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
-        range: `${sheetName}!A:Z`,
+        range: `${sheetName}!A1`,
         valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
         resource: { values: [values] }
       });
+      console.log(`✅ Fila agregada a ${sheetName} con ${values.length} columnas`);
       return true;
     } catch (error) {
       console.error(`❌ Error agregando fila a ${sheetName}:`, error.message);
@@ -216,7 +220,7 @@ class SheetsService {
    * Obtener pedidos de un cliente por WhatsApp
    */
   async getPedidosByWhatsapp(whatsapp) {
-    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:R');
+    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:S');
     if (rows.length <= 1) return [];
 
     const numeroLimpio = this.cleanPhone(whatsapp);
@@ -238,7 +242,7 @@ class SheetsService {
    * Obtener pedido por ID
    */
   async getPedidoById(pedidoId) {
-    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:R');
+    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:S');
     
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
@@ -251,6 +255,7 @@ class SheetsService {
 
   /**
    * Crear pedido
+   * Estructura: A-S (19 columnas)
    */
   async crearPedido(datosPedido) {
     const pedidoId = datosPedido.id || `PED-${Date.now().toString().slice(-6)}`;
@@ -274,7 +279,8 @@ class SheetsService {
       datosPedido.tipoEnvio || '',                 // O: TipoEnvio
       datosPedido.metodoEnvio || '',               // P: MetodoEnvio
       datosPedido.detalleEnvio || '',              // Q: DetalleEnvio
-      datosPedido.costoEnvio || 0                  // R: CostoEnvio
+      datosPedido.costoEnvio || 0,                 // R: CostoEnvio
+      datosPedido.origen || 'APP'                  // S: Origen
     ];
 
     const success = await this.appendRow('Pedidos', valores);
@@ -298,6 +304,7 @@ class SheetsService {
 
   /**
    * Parsear fila de pedido a objeto
+   * Estructura: A-S (19 columnas)
    */
   parsePedidoRow(row, rowIndex) {
     return {
@@ -319,6 +326,7 @@ class SheetsService {
       metodoEnvio: row[15] || '',
       detalleEnvio: row[16] || '',
       costoEnvio: parseFloat(row[17]) || 0,
+      origen: row[18] || 'APP',
       rowIndex
     };
   }
