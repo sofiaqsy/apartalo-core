@@ -302,7 +302,8 @@ router.get('/pedidos/:businessId', async (req, res) => {
         total: parseFloat(row[8]) || 0,
         estado: estadoPedido,
         voucherUrls: row[10],
-        observaciones: row[11]
+        observaciones: row[11],
+        origen: row[12] || 'APP'
       });
     }
 
@@ -323,12 +324,12 @@ router.get('/pedidos/:businessId', async (req, res) => {
  * POST /api/pedidos/:businessId
  * 
  * Crear nuevo pedido desde la app
- * Body: { whatsapp, cliente?, direccion?, productos, total, observaciones?, notificarCliente? }
+ * Body: { whatsapp, cliente?, direccion?, productos, total, observaciones?, estado?, origen?, notificarCliente? }
  */
 router.post('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, cliente, direccion, productos, total, observaciones, notificarCliente } = req.body;
+    const { whatsapp, cliente, direccion, productos, total, observaciones, estado, origen, notificarCliente } = req.body;
 
     // Validaciones
     if (!whatsapp || !productos || total === undefined) {
@@ -357,6 +358,10 @@ router.post('/pedidos/:businessId', async (req, res) => {
       productosStr = productos;
     }
 
+    // Determinar estado y origen (con valores por defecto)
+    const estadoFinal = estado || 'PENDIENTE';
+    const origenFinal = origen || 'APP';
+
     // Estructura de columnas según la hoja Pedidos:
     // A: ID, B: Fecha, C: Hora, D: WhatsApp, E: Cliente, F: Telefono, G: Direccion, 
     // H: Productos, I: Total, J: Estado, K: VoucherURLs, L: Observaciones, M: Origen
@@ -370,16 +375,16 @@ router.post('/pedidos/:businessId', async (req, res) => {
       direccion || '',                                       // G: Dirección
       productosStr,                                          // H: Productos
       total,                                                 // I: Total
-      'PENDIENTE',                                           // J: Estado
+      estadoFinal,                                           // J: Estado
       '',                                                    // K: VoucherURLs
       observaciones || '',                                   // L: Observaciones
-      'APP'                                                  // M: Origen
+      origenFinal                                            // M: Origen
     ];
 
     await sheets.appendRow('Pedidos', valores);
 
-    // Notificar al cliente si se solicita
-    if (notificarCliente) {
+    // Notificar al cliente si se solicita (no para ventas directas)
+    if (notificarCliente && whatsapp !== '000000000') {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
         const mensaje = `✅ *Pedido Registrado*\n\n` +
@@ -395,6 +400,8 @@ router.post('/pedidos/:businessId', async (req, res) => {
       }
     }
 
+    console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal}`);
+
     res.status(201).json({
       success: true,
       mensaje: 'Pedido creado',
@@ -406,8 +413,8 @@ router.post('/pedidos/:businessId', async (req, res) => {
         cliente,
         productos: productosStr,
         total,
-        estado: 'PENDIENTE',
-        origen: 'APP'
+        estado: estadoFinal,
+        origen: origenFinal
       }
     });
 
