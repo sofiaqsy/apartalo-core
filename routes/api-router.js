@@ -14,6 +14,18 @@ const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
 
 // ============================================
+// UTILIDAD: Parsear decimales con soporte de coma
+// Google Sheets en Perú usa coma como separador decimal
+// ============================================
+function parseDecimal(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return value;
+  const str = String(value).trim().replace(',', '.');
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}
+
+// ============================================
 // ENVIAR MENSAJE A CLIENTE (Asesor)
 // ============================================
 
@@ -310,7 +322,7 @@ router.get('/pedidos/:businessId', async (req, res) => {
         telefono: row[5] || '',
         direccion: row[6] || '',
         productos: row[7] || '',
-        total: parseFloat(row[8]) || 0,
+        total: parseDecimal(row[8]),  // Soporta coma y punto
         estado: estadoPedido,
         voucherUrls: row[10] || '',
         observaciones: row[11] || '',
@@ -319,7 +331,7 @@ router.get('/pedidos/:businessId', async (req, res) => {
         tipoEnvio: row[14] || '',
         metodoEnvio: row[15] || '',
         detalleEnvio: row[16] || '',
-        costoEnvio: parseFloat(row[17]) || 0,
+        costoEnvio: parseDecimal(row[17]),  // Soporta coma y punto
         origen: row[18] || 'APP'
       });
     }
@@ -401,6 +413,10 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const estadoFinal = estado || 'PENDIENTE';
     const origenFinal = origen || 'APP';
 
+    // Parsear totales con soporte de coma
+    const totalNumero = parseDecimal(total);
+    const costoEnvioNumero = parseDecimal(costoEnvio);
+
     // Estructura completa de 19 columnas (A-S)
     const valores = [
       pedidoId,                                              // A: ID
@@ -411,7 +427,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
       telefono || '',                                        // F: Teléfono
       direccion || '',                                       // G: Dirección
       productosStr,                                          // H: Productos (JSON)
-      parseFloat(total) || 0,                                // I: Total
+      totalNumero,                                           // I: Total
       estadoFinal,                                           // J: Estado
       '',                                                    // K: VoucherURLs
       observaciones || '',                                   // L: Observaciones
@@ -420,7 +436,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
       tipoEnvio || '',                                       // O: TipoEnvio
       metodoEnvio || '',                                     // P: MetodoEnvio
       detalleEnvio || '',                                    // Q: DetalleEnvio
-      parseFloat(costoEnvio) || 0,                           // R: CostoEnvio
+      costoEnvioNumero,                                      // R: CostoEnvio
       origenFinal                                            // S: Origen
     ];
 
@@ -439,7 +455,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
         
         const mensaje = `✅ *Pedido Registrado*\n\n` +
           `📦 Pedido: *${pedidoId}*\n` +
-          `💰 Total: *S/ ${parseFloat(total).toFixed(2)}*\n` +
+          `💰 Total: *S/ ${totalNumero.toFixed(2)}*\n` +
           `📝 Productos: ${productosMsg}\n\n` +
           `¡Gracias por tu compra! Te avisaremos cuando esté listo.`;
         
@@ -462,7 +478,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
         whatsapp,
         cliente,
         productos: productosStr,
-        total: parseFloat(total) || 0,
+        total: totalNumero,
         estado: estadoFinal,
         origen: origenFinal
       }
@@ -1151,8 +1167,8 @@ router.post('/productos/:businessId', async (req, res) => {
       return res.status(400).json({ error: 'Ya existe un producto con ese código' });
     }
 
-    // IMPORTANTE: Asegurar que precio sea número decimal
-    const precioNumero = parseFloat(precio);
+    // IMPORTANTE: Asegurar que precio sea número decimal (soporta coma)
+    const precioNumero = parseDecimal(precio);
     const stockNumero = parseInt(stock) || 0;
 
     console.log(`💰 Creando producto: ${nombre} - Precio: ${precioNumero} (original: ${precio})`);
@@ -1216,9 +1232,9 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
         if (nombre !== undefined) updates.push({ range: `Inventario!B${i + 1}`, value: nombre });
         if (descripcion !== undefined) updates.push({ range: `Inventario!C${i + 1}`, value: descripcion });
         
-        // IMPORTANTE: Asegurar que precio sea número decimal
+        // IMPORTANTE: Asegurar que precio sea número decimal (soporta coma)
         if (precio !== undefined) {
-          const precioNumero = parseFloat(precio);
+          const precioNumero = parseDecimal(precio);
           console.log(`💰 Actualizando precio: ${precioNumero} (original: ${precio})`);
           updates.push({ range: `Inventario!D${i + 1}`, value: precioNumero });
         }
@@ -1408,7 +1424,7 @@ router.post('/productos/:businessId/importar', async (req, res) => {
             if (rows[i][0] === prod.codigo) {
               const updates = [];
               if (prod.nombre) updates.push({ range: `Inventario!B${i + 1}`, value: prod.nombre });
-              if (prod.precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: parseFloat(prod.precio) });
+              if (prod.precio !== undefined) updates.push({ range: `Inventario!D${i + 1}`, value: parseDecimal(prod.precio) });
               if (prod.stock !== undefined) updates.push({ range: `Inventario!E${i + 1}`, value: parseInt(prod.stock) || 0 });
               if (updates.length > 0) await sheets.batchUpdate(updates);
               break;
@@ -1420,7 +1436,7 @@ router.post('/productos/:businessId/importar', async (req, res) => {
             prod.codigo,
             prod.nombre,
             prod.descripcion || '',
-            parseFloat(prod.precio) || 0,
+            parseDecimal(prod.precio),
             parseInt(prod.stock) || 0,
             0,
             prod.imagenUrl || '',
