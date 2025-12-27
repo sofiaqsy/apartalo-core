@@ -75,6 +75,19 @@ class SheetsService {
   }
 
   /**
+   * Formatear valor para Google Sheets
+   * Asegura que los números se envíen correctamente con decimales
+   */
+  formatValueForSheets(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number') {
+      // Forzar formato con punto decimal para números
+      return value;
+    }
+    return value;
+  }
+
+  /**
    * Agregar fila al final de una hoja
    * IMPORTANTE: Usa rango A1 para asegurar que siempre empiece desde columna A
    */
@@ -82,13 +95,16 @@ class SheetsService {
     if (!this.initialized) return false;
 
     try {
+      // Formatear todos los valores
+      const formattedValues = values.map(v => this.formatValueForSheets(v));
+      
       // Usar rango A1 notation específico para forzar inserción desde columna A
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
         range: `${sheetName}!A1`,
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: 'RAW', // Cambiado a RAW para preservar números exactos
         insertDataOption: 'INSERT_ROWS',
-        resource: { values: [values] }
+        resource: { values: [formattedValues] }
       });
       console.log(`✅ Fila agregada a ${sheetName} con ${values.length} columnas`);
       return true;
@@ -105,11 +121,13 @@ class SheetsService {
     if (!this.initialized) return false;
 
     try {
+      const formattedValue = this.formatValueForSheets(value);
+      
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
         range,
-        valueInputOption: 'USER_ENTERED',
-        resource: { values: [[value]] }
+        valueInputOption: 'RAW', // Cambiado a RAW para preservar números exactos
+        resource: { values: [[formattedValue]] }
       });
       return true;
     } catch (error) {
@@ -130,9 +148,9 @@ class SheetsService {
         resource: {
           data: updates.map(u => ({
             range: u.range,
-            values: [[u.value]]
+            values: [[this.formatValueForSheets(u.value)]]
           })),
-          valueInputOption: 'USER_ENTERED'
+          valueInputOption: 'RAW' // Cambiado a RAW para preservar números exactos
         }
       });
       return true;
@@ -270,7 +288,7 @@ class SheetsService {
       datosPedido.telefono || '',                  // F: Teléfono
       datosPedido.direccion || '',                 // G: Dirección
       datosPedido.productos || '',                 // H: Productos (JSON o texto)
-      datosPedido.total || 0,                      // I: Total
+      parseFloat(datosPedido.total) || 0,          // I: Total (asegurar número)
       datosPedido.estado || config.orderStates.PENDING_PAYMENT, // J: Estado
       '',                                          // K: VoucherURLs
       datosPedido.observaciones || '',             // L: Observaciones
@@ -279,7 +297,7 @@ class SheetsService {
       datosPedido.tipoEnvio || '',                 // O: TipoEnvio
       datosPedido.metodoEnvio || '',               // P: MetodoEnvio
       datosPedido.detalleEnvio || '',              // Q: DetalleEnvio
-      datosPedido.costoEnvio || 0,                 // R: CostoEnvio
+      parseFloat(datosPedido.costoEnvio) || 0,     // R: CostoEnvio (asegurar número)
       datosPedido.origen || 'APP'                  // S: Origen
     ];
 
