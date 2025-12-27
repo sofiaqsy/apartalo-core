@@ -53,6 +53,48 @@ class SheetsService {
   }
 
   // ============================================
+  // UTILIDADES DE CONVERSIÓN
+  // ============================================
+
+  /**
+   * Parsear número decimal desde string (soporta coma y punto)
+   * Google Sheets en configuración regional Perú usa coma como decimal
+   */
+  parseDecimal(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'number') return value;
+    
+    // Convertir a string y reemplazar coma por punto
+    const str = String(value).trim().replace(',', '.');
+    const num = parseFloat(str);
+    return isNaN(num) ? 0 : num;
+  }
+
+  /**
+   * Parsear entero desde string
+   */
+  parseInt(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'number') return Math.floor(value);
+    
+    const str = String(value).trim().replace(',', '.');
+    const num = parseInt(str, 10);
+    return isNaN(num) ? 0 : num;
+  }
+
+  /**
+   * Formatear valor para Google Sheets
+   * Asegura que los números se envíen correctamente con decimales
+   */
+  formatValueForSheets(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number') {
+      return value;
+    }
+    return value;
+  }
+
+  // ============================================
   // OPERACIONES GENÉRICAS
   // ============================================
 
@@ -75,19 +117,6 @@ class SheetsService {
   }
 
   /**
-   * Formatear valor para Google Sheets
-   * Asegura que los números se envíen correctamente con decimales
-   */
-  formatValueForSheets(value) {
-    if (value === null || value === undefined) return '';
-    if (typeof value === 'number') {
-      // Forzar formato con punto decimal para números
-      return value;
-    }
-    return value;
-  }
-
-  /**
    * Agregar fila al final de una hoja
    * IMPORTANTE: Usa rango A1 para asegurar que siempre empiece desde columna A
    */
@@ -102,7 +131,7 @@ class SheetsService {
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
         range: `${sheetName}!A1`,
-        valueInputOption: 'RAW', // Cambiado a RAW para preservar números exactos
+        valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         resource: { values: [formattedValues] }
       });
@@ -126,7 +155,7 @@ class SheetsService {
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
         range,
-        valueInputOption: 'RAW', // Cambiado a RAW para preservar números exactos
+        valueInputOption: 'RAW',
         resource: { values: [[formattedValue]] }
       });
       return true;
@@ -150,7 +179,7 @@ class SheetsService {
             range: u.range,
             values: [[this.formatValueForSheets(u.value)]]
           })),
-          valueInputOption: 'RAW' // Cambiado a RAW para preservar números exactos
+          valueInputOption: 'RAW'
         }
       });
       return true;
@@ -288,7 +317,7 @@ class SheetsService {
       datosPedido.telefono || '',                  // F: Teléfono
       datosPedido.direccion || '',                 // G: Dirección
       datosPedido.productos || '',                 // H: Productos (JSON o texto)
-      parseFloat(datosPedido.total) || 0,          // I: Total (asegurar número)
+      this.parseDecimal(datosPedido.total),        // I: Total (asegurar número)
       datosPedido.estado || config.orderStates.PENDING_PAYMENT, // J: Estado
       '',                                          // K: VoucherURLs
       datosPedido.observaciones || '',             // L: Observaciones
@@ -297,7 +326,7 @@ class SheetsService {
       datosPedido.tipoEnvio || '',                 // O: TipoEnvio
       datosPedido.metodoEnvio || '',               // P: MetodoEnvio
       datosPedido.detalleEnvio || '',              // Q: DetalleEnvio
-      parseFloat(datosPedido.costoEnvio) || 0,     // R: CostoEnvio (asegurar número)
+      this.parseDecimal(datosPedido.costoEnvio),   // R: CostoEnvio (asegurar número)
       datosPedido.origen || 'APP'                  // S: Origen
     ];
 
@@ -323,6 +352,7 @@ class SheetsService {
   /**
    * Parsear fila de pedido a objeto
    * Estructura: A-S (19 columnas)
+   * NOTA: Usa parseDecimal para manejar coma como separador decimal
    */
   parsePedidoRow(row, rowIndex) {
     return {
@@ -334,7 +364,7 @@ class SheetsService {
       telefono: row[5] || '',
       direccion: row[6] || '',
       productos: row[7] || '',
-      total: parseFloat(row[8]) || 0,
+      total: this.parseDecimal(row[8]),
       estado: row[9] || '',
       voucherUrls: row[10] || '',
       observaciones: row[11] || '',
@@ -343,7 +373,7 @@ class SheetsService {
       tipoEnvio: row[14] || '',
       metodoEnvio: row[15] || '',
       detalleEnvio: row[16] || '',
-      costoEnvio: parseFloat(row[17]) || 0,
+      costoEnvio: this.parseDecimal(row[17]),
       origen: row[18] || 'APP',
       rowIndex
     };
@@ -356,6 +386,7 @@ class SheetsService {
   /**
    * Obtener productos activos
    * Estructura: Codigo, Nombre, Descripcion, Precio, Stock, StockReservado, ImagenUrl, Estado, Categoria
+   * NOTA: Usa parseDecimal para manejar coma como separador decimal (formato regional Perú)
    */
   async getProductos(estado = null) {
     const rows = await this.getRows(this.spreadsheetId, 'Inventario!A:I');
@@ -371,17 +402,20 @@ class SheetsService {
       if (productoEstado === 'ELIMINADO') continue;
 
       if (!estado || productoEstado === estado) {
+        const stock = this.parseInt(row[4]);
+        const stockReservado = this.parseInt(row[5]);
+        
         productos.push({
           codigo: row[0] || '',
           nombre: row[1] || '',
           descripcion: row[2] || '',
-          precio: parseFloat(row[3]) || 0,
-          stock: parseInt(row[4]) || 0,
-          stockReservado: parseInt(row[5]) || 0,
+          precio: this.parseDecimal(row[3]),  // Soporta coma y punto
+          stock: stock,
+          stockReservado: stockReservado,
           imagenUrl: row[6] || '',
           estado: productoEstado,
           categoria: row[8] || '',
-          disponible: (parseInt(row[4]) || 0) - (parseInt(row[5]) || 0),
+          disponible: stock - stockReservado,
           rowIndex: i + 1
         });
       }
