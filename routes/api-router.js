@@ -26,6 +26,41 @@ function parseDecimal(value) {
 }
 
 // ============================================
+// UTILIDAD: Obtener fecha/hora en zona horaria de Perú (UTC-5)
+// ============================================
+function getPeruDate() {
+  const now = new Date();
+  // Perú es UTC-5 (no tiene horario de verano)
+  const peruOffset = -5 * 60; // -5 horas en minutos
+  const utcOffset = now.getTimezoneOffset(); // Offset del servidor en minutos
+  const peruTime = new Date(now.getTime() + (utcOffset + peruOffset) * 60000);
+  return peruTime;
+}
+
+function formatPeruDate(date) {
+  const d = date || getPeruDate();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function formatPeruTime(date) {
+  const d = date || getPeruDate();
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'p.\u00a0m.' : 'a.\u00a0m.';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // 0 should be 12
+  return `${hours}:${minutes} ${ampm}`;
+}
+
+function formatPeruDateTime(date) {
+  const d = date || getPeruDate();
+  return `${formatPeruDate(d)} ${formatPeruTime(d)}`;
+}
+
+// ============================================
 // ENVIAR MENSAJE A CLIENTE (Asesor)
 // ============================================
 
@@ -54,7 +89,7 @@ router.post('/mensaje', async (req, res) => {
       const sheets = new SheetsService(negocio.spreadsheetId);
       await sheets.initialize();
 
-      const timestamp = new Date().toISOString();
+      const timestamp = getPeruDate().toISOString();
       const msgId = `MSG-${Date.now()}`;
 
       await sheets.appendRow('Mensajes', [
@@ -71,7 +106,7 @@ router.post('/mensaje', async (req, res) => {
       success: true,
       messageId: result.messages?.[0]?.id,
       to,
-      timestamp: new Date().toISOString()
+      timestamp: getPeruDate().toISOString()
     });
 
   } catch (error) {
@@ -399,7 +434,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
 
     // Generar ID de pedido
     const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
-    const ahora = new Date();
+    const ahora = getPeruDate();
 
     // Formatear productos para guardar
     let productosStr = '';
@@ -420,8 +455,8 @@ router.post('/pedidos/:businessId', async (req, res) => {
     // Estructura completa de 19 columnas (A-S)
     const valores = [
       pedidoId,                                              // A: ID
-      ahora.toLocaleDateString('es-PE'),                     // B: Fecha
-      ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }), // C: Hora
+      formatPeruDate(ahora),                                 // B: Fecha (hora Perú)
+      formatPeruTime(ahora),                                 // C: Hora (hora Perú)
       (whatsapp || '').toString().replace(/[^0-9]/g, ''),    // D: WhatsApp
       cliente || '',                                         // E: Cliente
       telefono || '',                                        // F: Teléfono
@@ -466,15 +501,15 @@ router.post('/pedidos/:businessId', async (req, res) => {
       }
     }
 
-    console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal}`);
+    console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal} - ${formatPeruTime(ahora)}`);
 
     res.status(201).json({
       success: true,
       mensaje: 'Pedido creado',
       pedido: {
         id: pedidoId,
-        fecha: ahora.toLocaleDateString('es-PE'),
-        hora: ahora.toLocaleTimeString('es-PE'),
+        fecha: formatPeruDate(ahora),
+        hora: formatPeruTime(ahora),
         whatsapp,
         cliente,
         productos: productosStr,
@@ -716,7 +751,7 @@ router.post('/clientes/:businessId', async (req, res) => {
     }
 
     const clienteId = `CLI-${Date.now().toString().slice(-6)}`;
-    const fechaHoy = new Date().toLocaleDateString('es-PE');
+    const fechaHoy = formatPeruDate();
 
     const valores = [
       clienteId,
@@ -878,7 +913,7 @@ router.post('/clientes/:businessId/importar', async (req, res) => {
         }
 
         const clienteId = `CLI-${Date.now().toString().slice(-6)}${Math.random().toString(36).slice(-2)}`;
-        const fechaHoy = new Date().toLocaleDateString('es-PE');
+        const fechaHoy = formatPeruDate();
 
         await sheets.appendRow('Clientes', [
           clienteId,
@@ -1045,7 +1080,7 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const fechaHoy = new Date().toLocaleDateString('es-PE');
+    const fechaHoy = formatPeruDate();
     const usuarioFinal = usuario || 'APP';
 
     // Leer precios existentes
@@ -1513,7 +1548,7 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
         try {
           await sheets.appendRow('MovimientosStock', [
             `MOV-${Date.now()}`,
-            new Date().toISOString(),
+            getPeruDate().toISOString(),
             codigo,
             rows[i][1],
             operacion,
