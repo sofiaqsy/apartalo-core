@@ -964,6 +964,166 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
 });
 
 // ============================================
+// PRECIOS PERSONALIZADOS POR CLIENTE
+// Hoja: PreciosClientes
+// A: clienteId, B: codigoProducto, C: precioPersonalizado, D: fechaActualizacion, E: actualizadoPor
+// ============================================
+
+/**
+ * GET /api/precios-cliente/:businessId/:clienteId
+ * Obtener precios personalizados de un cliente
+ */
+router.get('/precios-cliente/:businessId/:clienteId', async (req, res) => {
+  try {
+    const { businessId, clienteId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    // Leer hoja PreciosClientes
+    let rows = [];
+    try {
+      rows = await sheets.getRows(negocio.spreadsheetId, 'PreciosClientes!A:E');
+    } catch (e) {
+      // Hoja no existe, retornar vacío
+      return res.json({
+        clienteId,
+        precios: {},
+        total: 0
+      });
+    }
+
+    // Buscar precios del cliente
+    const precios = {};
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (row[0] === clienteId && row[1] && row[2]) {
+        precios[row[1]] = {
+          precio: parseDecimal(row[2]),
+          fechaActualizacion: row[3] || '',
+          actualizadoPor: row[4] || ''
+        };
+      }
+    }
+
+    res.json({
+      clienteId,
+      precios,
+      total: Object.keys(precios).length
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo precios cliente:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/precios-cliente/:businessId/:clienteId
+ * Guardar/actualizar precios personalizados de un cliente
+ * Body: { precios: { "CODIGO1": 65.00, "CODIGO2": 120.00, ... }, usuario?: string }
+ */
+router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
+  try {
+    const { businessId, clienteId } = req.params;
+    const { precios, usuario } = req.body;
+
+    if (!precios || typeof precios !== 'object') {
+      return res.status(400).json({ error: 'Campo requerido: precios (objeto con codigoProducto: precio)' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const fechaHoy = new Date().toLocaleDateString('es-PE');
+    const usuarioFinal = usuario || 'APP';
+
+    // Leer precios existentes
+    let rows = [];
+    try {
+      rows = await sheets.getRows(negocio.spreadsheetId, 'PreciosClientes!A:E');
+    } catch (e) {
+      // Hoja no existe o está vacía
+      rows = [['clienteId', 'codigoProducto', 'precioPersonalizado', 'fechaActualizacion', 'actualizadoPor']];
+    }
+
+    // Crear mapa de filas existentes para este cliente
+    const filasExistentes = {};
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === clienteId && rows[i][1]) {
+        filasExistentes[rows[i][1]] = i + 1; // rowNumber (1-indexed)
+      }
+    }
+
+    const updates = [];
+    const nuevosRegistros = [];
+    let actualizados = 0;
+    let creados = 0;
+
+    // Procesar cada precio
+    for (const [codigoProducto, precio] of Object.entries(precios)) {
+      const precioNumero = parseDecimal(precio);
+      
+      if (filasExistentes[codigoProducto]) {
+        // Actualizar registro existente
+        const rowNum = filasExistentes[codigoProducto];
+        updates.push({ range: `PreciosClientes!C${rowNum}`, value: precioNumero });
+        updates.push({ range: `PreciosClientes!D${rowNum}`, value: fechaHoy });
+        updates.push({ range: `PreciosClientes!E${rowNum}`, value: usuarioFinal });
+        actualizados++;
+      } else {
+        // Crear nuevo registro
+        nuevosRegistros.push([
+          clienteId,
+          codigoProducto,
+          precioNumero,
+          fechaHoy,
+          usuarioFinal
+        ]);
+        creados++;
+      }
+    }
+
+    // Ejecutar actualizaciones
+    if (updates.length > 0) {
+      await sheets.batchUpdate(updates);
+    }
+
+    // Agregar nuevos registros
+    for (const registro of nuevosRegistros) {
+      await sheets.appendRow('PreciosClientes', registro);
+    }
+
+    console.log(`✅ Precios guardados para ${clienteId}: ${actualizados} actualizados, ${creados} creados`);
+
+    res.json({
+      success: true,
+      mensaje: 'Precios guardados',
+      clienteId,
+      resumen: {
+        actualizados,
+        creados,
+        total: actualizados + creados
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error guardando precios cliente:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // NEGOCIOS
 // ============================================
 
