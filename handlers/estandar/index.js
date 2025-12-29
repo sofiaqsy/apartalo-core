@@ -2,12 +2,16 @@
  * APARTALO CORE - Handler Estándar
  * 
  * Flujo de conversación por defecto para negocios
- * sin personalización (live commerce, catálogo web)
+ * Ahora con IA para respuestas más cálidas e inteligentes
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
 const { detectarDepartamento } = require('../../core/utils/ciudades');
+const aiService = require('../../core/services/ai-service');
 const config = require('../../config');
+
+// Inicializar IA al cargar
+aiService.initialize().catch(console.error);
 
 /**
  * Manejar mensaje entrante
@@ -17,20 +21,21 @@ async function handle(from, message, context) {
   const { text, type, interactiveData } = message;
 
   const state = stateManager.getState(from, negocio.id);
-  const mensajeLimpio = (text || '').trim().toLowerCase();
+  const mensajeLimpio = (text || '').trim();
+  const mensajeNormalizado = mensajeLimpio.toLowerCase();
 
   console.log(`   Estado: ${state.step}`);
   console.log(`   Negocio: ${negocio.nombre}`);
 
   // Comandos globales
-  if (mensajeLimpio === 'menu' || mensajeLimpio === 'menú' || mensajeLimpio === 'inicio') {
+  if (mensajeNormalizado === 'menu' || mensajeNormalizado === 'menú' || mensajeNormalizado === 'inicio') {
     stateManager.resetState(from, negocio.id);
     return await mostrarMenuPrincipal(from, context);
   }
 
-  if (mensajeLimpio === 'cancelar') {
+  if (mensajeNormalizado === 'cancelar') {
     stateManager.resetState(from, negocio.id);
-    await whatsapp.sendMessage(from, 'Operación cancelada.');
+    await whatsapp.sendMessage(from, 'Operación cancelada. ¿En qué más te puedo ayudar? 😊');
     return await mostrarMenuPrincipal(from, context);
   }
 
@@ -42,10 +47,10 @@ async function handle(from, message, context) {
   // Flujo según estado
   switch (state.step) {
     case 'inicio':
-      return await mostrarMenuPrincipal(from, context);
+      return await manejarMensajeInicial(from, mensajeLimpio, context);
 
     case 'menu':
-      return await manejarMenu(from, text, context);
+      return await manejarMenu(from, text, interactiveData, context);
 
     case 'seleccion_producto':
       return await manejarSeleccionProducto(from, text, context);
@@ -54,7 +59,7 @@ async function handle(from, message, context) {
       return await manejarCantidad(from, text, context);
 
     case 'confirmar_pedido':
-      return await manejarConfirmacion(from, text, context);
+      return await manejarConfirmacion(from, text, interactiveData, context);
 
     case 'datos_nombre':
       return await manejarDatosNombre(from, text, context);
@@ -71,12 +76,122 @@ async function handle(from, message, context) {
     case 'esperando_voucher':
       return await manejarVoucher(from, message, context);
 
-    case 'seleccion_envio':
-      return await manejarSeleccionEnvio(from, text, context);
-
     default:
-      return await mostrarMenuPrincipal(from, context);
+      // Si no está en un flujo conocido, usar IA
+      return await manejarMensajeInicial(from, mensajeLimpio, context);
   }
+}
+
+// ============================================
+// MANEJO INTELIGENTE DE MENSAJES
+// ============================================
+
+async function manejarMensajeInicial(from, mensaje, context) {
+  const { whatsapp, sheets, stateManager, negocio } = context;
+  
+  // Obtener productos para contexto
+  const productos = await sheets.getProductos('PUBLICADO');
+  
+  // Usar IA para entender el mensaje
+  const resultado = await aiService.procesarMensaje(mensaje, {
+    negocio,
+    productos,
+    estadoActual: 'inicio'
+  });
+
+  console.log(`   🤖 IA: accion=${resultado.accion}`);
+
+  // Ejecutar acción según lo que entendió la IA
+  switch (resultado.accion) {
+    case 'ver_catalogo':
+      if (resultado.respuesta) {
+        await whatsapp.sendMessage(from, resultado.respuesta);
+      }
+      return await mostrarCatalogo(from, context);
+
+    case 'buscar_producto':
+      if (resultado.datos?.producto) {
+        // Si encontró un producto específico
+        await whatsapp.sendMessage(from, resultado.respuesta);
+        stateManager.setState(from, negocio.id, {
+          step: 'cantidad',
+          data: { productoSeleccionado: resultado.datos.producto, productos }
+        });
+        return;
+      }
+      // Si solo tiene término de búsqueda
+      return await buscarProducto(from, resultado.datos?.buscar || mensaje, context);
+
+    case 'contactar':
+      await whatsapp.sendMessage(from, resultado.respuesta || 'Te conecto con alguien del equipo 👤');
+      await whatsapp.sendMessage(from, 
+        `📱 *${negocio.nombre}*\n\n` +
+        `Puedes escribir tu consulta y te responderemos pronto.\n\n` +
+        `⏰ Horario de atención: Lun-Sab 9am-6pm\n\n` +
+        `_Escribe "menu" para volver al inicio_`
+      );
+      return;
+
+    case 'menu':
+      return await mostrarMenuPrincipal(from, context);
+
+    case 'continuar':
+    default:
+      // Solo enviar respuesta cálida de la IA
+      await whatsapp.sendMessage(from, resultado.respuesta);
+      
+      // Si es saludo o ayuda, mostrar opciones
+      if (/hola|ayuda|help/.test(mensaje.toLowerCase())) {
+        return await mostrarMenuPrincipal(from, context);
+      }
+      return;
+  }
+}
+
+async function buscarProducto(from, termino, context) {
+  const { whatsapp, sheets, stateManager, negocio } = context;
+  
+  const productos = await sheets.getProductos('PUBLICADO');
+  const encontrados = productos.filter(p => 
+    p.nombre.toLowerCase().includes(termino.toLowerCase())
+  );
+
+  if (encontrados.length === 0) {
+    await whatsapp.sendMessage(from, 
+      `No encontré "${termino}" 😅\n\n` +
+      `Te muestro lo que tenemos disponible:`
+    );
+    return await mostrarCatalogo(from, context);
+  }
+
+  if (encontrados.length === 1) {
+    const producto = encontrados[0];
+    await whatsapp.sendMessage(from, 
+      `¡Encontré esto! 🎉\n\n` +
+      `*${producto.nombre}*\n` +
+      `💰 ${formatPrice(producto.precio)}\n` +
+      `📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n` +
+      `¿Cuántas unidades deseas?`
+    );
+    stateManager.setState(from, negocio.id, {
+      step: 'cantidad',
+      data: { productoSeleccionado: producto, productos }
+    });
+    return;
+  }
+
+  // Múltiples resultados
+  let mensaje = `Encontré ${encontrados.length} productos:\n\n`;
+  encontrados.slice(0, 5).forEach((p, i) => {
+    mensaje += `*${i + 1}.* ${p.nombre} - ${formatPrice(p.precio)}\n`;
+  });
+  mensaje += `\nEscribe el *número* del que quieres:`;
+
+  await whatsapp.sendMessage(from, mensaje);
+  stateManager.setState(from, negocio.id, {
+    step: 'seleccion_producto',
+    data: { productos: encontrados }
+  });
 }
 
 // ============================================
@@ -101,10 +216,10 @@ async function mostrarMenuPrincipal(from, context) {
 
   if (!cliente && pedidosActivos.length === 0) {
     // Cliente nuevo
-    mensaje = `${saludo}! 👋\n\nBienvenido a *${negocio.nombre}*\n\n¿Qué deseas hacer?`;
+    mensaje = `${saludo}! 👋\n\nBienvenido a *${negocio.nombre}*\n\n¿En qué te puedo ayudar?`;
     botones = [
-      { id: 'ver_catalogo', title: 'Ver catálogo' },
-      { id: 'contactar', title: 'Contactar' }
+      { id: 'ver_catalogo', title: 'Ver catálogo 📦' },
+      { id: 'contactar', title: 'Contactar 💬' }
     ];
   } else if (pedidosActivos.length > 0) {
     // Cliente con pedidos activos
@@ -114,16 +229,17 @@ async function mostrarMenuPrincipal(from, context) {
     });
     mensaje += `\n¿Qué deseas hacer?`;
     botones = [
-      { id: 'ver_pedidos', title: 'Ver pedidos' },
-      { id: 'ver_catalogo', title: 'Nuevo pedido' }
+      { id: 'ver_pedidos', title: 'Ver pedidos 📋' },
+      { id: 'ver_catalogo', title: 'Nuevo pedido 🛒' }
     ];
   } else {
     // Cliente recurrente sin pedidos activos
-    mensaje = `${saludo}! 👋\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué deseas hacer?`;
+    const nombreCliente = cliente?.nombre?.split(' ')[0] || '';
+    mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}! 👋\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
     botones = [
-      { id: 'ver_catalogo', title: 'Ver catálogo' },
-      { id: 'repetir_pedido', title: 'Repetir pedido' },
-      { id: 'contactar', title: 'Contactar' }
+      { id: 'ver_catalogo', title: 'Ver catálogo 📦' },
+      { id: 'repetir_pedido', title: 'Repetir pedido 🔄' },
+      { id: 'contactar', title: 'Contactar 💬' }
     ];
   }
 
@@ -131,11 +247,13 @@ async function mostrarMenuPrincipal(from, context) {
   stateManager.setStep(from, negocio.id, 'menu');
 }
 
-async function manejarMenu(from, text, context) {
-  const { whatsapp, stateManager, negocio } = context;
-  const opcion = text.toLowerCase();
+async function manejarMenu(from, text, interactiveData, context) {
+  const { whatsapp, sheets, stateManager, negocio } = context;
+  
+  // Priorizar respuesta de botones
+  const opcion = interactiveData?.id || text?.toLowerCase() || '';
 
-  if (opcion.includes('catálogo') || opcion.includes('catalogo') || opcion === 'ver_catalogo') {
+  if (opcion.includes('catalogo') || opcion.includes('catálogo') || opcion === 'ver_catalogo') {
     return await mostrarCatalogo(from, context);
   }
 
@@ -149,16 +267,16 @@ async function manejarMenu(from, text, context) {
 
   if (opcion.includes('contactar') || opcion === 'contactar') {
     await whatsapp.sendMessage(from, 
-      `*${negocio.nombre}*\n\n` +
-      `📱 WhatsApp: Este número\n` +
+      `📱 *${negocio.nombre}*\n\n` +
+      `Escribe tu consulta y te responderemos pronto 😊\n\n` +
       `⏰ Horario: Lun-Sab 9am-6pm\n\n` +
-      `Escribe tu consulta y te responderemos pronto.`
+      `_Escribe "menu" para volver al inicio_`
     );
     return;
   }
 
-  // Si no reconoce, mostrar menú de nuevo
-  return await mostrarMenuPrincipal(from, context);
+  // Si no es un comando conocido, usar IA
+  return await manejarMensajeInicial(from, text, context);
 }
 
 // ============================================
@@ -171,18 +289,24 @@ async function mostrarCatalogo(from, context) {
   const productos = await sheets.getProductos('PUBLICADO');
 
   if (productos.length === 0) {
-    await whatsapp.sendMessage(from, 'No hay productos disponibles en este momento.');
+    await whatsapp.sendMessage(from, 'No hay productos disponibles en este momento 😅\n\nVuelve pronto!');
     return await mostrarMenuPrincipal(from, context);
   }
 
-  let mensaje = `*📦 CATÁLOGO ${negocio.nombre.toUpperCase()}*\n\n`;
+  let mensaje = `📦 *CATÁLOGO ${negocio.nombre.toUpperCase()}*\n\n`;
 
   productos.slice(0, 10).forEach((p, i) => {
+    const stock = p.disponible || p.stock || 0;
+    const stockInfo = stock > 0 ? `✅ ${stock} disp.` : '⚠️ Agotado';
     mensaje += `*${i + 1}.* ${p.nombre}\n`;
-    mensaje += `   ${formatPrice(p.precio)} | Stock: ${p.disponible}\n\n`;
+    mensaje += `   ${formatPrice(p.precio)} | ${stockInfo}\n\n`;
   });
 
-  mensaje += `\nEscribe el *número* del producto que deseas:`;
+  if (productos.length > 10) {
+    mensaje += `_...y ${productos.length - 10} productos más_\n\n`;
+  }
+
+  mensaje += `Escribe el *número* del producto que te interesa 👇`;
 
   await whatsapp.sendMessage(from, mensaje);
 
@@ -193,14 +317,19 @@ async function mostrarCatalogo(from, context) {
 }
 
 async function manejarSeleccionProducto(from, text, context) {
-  const { whatsapp, stateManager, negocio } = context;
+  const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
   const productos = state.data?.productos || [];
 
   const numero = parseInt(text);
 
-  if (isNaN(numero) || numero < 1 || numero > productos.length) {
-    await whatsapp.sendMessage(from, 'Por favor, ingresa un número válido del catálogo.');
+  // Si no es número, intentar buscar por nombre con IA
+  if (isNaN(numero)) {
+    return await manejarMensajeInicial(from, text, context);
+  }
+
+  if (numero < 1 || numero > productos.length) {
+    await whatsapp.sendMessage(from, `Por favor, elige un número del 1 al ${productos.length} 😊`);
     return;
   }
 
@@ -210,8 +339,8 @@ async function manejarSeleccionProducto(from, text, context) {
   let mensaje = `*${producto.nombre}*\n\n`;
   if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
   mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
-  mensaje += `📦 Disponible: ${producto.disponible} unidades\n\n`;
-  mensaje += `¿Cuántas unidades deseas?`;
+  mensaje += `📦 Disponible: ${producto.disponible || producto.stock || 'Sí'} unidades\n\n`;
+  mensaje += `¿Cuántas unidades deseas? 🛒`;
 
   await whatsapp.sendMessage(from, mensaje);
 
@@ -220,34 +349,41 @@ async function manejarSeleccionProducto(from, text, context) {
 }
 
 async function manejarCantidad(from, text, context) {
-  const { whatsapp, stateManager, negocio } = context;
+  const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
   const producto = state.data?.productoSeleccionado;
+
+  if (!producto) {
+    return await mostrarCatalogo(from, context);
+  }
 
   const cantidad = parseInt(text);
 
   if (isNaN(cantidad) || cantidad < 1) {
-    await whatsapp.sendMessage(from, 'Por favor, ingresa una cantidad válida (mínimo 1).');
+    await whatsapp.sendMessage(from, 'Por favor, ingresa una cantidad válida (mínimo 1) 😊');
     return;
   }
 
-  if (cantidad > producto.disponible) {
-    await whatsapp.sendMessage(from, `Solo hay ${producto.disponible} unidades disponibles.`);
+  const disponible = producto.disponible || producto.stock || 999;
+  if (cantidad > disponible) {
+    await whatsapp.sendMessage(from, `Solo tenemos ${disponible} unidades disponibles 😅`);
     return;
   }
 
   const total = cantidad * producto.precio;
 
-  const mensaje = `*RESUMEN DE PEDIDO*\n\n` +
+  const mensaje = `*📋 RESUMEN DE TU PEDIDO*\n\n` +
     `📦 ${producto.nombre}\n` +
     `   Cantidad: ${cantidad}\n` +
     `   Precio: ${formatPrice(producto.precio)} c/u\n\n` +
-    `*TOTAL: ${formatPrice(total)}*\n\n` +
-    `¿Confirmar pedido?`;
+    `━━━━━━━━━━━━━━━━━\n` +
+    `*TOTAL: ${formatPrice(total)}*\n` +
+    `━━━━━━━━━━━━━━━━━\n\n` +
+    `¿Confirmamos tu pedido? 🛒`;
 
   await whatsapp.sendButtonMessage(from, mensaje, [
-    { id: 'confirmar_si', title: 'Sí, confirmar' },
-    { id: 'confirmar_no', title: 'Cancelar' }
+    { id: 'confirmar_si', title: '✅ Sí, confirmar' },
+    { id: 'confirmar_no', title: '❌ Cancelar' }
   ]);
 
   stateManager.updateData(from, negocio.id, { cantidad, total });
@@ -258,18 +394,18 @@ async function manejarCantidad(from, text, context) {
 // CONFIRMACIÓN Y DATOS
 // ============================================
 
-async function manejarConfirmacion(from, text, context) {
+async function manejarConfirmacion(from, text, interactiveData, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
-  const opcion = text.toLowerCase();
+  const opcion = interactiveData?.id || text?.toLowerCase() || '';
 
   if (opcion.includes('no') || opcion === 'confirmar_no') {
     stateManager.resetState(from, negocio.id);
-    await whatsapp.sendMessage(from, 'Pedido cancelado.');
+    await whatsapp.sendMessage(from, 'Pedido cancelado. ¿En qué más te puedo ayudar? 😊');
     return await mostrarMenuPrincipal(from, context);
   }
 
   if (!opcion.includes('sí') && !opcion.includes('si') && opcion !== 'confirmar_si') {
-    await whatsapp.sendMessage(from, 'Por favor, confirma o cancela el pedido.');
+    await whatsapp.sendMessage(from, 'Por favor, confirma o cancela el pedido usando los botones 👆');
     return;
   }
 
@@ -283,8 +419,9 @@ async function manejarConfirmacion(from, text, context) {
 
   // Solicitar datos
   await whatsapp.sendMessage(from, 
-    '*DATOS DE ENVÍO*\n\n' +
-    'Por favor, ingresa tu *nombre completo*:'
+    '*📝 DATOS DE ENVÍO*\n\n' +
+    'Para enviarte tu pedido, necesito algunos datos.\n\n' +
+    '¿Cuál es tu *nombre completo*?'
   );
   stateManager.setStep(from, negocio.id, 'datos_nombre');
 }
@@ -293,13 +430,13 @@ async function manejarDatosNombre(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
 
   if (!text || text.length < 3) {
-    await whatsapp.sendMessage(from, 'Por favor, ingresa un nombre válido.');
+    await whatsapp.sendMessage(from, 'Por favor, ingresa tu nombre completo 😊');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { nombre: text });
   
-  await whatsapp.sendMessage(from, 'Ahora ingresa tu *número de teléfono*:');
+  await whatsapp.sendMessage(from, `Gracias ${text.split(' ')[0]}! 😊\n\nAhora ingresa tu *número de teléfono*:`);
   stateManager.setStep(from, negocio.id, 'datos_telefono');
 }
 
@@ -308,13 +445,13 @@ async function manejarDatosTelefono(from, text, context) {
   const telefono = text.replace(/[^0-9]/g, '');
 
   if (telefono.length < 9) {
-    await whatsapp.sendMessage(from, 'Por favor, ingresa un teléfono válido (9 dígitos).');
+    await whatsapp.sendMessage(from, 'Por favor, ingresa un teléfono válido (9 dígitos) 📱');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { telefono });
   
-  await whatsapp.sendMessage(from, 'Ingresa tu *dirección completa* (con distrito):');
+  await whatsapp.sendMessage(from, '¡Perfecto! 📍\n\nIngresa tu *dirección completa* (con distrito):');
   stateManager.setStep(from, negocio.id, 'datos_direccion');
 }
 
@@ -322,13 +459,13 @@ async function manejarDatosDireccion(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
 
   if (!text || text.length < 10) {
-    await whatsapp.sendMessage(from, 'Por favor, ingresa una dirección más completa.');
+    await whatsapp.sendMessage(from, 'Por favor, ingresa una dirección más completa (incluye distrito) 📍');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { direccion: text });
   
-  await whatsapp.sendMessage(from, '¿En qué *ciudad/distrito* te encuentras?');
+  await whatsapp.sendMessage(from, 'Último dato! 🏙️\n\n¿En qué *ciudad o distrito* te encuentras?');
   stateManager.setStep(from, negocio.id, 'datos_ciudad');
 }
 
@@ -370,7 +507,7 @@ async function crearPedido(from, context, cliente) {
   const reserva = await sheets.reservarStock(productoSeleccionado.codigo, cantidad);
   
   if (!reserva.success) {
-    await whatsapp.sendMessage(from, `❌ ${reserva.error}`);
+    await whatsapp.sendMessage(from, `😅 ${reserva.error}\n\n¿Quieres ver otros productos?`);
     return await mostrarMenuPrincipal(from, context);
   }
 
@@ -393,17 +530,18 @@ async function crearPedido(from, context, cliente) {
   });
 
   if (!pedido) {
-    await whatsapp.sendMessage(from, '❌ Error creando el pedido. Intenta nuevamente.');
+    await whatsapp.sendMessage(from, '😅 Hubo un error creando el pedido. Intenta nuevamente.');
     return;
   }
 
   // Obtener métodos de pago
   const metodosPago = await sheets.getMetodosPago();
   
-  let mensajePago = `✅ *PEDIDO REGISTRADO*\n\n`;
+  let mensajePago = `🎉 *¡PEDIDO REGISTRADO!*\n\n`;
   mensajePago += `📋 Código: *${pedido.id}*\n`;
   mensajePago += `📦 ${productoSeleccionado.nombre} x${cantidad}\n`;
   mensajePago += `💰 Total: *${formatPrice(total)}*\n\n`;
+  mensajePago += `━━━━━━━━━━━━━━━━━\n`;
   mensajePago += `*MÉTODOS DE PAGO:*\n\n`;
 
   metodosPago.forEach(m => {
@@ -418,7 +556,8 @@ async function crearPedido(from, context, cliente) {
     mensajePago += '\n';
   });
 
-  mensajePago += `\n📸 Envía la foto de tu comprobante para confirmar el pedido.`;
+  mensajePago += `━━━━━━━━━━━━━━━━━\n\n`;
+  mensajePago += `📸 *Envía la foto de tu comprobante* para confirmar el pedido.`;
 
   await whatsapp.sendMessage(from, mensajePago);
 
@@ -434,7 +573,7 @@ async function manejarVoucher(from, message, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
   if (message.type !== 'image') {
-    await whatsapp.sendMessage(from, '📸 Por favor, envía una *imagen* de tu comprobante de pago.');
+    await whatsapp.sendMessage(from, '📸 Por favor, envía una *foto* de tu comprobante de pago.');
     return;
   }
 
@@ -445,9 +584,9 @@ async function manejarVoucher(from, message, context) {
   await sheets.updateEstadoPedido(pedidoId, config.orderStates.PENDING_VALIDATION);
 
   await whatsapp.sendMessage(from,
-    `✅ *COMPROBANTE RECIBIDO*\n\n` +
+    `✅ *¡COMPROBANTE RECIBIDO!*\n\n` +
     `Tu pedido *${pedidoId}* está siendo validado.\n\n` +
-    `Te notificaremos cuando sea confirmado.\n\n` +
+    `Te notificaremos cuando sea confirmado 📦\n\n` +
     `¡Gracias por tu compra! 🙏`
   );
 
@@ -464,14 +603,15 @@ async function mostrarPedidos(from, context) {
   const pedidos = await sheets.getPedidosByWhatsapp(from);
   
   if (pedidos.length === 0) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos registrados.');
+    await whatsapp.sendMessage(from, 'No tienes pedidos registrados aún 📭\n\n¿Te gustaría hacer uno?');
     return await mostrarMenuPrincipal(from, context);
   }
 
   let mensaje = `*📋 TUS PEDIDOS*\n\n`;
 
   pedidos.slice(0, 5).forEach(p => {
-    mensaje += `*${p.id}*\n`;
+    const emoji = p.estado === 'ENTREGADO' ? '✅' : p.estado === 'CANCELADO' ? '❌' : '📦';
+    mensaje += `${emoji} *${p.id}*\n`;
     mensaje += `   Estado: ${formatOrderStatus(p.estado)}\n`;
     mensaje += `   Total: ${formatPrice(p.total)}\n`;
     mensaje += `   Fecha: ${p.fecha}\n\n`;
@@ -487,12 +627,13 @@ async function repetirUltimoPedido(from, context) {
   const ultimoPedido = pedidos.find(p => p.estado === 'ENTREGADO');
 
   if (!ultimoPedido) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos anteriores para repetir.');
-    return await mostrarMenuPrincipal(from, context);
+    await whatsapp.sendMessage(from, 'No tienes pedidos anteriores para repetir 😅\n\nTe muestro el catálogo:');
+    return await mostrarCatalogo(from, context);
   }
 
-  await whatsapp.sendMessage(from, 'Función de repetir pedido próximamente disponible.');
-  return await mostrarMenuPrincipal(from, context);
+  // TODO: Implementar repetición de pedido completo
+  await whatsapp.sendMessage(from, '🔄 Función de repetir pedido próximamente disponible.\n\nMientras tanto, te muestro el catálogo:');
+  return await mostrarCatalogo(from, context);
 }
 
 async function procesarPedidoCatalogo(from, items, context) {
@@ -501,9 +642,8 @@ async function procesarPedidoCatalogo(from, items, context) {
   console.log('🛒 Procesando pedido desde catálogo WhatsApp');
   console.log(`   Items: ${items.length}`);
 
-  // Por ahora, mensaje simple
   await whatsapp.sendMessage(from, 
-    `✅ Recibimos tu selección de ${items.length} producto(s).\n\n` +
+    `✅ Recibimos tu selección de ${items.length} producto(s) 🛒\n\n` +
     `Un momento mientras procesamos tu pedido...`
   );
 
