@@ -27,42 +27,33 @@ function parseDecimal(value) {
 
 // ============================================
 // UTILIDAD: Obtener fecha/hora en zona horaria de Perú (UTC-5)
+// Heroku usa UTC, Perú es UTC-5 (5 horas ANTES que UTC)
+// Si en UTC son las 03:50 AM, en Perú son las 10:50 PM del día anterior
 // ============================================
 function getPeruDateTime() {
   const now = new Date();
   
   // Log para debug
   console.log('🕐 DEBUG TIMEZONE:');
-  console.log('   - Server UTC time:', now.toISOString());
-  console.log('   - Server local time:', now.toString());
+  console.log('   - UTC ISO:', now.toISOString());
+  console.log('   - UTC Hours:', now.getUTCHours(), ':', now.getUTCMinutes());
   
-  // Método 1: Usar toLocaleString con timezone
-  const peruDateStr = now.toLocaleString('es-PE', { 
-    timeZone: 'America/Lima',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  });
-  console.log('   - Peru toLocaleString:', peruDateStr);
+  // Calcular hora de Perú: restar 5 horas a UTC
+  const peruTime = new Date(now.getTime() - (5 * 60 * 60 * 1000));
   
-  // Método 2: Calcular manualmente UTC-5
-  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const peruTime = new Date(utcTime - (5 * 60 * 60000)); // UTC-5
-  console.log('   - Peru manual calc:', peruTime.toString());
+  console.log('   - Peru Time:', peruTime.toISOString());
+  console.log('   - Peru Hours:', peruTime.getUTCHours(), ':', peruTime.getUTCMinutes());
   
-  // Extraer partes usando el método manual (más confiable en Node.js)
-  const day = String(peruTime.getDate()).padStart(2, '0');
-  const month = String(peruTime.getMonth() + 1).padStart(2, '0');
-  const year = peruTime.getFullYear();
+  // Extraer partes usando UTC (porque ya ajustamos la hora)
+  const day = String(peruTime.getUTCDate()).padStart(2, '0');
+  const month = String(peruTime.getUTCMonth() + 1).padStart(2, '0');
+  const year = peruTime.getUTCFullYear();
   
-  let hours = peruTime.getHours();
-  const minutes = String(peruTime.getMinutes()).padStart(2, '0');
+  let hours = peruTime.getUTCHours();
+  const minutes = String(peruTime.getUTCMinutes()).padStart(2, '0');
   const ampm = hours >= 12 ? 'p. m.' : 'a. m.';
   hours = hours % 12;
-  hours = hours ? hours : 12;
+  hours = hours ? hours : 12; // 0 debe ser 12
   
   const fecha = `${day}/${month}/${year}`;
   const hora = `${hours}:${minutes} ${ampm}`;
@@ -457,7 +448,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
     
     // Obtener fecha y hora en zona horaria de Perú
-    console.log('📦 Creando pedido - obteniendo hora Perú...');
+    console.log('📦 Creando pedido - calculando hora Perú...');
     const { fecha: fechaPeru, hora: horaPeru } = getPeruDateTime();
 
     // Formatear productos para guardar
@@ -499,7 +490,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
       origenFinal                                            // S: Origen
     ];
 
-    console.log('📦 Valores a guardar - Fecha:', fechaPeru, '- Hora:', horaPeru);
+    console.log('📦 Guardando pedido - Fecha:', fechaPeru, '- Hora:', horaPeru);
 
     await sheets.appendRow('Pedidos', valores);
 
