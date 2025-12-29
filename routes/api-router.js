@@ -27,37 +27,44 @@ function parseDecimal(value) {
 
 // ============================================
 // UTILIDAD: Obtener fecha/hora en zona horaria de Perú (UTC-5)
+// Usamos toLocaleString con timezone para obtener la hora correcta
 // ============================================
-function getPeruDate() {
+function getPeruDateParts() {
   const now = new Date();
-  // Perú es UTC-5 (no tiene horario de verano)
-  const peruOffset = -5 * 60; // -5 horas en minutos
-  const utcOffset = now.getTimezoneOffset(); // Offset del servidor en minutos
-  const peruTime = new Date(now.getTime() + (utcOffset + peruOffset) * 60000);
-  return peruTime;
+  
+  // Usar Intl para obtener las partes de la fecha en zona horaria de Perú
+  const formatter = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const partsObj = {};
+  parts.forEach(p => partsObj[p.type] = p.value);
+  
+  return {
+    day: partsObj.day,
+    month: partsObj.month,
+    year: partsObj.year,
+    hour: partsObj.hour,
+    minute: partsObj.minute,
+    dayPeriod: partsObj.dayPeriod // a. m. o p. m.
+  };
 }
 
-function formatPeruDate(date) {
-  const d = date || getPeruDate();
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+function formatPeruDate() {
+  const p = getPeruDateParts();
+  return `${p.day}/${p.month}/${p.year}`;
 }
 
-function formatPeruTime(date) {
-  const d = date || getPeruDate();
-  let hours = d.getHours();
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'p.\u00a0m.' : 'a.\u00a0m.';
-  hours = hours % 12;
-  hours = hours ? hours : 12; // 0 should be 12
-  return `${hours}:${minutes} ${ampm}`;
-}
-
-function formatPeruDateTime(date) {
-  const d = date || getPeruDate();
-  return `${formatPeruDate(d)} ${formatPeruTime(d)}`;
+function formatPeruTime() {
+  const p = getPeruDateParts();
+  return `${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
 
 // ============================================
@@ -89,7 +96,7 @@ router.post('/mensaje', async (req, res) => {
       const sheets = new SheetsService(negocio.spreadsheetId);
       await sheets.initialize();
 
-      const timestamp = getPeruDate().toISOString();
+      const timestamp = new Date().toISOString();
       const msgId = `MSG-${Date.now()}`;
 
       await sheets.appendRow('Mensajes', [
@@ -106,7 +113,7 @@ router.post('/mensaje', async (req, res) => {
       success: true,
       messageId: result.messages?.[0]?.id,
       to,
-      timestamp: getPeruDate().toISOString()
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -434,7 +441,10 @@ router.post('/pedidos/:businessId', async (req, res) => {
 
     // Generar ID de pedido
     const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
-    const ahora = getPeruDate();
+    
+    // Obtener fecha y hora en zona horaria de Perú
+    const fechaPeru = formatPeruDate();
+    const horaPeru = formatPeruTime();
 
     // Formatear productos para guardar
     let productosStr = '';
@@ -455,8 +465,8 @@ router.post('/pedidos/:businessId', async (req, res) => {
     // Estructura completa de 19 columnas (A-S)
     const valores = [
       pedidoId,                                              // A: ID
-      formatPeruDate(ahora),                                 // B: Fecha (hora Perú)
-      formatPeruTime(ahora),                                 // C: Hora (hora Perú)
+      fechaPeru,                                             // B: Fecha (hora Perú)
+      horaPeru,                                              // C: Hora (hora Perú)
       (whatsapp || '').toString().replace(/[^0-9]/g, ''),    // D: WhatsApp
       cliente || '',                                         // E: Cliente
       telefono || '',                                        // F: Teléfono
@@ -501,15 +511,15 @@ router.post('/pedidos/:businessId', async (req, res) => {
       }
     }
 
-    console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal} - ${formatPeruTime(ahora)}`);
+    console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal} - ${horaPeru}`);
 
     res.status(201).json({
       success: true,
       mensaje: 'Pedido creado',
       pedido: {
         id: pedidoId,
-        fecha: formatPeruDate(ahora),
-        hora: formatPeruTime(ahora),
+        fecha: fechaPeru,
+        hora: horaPeru,
         whatsapp,
         cliente,
         productos: productosStr,
@@ -1548,7 +1558,7 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
         try {
           await sheets.appendRow('MovimientosStock', [
             `MOV-${Date.now()}`,
-            getPeruDate().toISOString(),
+            new Date().toISOString(),
             codigo,
             rows[i][1],
             operacion,
