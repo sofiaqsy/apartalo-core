@@ -2,7 +2,7 @@
  * APARTALO CORE - Handler Estándar
  * 
  * Flujo de conversación por defecto para negocios
- * Ahora con IA para respuestas más cálidas e inteligentes
+ * Con IA contextual para respuestas inteligentes
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -18,7 +18,7 @@ aiService.initialize().catch(console.error);
  */
 async function handle(from, message, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
-  const { text, type, interactiveData } = message;
+  const { text, type, interactiveData, mediaId } = message;
 
   const state = stateManager.getState(from, negocio.id);
   const mensajeLimpio = (text || '').trim();
@@ -31,18 +31,15 @@ async function handle(from, message, context) {
   console.log(`   Mensaje: "${mensajeLimpio}"`);
   console.log(`   Tipo: ${type}`);
   console.log(`   Estado: ${state.step}`);
-  console.log(`   InteractiveData:`, interactiveData);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
-  // Comandos globales
+  // Comandos globales (siempre disponibles)
   if (mensajeNormalizado === 'menu' || mensajeNormalizado === 'menú' || mensajeNormalizado === 'inicio') {
-    console.log('   → Comando: menu');
     stateManager.resetState(from, negocio.id);
     return await mostrarMenuPrincipal(from, context);
   }
 
   if (mensajeNormalizado === 'cancelar') {
-    console.log('   → Comando: cancelar');
     stateManager.resetState(from, negocio.id);
     await whatsapp.sendMessage(from, 'Operación cancelada. ¿En qué más te puedo ayudar? 😊');
     return await mostrarMenuPrincipal(from, context);
@@ -50,19 +47,15 @@ async function handle(from, message, context) {
 
   // Manejar pedido desde catálogo WhatsApp
   if (interactiveData?.type === 'order') {
-    console.log('   → Procesando order de catálogo');
     return await procesarPedidoCatalogo(from, interactiveData.items, context);
   }
 
   // Flujo según estado
-  console.log(`   → Switch por estado: ${state.step}`);
   switch (state.step) {
     case 'inicio':
-      console.log('   → Llamando manejarMensajeInicial');
-      return await manejarMensajeInicial(from, mensajeLimpio, context);
+      return await manejarMensajeConIA(from, message, context);
 
     case 'menu':
-      console.log('   → Llamando manejarMenu');
       return await manejarMenu(from, text, interactiveData, context);
 
     case 'seleccion_producto':
@@ -90,45 +83,58 @@ async function handle(from, message, context) {
       return await manejarVoucher(from, message, context);
 
     default:
-      console.log('   → Default: llamando manejarMensajeInicial');
-      return await manejarMensajeInicial(from, mensajeLimpio, context);
+      return await manejarMensajeConIA(from, message, context);
   }
 }
 
 // ============================================
-// MANEJO INTELIGENTE DE MENSAJES
+// MANEJO INTELIGENTE CON IA
 // ============================================
 
-async function manejarMensajeInicial(from, mensaje, context) {
+async function manejarMensajeConIA(from, message, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
+  const { text, type, mediaId } = message;
+  const mensajeLimpio = (text || '').trim();
+  const state = stateManager.getState(from, negocio.id);
   
-  console.log(`\n🤖 manejarMensajeInicial: "${mensaje}"`);
+  console.log(`\n🤖 manejarMensajeConIA`);
+  console.log(`   Mensaje: "${mensajeLimpio}"`);
+  console.log(`   Tipo: ${type}`);
+  console.log(`   Estado: ${state.step}`);
   
   // Obtener productos para contexto
   const productos = await sheets.getProductos('PUBLICADO');
-  console.log(`   Productos encontrados: ${productos.length}`);
   
-  // Usar IA para entender el mensaje
-  console.log('   Llamando aiService.procesarMensaje...');
-  const resultado = await aiService.procesarMensaje(mensaje, {
+  // Obtener datos del cliente si existen
+  const cliente = await sheets.buscarCliente(from);
+  
+  // Construir contexto completo para la IA
+  const contextoIA = {
     negocio,
     productos,
-    estadoActual: 'inicio'
-  });
+    estadoActual: state.step,
+    tipoMensaje: type,
+    datosCliente: cliente || {},
+    pedidoActual: state.data?.productoSeleccionado ? {
+      producto: state.data.productoSeleccionado.nombre,
+      cantidad: state.data.cantidad,
+      total: state.data.total
+    } : null
+  };
 
-  console.log(`   🤖 IA resultado: accion=${resultado.accion}, respuesta="${resultado.respuesta?.substring(0, 50)}..."`);
+  // Llamar a la IA
+  const resultado = await aiService.procesarMensaje(mensajeLimpio, contextoIA);
+  console.log(`   🤖 IA: accion=${resultado.accion}`);
 
   // Ejecutar acción según lo que entendió la IA
   switch (resultado.accion) {
     case 'ver_catalogo':
-      console.log('   → Acción: ver_catalogo');
       if (resultado.respuesta) {
         await whatsapp.sendMessage(from, resultado.respuesta);
       }
       return await mostrarCatalogo(from, context);
 
     case 'buscar_producto':
-      console.log('   → Acción: buscar_producto');
       if (resultado.datos?.producto) {
         await whatsapp.sendMessage(from, resultado.respuesta);
         stateManager.setState(from, negocio.id, {
@@ -137,10 +143,9 @@ async function manejarMensajeInicial(from, mensaje, context) {
         });
         return;
       }
-      return await buscarProducto(from, resultado.datos?.buscar || mensaje, context);
+      return await buscarProducto(from, resultado.datos?.buscar || mensajeLimpio, context);
 
     case 'contactar':
-      console.log('   → Acción: contactar');
       await whatsapp.sendMessage(from, resultado.respuesta || 'Te conecto con alguien del equipo 👤');
       await whatsapp.sendMessage(from, 
         `📱 *${negocio.nombre}*\n\n` +
@@ -151,17 +156,53 @@ async function manejarMensajeInicial(from, mensaje, context) {
       return;
 
     case 'menu':
-      console.log('   → Acción: menu');
+      return await mostrarMenuPrincipal(from, context);
+
+    case 'procesar_voucher':
+      // Imagen recibida en estado de espera de voucher
+      return await manejarVoucher(from, message, context);
+
+    case 'preguntar_imagen':
+      // Imagen recibida fuera de contexto
+      await whatsapp.sendButtonMessage(from, resultado.respuesta, [
+        { id: 'es_voucher', title: 'Es un comprobante' },
+        { id: 'ver_catalogo', title: 'Ver catálogo' }
+      ]);
+      return;
+
+    case 'guardar_ubicacion':
+      await whatsapp.sendMessage(from, resultado.respuesta);
+      return;
+
+    case 'explicar_proceso':
+      await whatsapp.sendMessage(from, resultado.respuesta);
+      await whatsapp.sendButtonMessage(from, '¿Quieres ver nuestros productos?', [
+        { id: 'ver_catalogo', title: 'Ver catálogo 📦' }
+      ]);
+      return;
+
+    case 'solicitar_foto':
+      await whatsapp.sendMessage(from, resultado.respuesta || '📸 Envía una foto cuando estés listo.');
+      return;
+
+    case 'seleccionar_numero':
+      // El usuario escribió un número, intentar seleccionar producto
+      if (state.step === 'seleccion_producto') {
+        return await manejarSeleccionProducto(from, mensajeLimpio, context);
+      }
+      // Si no estamos en selección, mostrar menú
+      await whatsapp.sendMessage(from, resultado.respuesta || '¿En qué te puedo ayudar?');
       return await mostrarMenuPrincipal(from, context);
 
     case 'continuar':
     default:
-      console.log('   → Acción: continuar (enviar respuesta)');
-      await whatsapp.sendMessage(from, resultado.respuesta);
+      // Enviar respuesta de la IA
+      if (resultado.respuesta) {
+        await whatsapp.sendMessage(from, resultado.respuesta);
+      }
       
-      // Si es saludo o ayuda, mostrar opciones
-      if (/hola|ayuda|help/.test(mensaje.toLowerCase())) {
-        console.log('   → Es saludo/ayuda, mostrando menú');
+      // Si es saludo, mostrar menú
+      if (/^(hola|buenos|buenas|hey|hi)/.test(mensajeLimpio.toLowerCase())) {
         return await mostrarMenuPrincipal(from, context);
       }
       return;
@@ -221,12 +262,7 @@ async function buscarProducto(from, termino, context) {
 async function mostrarMenuPrincipal(from, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  console.log('   📋 mostrarMenuPrincipal');
-
-  // Buscar cliente existente
   const cliente = await sheets.buscarCliente(from);
-  
-  // Buscar pedidos activos
   const pedidos = await sheets.getPedidosByWhatsapp(from);
   const pedidosActivos = pedidos.filter(p => 
     !['ENTREGADO', 'CANCELADO'].includes(p.estado)
@@ -237,14 +273,12 @@ async function mostrarMenuPrincipal(from, context) {
   let botones = [];
 
   if (!cliente && pedidosActivos.length === 0) {
-    // Cliente nuevo
     mensaje = `${saludo}! 👋\n\nBienvenido a *${negocio.nombre}*\n\n¿En qué te puedo ayudar?`;
     botones = [
       { id: 'ver_catalogo', title: 'Ver catálogo 📦' },
       { id: 'contactar', title: 'Contactar 💬' }
     ];
   } else if (pedidosActivos.length > 0) {
-    // Cliente con pedidos activos
     mensaje = `${saludo}! 👋\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
       mensaje += `• *${p.id}* - ${formatOrderStatus(p.estado)}\n`;
@@ -255,7 +289,6 @@ async function mostrarMenuPrincipal(from, context) {
       { id: 'ver_catalogo', title: 'Nuevo pedido 🛒' }
     ];
   } else {
-    // Cliente recurrente sin pedidos activos
     const nombreCliente = cliente?.nombre?.split(' ')[0] || '';
     mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}! 👋\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
     botones = [
@@ -265,7 +298,6 @@ async function mostrarMenuPrincipal(from, context) {
     ];
   }
 
-  console.log(`   Enviando menú con ${botones.length} botones`);
   await whatsapp.sendButtonMessage(from, mensaje, botones);
   stateManager.setStep(from, negocio.id, 'menu');
 }
@@ -273,9 +305,7 @@ async function mostrarMenuPrincipal(from, context) {
 async function manejarMenu(from, text, interactiveData, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   
-  // Priorizar respuesta de botones
   const opcion = interactiveData?.id || text?.toLowerCase() || '';
-  console.log(`   manejarMenu opcion: "${opcion}"`);
 
   if (opcion.includes('catalogo') || opcion.includes('catálogo') || opcion === 'ver_catalogo') {
     return await mostrarCatalogo(from, context);
@@ -299,9 +329,14 @@ async function manejarMenu(from, text, interactiveData, context) {
     return;
   }
 
+  if (opcion === 'es_voucher') {
+    await whatsapp.sendMessage(from, '📸 Perfecto! Envía la foto de tu comprobante de pago.');
+    stateManager.setStep(from, negocio.id, 'esperando_voucher');
+    return;
+  }
+
   // Si no es un comando conocido, usar IA
-  console.log('   → Opción no reconocida, usando IA');
-  return await manejarMensajeInicial(from, text, context);
+  return await manejarMensajeConIA(from, { text, type: 'text', interactiveData }, context);
 }
 
 // ============================================
@@ -348,9 +383,8 @@ async function manejarSeleccionProducto(from, text, context) {
 
   const numero = parseInt(text);
 
-  // Si no es número, intentar buscar por nombre con IA
   if (isNaN(numero)) {
-    return await manejarMensajeInicial(from, text, context);
+    return await manejarMensajeConIA(from, { text, type: 'text' }, context);
   }
 
   if (numero < 1 || numero > productos.length) {
@@ -360,7 +394,6 @@ async function manejarSeleccionProducto(from, text, context) {
 
   const producto = productos[numero - 1];
 
-  // Mostrar detalle del producto
   let mensaje = `*${producto.nombre}*\n\n`;
   if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
   mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
@@ -434,15 +467,12 @@ async function manejarConfirmacion(from, text, interactiveData, context) {
     return;
   }
 
-  // Verificar si ya tenemos datos del cliente
   const cliente = await sheets.buscarCliente(from);
 
   if (cliente && cliente.nombre && cliente.direccion) {
-    // Cliente existente, crear pedido directo
     return await crearPedido(from, context, cliente);
   }
 
-  // Solicitar datos
   await whatsapp.sendMessage(from, 
     '*📝 DATOS DE ENVÍO*\n\n' +
     'Para enviarte tu pedido, necesito algunos datos.\n\n' +
@@ -504,7 +534,6 @@ async function manejarDatosCiudad(from, text, context) {
     departamento: departamento || ''
   });
 
-  // Crear cliente y pedido
   const state = stateManager.getState(from, negocio.id);
   const datosCliente = {
     whatsapp: from,
@@ -528,7 +557,6 @@ async function crearPedido(from, context, cliente) {
   const state = stateManager.getState(from, negocio.id);
   const { productoSeleccionado, cantidad, total } = state.data;
 
-  // Reservar stock
   const reserva = await sheets.reservarStock(productoSeleccionado.codigo, cantidad);
   
   if (!reserva.success) {
@@ -536,7 +564,6 @@ async function crearPedido(from, context, cliente) {
     return await mostrarMenuPrincipal(from, context);
   }
 
-  // Crear pedido
   const pedido = await sheets.crearPedido({
     whatsapp: from,
     cliente: cliente.nombre,
@@ -559,7 +586,6 @@ async function crearPedido(from, context, cliente) {
     return;
   }
 
-  // Obtener métodos de pago
   const metodosPago = await sheets.getMetodosPago();
   
   let mensajePago = `🎉 *¡PEDIDO REGISTRADO!*\n\n`;
@@ -605,7 +631,13 @@ async function manejarVoucher(from, message, context) {
   const state = stateManager.getState(from, negocio.id);
   const pedidoId = state.data?.pedidoId;
 
-  // Actualizar estado del pedido
+  if (!pedidoId) {
+    await whatsapp.sendMessage(from, 
+      '🤔 Recibí tu imagen, pero no tienes un pedido pendiente de pago.\n\n¿Quieres hacer un nuevo pedido?'
+    );
+    return await mostrarMenuPrincipal(from, context);
+  }
+
   await sheets.updateEstadoPedido(pedidoId, config.orderStates.PENDING_VALIDATION);
 
   await whatsapp.sendMessage(from,
@@ -656,7 +688,6 @@ async function repetirUltimoPedido(from, context) {
     return await mostrarCatalogo(from, context);
   }
 
-  // TODO: Implementar repetición de pedido completo
   await whatsapp.sendMessage(from, '🔄 Función de repetir pedido próximamente disponible.\n\nMientras tanto, te muestro el catálogo:');
   return await mostrarCatalogo(from, context);
 }
@@ -672,7 +703,6 @@ async function procesarPedidoCatalogo(from, items, context) {
     `Un momento mientras procesamos tu pedido...`
   );
 
-  // TODO: Implementar flujo completo de pedido desde catálogo
   return await mostrarMenuPrincipal(from, context);
 }
 
