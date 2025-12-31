@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v6
+ * APARTALO CORE - Handler Estándar v7
  * 
- * Flujo conversacional con soporte para consulta de pedidos
+ * Flujo conversacional con pedidos mejorados con botones
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -121,7 +121,6 @@ async function manejarMensajeConIA(from, message, context) {
 
   switch (resultado.accion) {
     case 'ver_pedidos':
-      // NUEVA ACCIÓN: Ver pedidos del cliente
       return await mostrarPedidos(from, context);
 
     case 'ver_catalogo':
@@ -412,6 +411,12 @@ async function manejarMenu(from, text, interactiveData, context) {
 
   if (opcion.includes('pedido') || opcion === 'ver_pedidos') {
     return await mostrarPedidos(from, context);
+  }
+
+  if (opcion === 'enviar_voucher') {
+    await whatsapp.sendMessage(from, 'Envía la foto de tu comprobante de pago.');
+    stateManager.setStep(from, negocio.id, 'esperando_voucher');
+    return;
   }
 
   if (opcion.includes('repetir') || opcion === 'repetir_pedido') {
@@ -751,11 +756,20 @@ async function manejarVoucher(from, message, context) {
   }
 
   const state = stateManager.getState(from, negocio.id);
-  const pedidoId = state.data?.pedidoId;
+  let pedidoId = state.data?.pedidoId;
+
+  // Si no hay pedido en el estado, buscar el último pendiente de pago
+  if (!pedidoId) {
+    const pedidos = await sheets.getPedidosByWhatsapp(from);
+    const pendiente = pedidos.find(p => p.estado === 'PENDIENTE_PAGO');
+    if (pendiente) {
+      pedidoId = pendiente.id;
+    }
+  }
 
   if (!pedidoId) {
     await whatsapp.sendMessage(from, 
-      'No tienes un pedido pendiente.\n\n¿Quieres hacer uno nuevo?'
+      'No tienes un pedido pendiente de pago.\n\n¿Quieres hacer uno nuevo?'
     );
     return await mostrarMenuPrincipal(from, context);
   }
@@ -773,50 +787,88 @@ async function manejarVoucher(from, message, context) {
 }
 
 // ============================================
-// UTILIDADES
+// PEDIDOS
 // ============================================
 
 async function mostrarPedidos(from, context) {
-  const { whatsapp, sheets, negocio } = context;
+  const { whatsapp, sheets, stateManager, negocio } = context;
 
   const pedidos = await sheets.getPedidosByWhatsapp(from);
   
   if (pedidos.length === 0) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos registrados.\n\n¿Te gustaría hacer uno?');
-    return await mostrarMenuPrincipal(from, context);
+    await whatsapp.sendButtonMessage(from, 
+      'No tienes pedidos registrados.\n\n¿Te gustaría hacer uno?',
+      [
+        { id: 'ver_catalogo', title: 'Ver catálogo' },
+        { id: 'contactar', title: 'Contactar' }
+      ]
+    );
+    return;
   }
 
   let mensaje = `*TUS PEDIDOS*\n\n`;
 
-  pedidos.slice(0, 5).forEach(p => {
-    mensaje += `*${p.id}*\n`;
-    mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n`;
-    
-    // Mostrar productos si existen
-    if (p.productos) {
-      try {
-        const prods = typeof p.productos === 'string' ? JSON.parse(p.productos) : p.productos;
-        if (Array.isArray(prods) && prods.length > 0) {
-          mensaje += `${prods.map(pr => pr.nombre).join(', ')}\n`;
-        }
-      } catch (e) {
-        // Si no se puede parsear, mostrar como texto
-        if (typeof p.productos === 'string' && p.productos.length < 50) {
-          mensaje += `${p.productos}\n`;
+  // Separar pedidos activos de historial
+  const pedidosActivos = pedidos.filter(p => 
+    !['ENTREGADO', 'CANCELADO'].includes(p.estado)
+  );
+  const pedidosHistorial = pedidos.filter(p => 
+    ['ENTREGADO', 'CANCELADO'].includes(p.estado)
+  );
+
+  // Mostrar pedidos activos primero
+  if (pedidosActivos.length > 0) {
+    mensaje += `*Activos:*\n`;
+    pedidosActivos.slice(0, 3).forEach(p => {
+      mensaje += `\n*${p.id}*\n`;
+      mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n`;
+      
+      if (p.productos) {
+        try {
+          const prods = typeof p.productos === 'string' ? JSON.parse(p.productos) : p.productos;
+          if (Array.isArray(prods) && prods.length > 0) {
+            mensaje += `${prods.map(pr => pr.nombre).join(', ')}\n`;
+          }
+        } catch (e) {
+          if (typeof p.productos === 'string' && p.productos.length < 50) {
+            mensaje += `${p.productos}\n`;
+          }
         }
       }
-    }
-    mensaje += `\n`;
-  });
-
-  if (pedidos.length > 5) {
-    mensaje += `_...y ${pedidos.length - 5} pedidos más_\n\n`;
+    });
   }
 
-  mensaje += `¿Necesitas ayuda con algún pedido?`;
+  // Mostrar historial (últimos 2)
+  if (pedidosHistorial.length > 0) {
+    mensaje += `\n*Historial:*\n`;
+    pedidosHistorial.slice(0, 2).forEach(p => {
+      mensaje += `\n*${p.id}* - ${formatOrderStatus(p.estado)} | S/${p.total}\n`;
+    });
+    
+    if (pedidosHistorial.length > 2) {
+      mensaje += `_...y ${pedidosHistorial.length - 2} más_\n`;
+    }
+  }
 
-  await whatsapp.sendMessage(from, mensaje);
+  // Determinar botones según el estado de pedidos
+  let botones = [];
+  
+  // Si hay pedidos pendientes de pago, ofrecer enviar voucher
+  const pendientesPago = pedidosActivos.filter(p => p.estado === 'PENDIENTE_PAGO');
+  if (pendientesPago.length > 0) {
+    botones.push({ id: 'enviar_voucher', title: 'Enviar voucher' });
+  }
+  
+  botones.push({ id: 'ver_catalogo', title: 'Nuevo pedido' });
+  botones.push({ id: 'contactar', title: 'Ayuda' });
+
+  await whatsapp.sendButtonMessage(from, mensaje, botones);
+  stateManager.setStep(from, negocio.id, 'menu');
 }
+
+// ============================================
+// UTILIDADES
+// ============================================
 
 async function repetirUltimoPedido(from, context) {
   const { whatsapp, sheets, negocio } = context;
