@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA v3
+ * APARTALO CORE - Servicio de IA v4
  * 
- * IA contextual con soporte para envío de fotos de productos
+ * IA contextual - respuestas limpias sin emojis ni stock
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -17,37 +17,33 @@ class AIService {
   }
 
   async initialize() {
-    console.log('🤖 AI Service inicializando...');
-    console.log(`   GROQ_API_KEY: ${GROQ_API_KEY ? 'SET (' + GROQ_API_KEY.substring(0, 10) + '...)' : 'NOT SET'}`);
-    console.log(`   GEMINI_API_KEY: ${GEMINI_API_KEY ? 'SET (' + GEMINI_API_KEY.substring(0, 10) + '...)' : 'NOT SET'}`);
+    console.log('AI Service inicializando...');
+    console.log(`   GROQ_API_KEY: ${GROQ_API_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`   GEMINI_API_KEY: ${GEMINI_API_KEY ? 'SET' : 'NOT SET'}`);
     
     if (GROQ_API_KEY) {
       this.provider = 'groq';
       this.initialized = true;
-      console.log('🤖 IA: Groq configurado');
+      console.log('IA: Groq configurado');
       return true;
     }
     
     if (GEMINI_API_KEY) {
       this.provider = 'gemini';
       this.initialized = true;
-      console.log('🤖 IA: Gemini configurado');
+      console.log('IA: Gemini configurado');
       return true;
     }
 
-    console.log('⚠️ IA: Sin API keys - usando respuestas locales');
+    console.log('IA: Sin API keys - usando respuestas locales');
     return false;
   }
 
-  /**
-   * Procesar mensaje con contexto completo
-   */
   async procesarMensaje(mensaje, contexto = {}) {
     const { tipoMensaje = 'text' } = contexto;
     
-    console.log(`🤖 AI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
+    console.log(`AI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
     
-    // Manejar tipos especiales de mensaje (media)
     if (tipoMensaje === 'image') {
       return this.manejarImagen(mensaje, contexto);
     }
@@ -64,7 +60,6 @@ class AIService {
       return this.manejarAudio(mensaje, contexto);
     }
 
-    // Mensaje de texto - usar IA o respuesta local
     if (!this.initialized) {
       return this.respuestaLocal(mensaje, contexto);
     }
@@ -80,19 +75,16 @@ class AIService {
       }
 
       if (resultado) {
-        console.log(`   → IA resultado: ${resultado.accion}`);
+        console.log(`   IA resultado: ${resultado.accion}`);
         return resultado;
       }
     } catch (error) {
-      console.error('❌ Error IA:', error.message);
+      console.error('Error IA:', error.message);
     }
 
     return this.respuestaLocal(mensaje, contexto);
   }
 
-  /**
-   * Manejar imagen recibida
-   */
   manejarImagen(caption, contexto) {
     const { estadoActual = 'inicio' } = contexto;
 
@@ -105,7 +97,7 @@ class AIService {
     }
 
     return {
-      respuesta: '¡Recibí tu imagen! 📷\n\n¿Es un comprobante de pago?',
+      respuesta: 'Recibí tu imagen\n\n¿Es un comprobante de pago?',
       accion: 'preguntar_imagen',
       datos: { tieneImagen: true }
     };
@@ -116,14 +108,14 @@ class AIService {
 
     if (estadoActual === 'datos_direccion' || estadoActual === 'datos_ciudad') {
       return {
-        respuesta: '¡Recibí tu ubicación! 📍\n\n¿Puedes confirmar la dirección exacta?',
+        respuesta: 'Recibí tu ubicación\n\n¿Puedes confirmar la dirección exacta?',
         accion: 'guardar_ubicacion',
         datos: { tieneUbicacion: true }
       };
     }
 
     return {
-      respuesta: '¡Gracias por tu ubicación! 📍',
+      respuesta: 'Gracias por tu ubicación',
       accion: 'continuar',
       datos: { tieneUbicacion: true }
     };
@@ -131,7 +123,7 @@ class AIService {
 
   manejarDocumento(mensaje, contexto) {
     return {
-      respuesta: 'Recibí tu documento 📄\n\nSi es un comprobante, ¿puedes enviarlo como foto?',
+      respuesta: 'Recibí tu documento\n\nSi es un comprobante, ¿puedes enviarlo como foto?',
       accion: 'continuar',
       datos: { tieneDocumento: true }
     };
@@ -139,15 +131,12 @@ class AIService {
 
   manejarAudio(mensaje, contexto) {
     return {
-      respuesta: '🎤 No puedo escuchar audios aún.\n\n¿Puedes escribirme?',
+      respuesta: 'No puedo escuchar audios aún.\n\n¿Puedes escribirme?',
       accion: 'continuar',
       datos: { tieneAudio: true }
     };
   }
 
-  /**
-   * Construir prompt inteligente
-   */
   construirPromptInteligente(mensaje, contexto) {
     const { 
       negocio, 
@@ -170,12 +159,14 @@ ${productosTexto || 'Sin productos'}
 
 CONTEXTO: ${contextoEstado}
 
-REGLAS:
-1. NO muestres catálogo a menos que lo pidan explícitamente
-2. Si piden "foto" o "ver" un producto → TENEMOS fotos, usar acción "enviar_foto"
-3. Si preguntan por producto específico → dar info de ESE producto
-4. Si no es claro → PREGUNTAR qué necesitan
-5. Respuestas cortas (2-3 líneas)
+REGLAS IMPORTANTES:
+1. NO uses emojis en las respuestas
+2. NO muestres información de stock al cliente
+3. NO muestres catálogo a menos que lo pidan explícitamente
+4. Si piden "foto" o "ver" un producto -> usar acción "enviar_foto"
+5. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
+6. Si no es claro -> PREGUNTAR qué necesitan
+7. Respuestas cortas y profesionales (2-3 líneas máximo)
 
 ACCIONES (JSON):
 - ver_catalogo: SOLO si piden ver todos los productos
@@ -267,7 +258,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
         };
       }
     } catch (e) {
-      console.log('   ⚠️ Error parsing JSON:', e.message);
+      console.log('   Error parsing JSON:', e.message);
     }
 
     if (texto && texto.length > 0 && texto.length < 500) {
@@ -281,93 +272,83 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     return null;
   }
 
-  /**
-   * Respuestas locales MEJORADAS con soporte para fotos
-   */
   respuestaLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
     const { productos = [], estadoActual = 'inicio', negocio } = contexto;
 
-    // === SOLICITUD DE FOTOS DE PRODUCTOS ===
+    // SOLICITUD DE FOTOS
     if ((msg.includes('foto') || msg.includes('imagen') || msg.includes('ver') || msg.includes('muestra') || msg.includes('enseña')) && 
         !msg.includes('comprobante') && !msg.includes('voucher') && !msg.includes('pago')) {
       
-      // Buscar qué producto quiere ver
       const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
       
       if (productoMencionado) {
         if (productoMencionado.imagenUrl) {
           return {
-            respuesta: `¡Aquí tienes! 📷`,
+            respuesta: '',
             accion: 'enviar_foto',
             datos: { producto: productoMencionado }
           };
         } else {
           return {
-            respuesta: `No tengo foto del *${productoMencionado.nombre}* 😅\n\nPero te cuento: cuesta S/${productoMencionado.precio}. ¿Te interesa?`,
+            respuesta: `No tengo foto de *${productoMencionado.nombre}*\n\nPrecio: S/${productoMencionado.precio}\n\n¿Te interesa?`,
             accion: 'info_producto',
             datos: { producto: productoMencionado }
           };
         }
       }
       
-      // Piden foto pero no especifican producto
       return {
-        respuesta: '📷 ¿De qué producto quieres ver la foto?',
+        respuesta: '¿De qué producto quieres ver la foto?',
         accion: 'preguntar',
         datos: {}
       };
     }
 
-    // === PREGUNTAS POR PRODUCTO ESPECÍFICO ===
+    // PREGUNTAS POR PRODUCTO ESPECÍFICO
     const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
     
     if (productoMencionado) {
-      // Quiere precio
       if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta') || msg.includes('vale')) {
         return {
-          respuesta: `*${productoMencionado.nombre}* cuesta S/${productoMencionado.precio} 💰\n\n¿Te interesa?`,
+          respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}\n\n¿Te interesa?`,
           accion: 'info_producto',
           datos: { producto: productoMencionado }
         };
       }
       
-      // Quiere comprar
       if (msg.includes('quiero') || msg.includes('dame') || msg.includes('necesito') || msg.includes('comprar')) {
         return {
-          respuesta: `¡Perfecto! *${productoMencionado.nombre}* a S/${productoMencionado.precio}\n\n¿Cuántas unidades?`,
+          respuesta: `*${productoMencionado.nombre}* - S/${productoMencionado.precio}\n\n¿Cuántas unidades?`,
           accion: 'confirmar_compra',
           datos: { producto: productoMencionado }
         };
       }
 
-      // Pregunta si tienen
       if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes')) {
         const stock = productoMencionado.disponible || productoMencionado.stock || 0;
         if (stock > 0) {
-          // Si tiene foto, enviarla
           if (productoMencionado.imagenUrl) {
             return {
-              respuesta: `¡Sí tenemos! 🎉`,
+              respuesta: 'Sí tenemos',
               accion: 'enviar_foto',
               datos: { producto: productoMencionado }
             };
           }
           return {
-            respuesta: `¡Sí! *${productoMencionado.nombre}* a S/${productoMencionado.precio}\nStock: ${stock} disponibles 📦\n\n¿Te interesa?`,
+            respuesta: `Sí, *${productoMencionado.nombre}* a S/${productoMencionado.precio}\n\n¿Te interesa?`,
             accion: 'info_producto',
             datos: { producto: productoMencionado }
           };
         } else {
           return {
-            respuesta: `😅 *${productoMencionado.nombre}* está agotado.\n\n¿Te interesa otro?`,
+            respuesta: `*${productoMencionado.nombre}* está agotado.\n\n¿Te interesa otro producto?`,
             accion: 'continuar',
             datos: {}
           };
         }
       }
 
-      // Solo mencionó el producto - enviar foto si tiene
       if (productoMencionado.imagenUrl) {
         return {
           respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}`,
@@ -377,22 +358,22 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       }
       
       return {
-        respuesta: `*${productoMencionado.nombre}*\nPrecio: S/${productoMencionado.precio}\nStock: ${productoMencionado.disponible || productoMencionado.stock || 'Disponible'}\n\n¿Lo quieres?`,
+        respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}\n\n¿Te interesa?`,
         accion: 'info_producto',
         datos: { producto: productoMencionado }
       };
     }
 
-    // === SALUDOS ===
+    // SALUDOS
     if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal)/.test(msg)) {
       return {
-        respuesta: `¡Hola! 👋 Soy el asistente de ${negocio?.nombre || 'la tienda'}.\n\n¿En qué te ayudo?`,
+        respuesta: `Hola, soy el asistente de ${negocio?.nombre || 'la tienda'}.\n\n¿En qué te ayudo?`,
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === VER CATÁLOGO (explícito) ===
+    // VER CATÁLOGO
     if (msg.includes('catálogo') || msg.includes('catalogo') || msg.includes('productos') || 
         msg.includes('qué tienen') || msg.includes('que tienen') || msg.includes('lista') || msg.includes('mostrar todo')) {
       return {
@@ -402,10 +383,10 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // === PREGUNTAS SIN PRODUCTO ESPECÍFICO ===
+    // PREGUNTAS SIN PRODUCTO
     if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio')) {
       return {
-        respuesta: '¿De qué producto quieres saber el precio? 🤔',
+        respuesta: '¿De qué producto quieres saber el precio?',
         accion: 'preguntar',
         datos: {}
       };
@@ -413,67 +394,67 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
 
     if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes') || msg.includes('venden')) {
       return {
-        respuesta: '¿Qué producto buscas? 🌱',
+        respuesta: '¿Qué producto buscas?',
         accion: 'preguntar',
         datos: {}
       };
     }
 
-    // === PROCESO DE COMPRA ===
+    // PROCESO DE COMPRA
     if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona')) {
       return {
-        respuesta: '¡Es fácil! 😊\n\n1️⃣ Elige un producto\n2️⃣ Indicas cantidad\n3️⃣ Pagas por Yape/Plin\n4️⃣ Envías foto del comprobante\n\n¿Qué te interesa?',
+        respuesta: 'Es fácil:\n\n1. Elige un producto\n2. Indicas cantidad\n3. Pagas por Yape/Plin\n4. Envías foto del comprobante\n\n¿Qué te interesa?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === MÉTODOS DE PAGO ===
+    // MÉTODOS DE PAGO
     if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia')) {
       return {
-        respuesta: '💳 Aceptamos Yape, Plin y transferencia.\n\n¿Quieres hacer un pedido?',
+        respuesta: 'Aceptamos Yape, Plin y transferencia.\n\n¿Quieres hacer un pedido?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === ENVÍO ===
+    // ENVÍO
     if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery')) {
       return {
-        respuesta: '🚚 Sí hacemos envíos. El costo depende de tu zona.\n\n¿Qué producto te interesa?',
+        respuesta: 'Sí hacemos envíos. El costo depende de tu zona.\n\n¿Qué producto te interesa?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === CONTACTO HUMANO ===
+    // CONTACTO HUMANO
     if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
       return {
-        respuesta: 'Te conecto con alguien del equipo 👤',
+        respuesta: 'Te conecto con alguien del equipo',
         accion: 'contactar',
         datos: {}
       };
     }
 
-    // === AGRADECIMIENTOS ===
+    // AGRADECIMIENTOS
     if (msg.includes('gracias') || msg.includes('genial') || msg.includes('perfecto') || msg.includes('ok')) {
       return {
-        respuesta: '¡De nada! 😊 ¿Algo más?',
+        respuesta: 'De nada. ¿Algo más?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === DESPEDIDAS ===
+    // DESPEDIDAS
     if (msg.includes('chau') || msg.includes('adiós') || msg.includes('adios') || msg.includes('bye')) {
       return {
-        respuesta: '¡Hasta pronto! 👋',
+        respuesta: 'Hasta pronto',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === NÚMEROS ===
+    // NÚMEROS
     if (/^\d+$/.test(msg)) {
       return {
         respuesta: null,
@@ -482,44 +463,37 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // === AYUDA ===
+    // AYUDA
     if (msg.includes('ayuda') || msg.includes('help')) {
       return {
-        respuesta: '¡Te ayudo! 😊\n\nPuedo:\n• Mostrarte fotos de productos\n• Darte precios\n• Ayudarte a comprar\n\n¿Qué necesitas?',
+        respuesta: 'Te ayudo.\n\nPuedo:\n- Mostrarte fotos de productos\n- Darte precios\n- Ayudarte a comprar\n\n¿Qué necesitas?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === DEFAULT ===
+    // DEFAULT
     return {
-      respuesta: `No entendí bien 🤔\n\n¿Qué necesitas? Puedo mostrarte productos, fotos o ayudarte a comprar.`,
+      respuesta: 'No entendí bien.\n\n¿Qué necesitas? Puedo mostrarte productos o ayudarte a comprar.',
       accion: 'preguntar',
       datos: {}
     };
   }
 
-  /**
-   * Buscar producto mencionado en el mensaje
-   */
   buscarProductoEnMensaje(mensaje, productos) {
     if (!productos || productos.length === 0) return null;
     
     const msgLower = mensaje.toLowerCase();
     
-    // Buscar coincidencia
     for (const producto of productos) {
       const nombreLower = producto.nombre.toLowerCase();
       
-      // Coincidencia del nombre completo
       if (msgLower.includes(nombreLower)) {
         return producto;
       }
       
-      // Buscar palabras clave del nombre (mínimo 4 caracteres)
       const palabrasProducto = nombreLower.split(/\s+/).filter(p => p.length >= 4);
       for (const palabra of palabrasProducto) {
-        // Evitar palabras comunes
         if (['para', 'como', 'una', 'uno', 'los', 'las', 'del', 'planta', 'maceta'].includes(palabra)) continue;
         
         if (msgLower.includes(palabra)) {
