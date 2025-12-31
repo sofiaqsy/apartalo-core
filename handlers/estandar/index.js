@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v9
+ * APARTALO CORE - Handler Estándar v10
  * 
- * Formato de pedidos mejorado: Producto - Estado | Precio (sin emojis)
+ * Mejoras: menú sin duplicar "bienvenido", mejor detección de nuevo pedido
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -14,22 +14,17 @@ aiService.initialize().catch(console.error);
 
 /**
  * Obtener nombre de producto desde diferentes formatos
- * Soporta: JSON array, "codigo:nombre:cantidad:precio", texto plano
  */
 function obtenerNombreProducto(productos) {
   if (!productos) return null;
   
   try {
-    // Intentar parsear como JSON
     const prods = typeof productos === 'string' ? JSON.parse(productos) : productos;
     if (Array.isArray(prods) && prods.length > 0) {
       return prods.map(pr => pr.nombre).join(', ');
     }
-  } catch (e) {
-    // No es JSON, intentar otros formatos
-  }
+  } catch (e) {}
   
-  // Formato "codigo:nombre:cantidad:precio"
   if (typeof productos === 'string') {
     const lineas = productos.split('\n').filter(l => l.trim());
     const nombres = [];
@@ -163,9 +158,6 @@ async function manejarMensajeConIA(from, message, context) {
       return await mostrarPedidos(from, context);
 
     case 'ver_catalogo':
-      if (resultado.respuesta) {
-        await whatsapp.sendMessage(from, resultado.respuesta);
-      }
       return await mostrarCatalogo(from, context);
 
     case 'enviar_foto':
@@ -283,10 +275,6 @@ async function manejarMensajeConIA(from, message, context) {
       if (resultado.respuesta) {
         await whatsapp.sendMessage(from, resultado.respuesta);
       }
-      
-      if (/^(hola|buenos días|buenas tardes|buenas noches)$/i.test(mensajeLimpio)) {
-        return await mostrarMenuPrincipal(from, context);
-      }
       return;
   }
 }
@@ -365,13 +353,8 @@ async function mostrarMenuPrincipal(from, context) {
   let mensaje = '';
   let botones = [];
 
-  if (!cliente && pedidosActivos.length === 0) {
-    mensaje = `${saludo}\n\nBienvenido a *${negocio.nombre}*\n\n¿En qué te puedo ayudar?`;
-    botones = [
-      { id: 'ver_catalogo', title: 'Ver catálogo' },
-      { id: 'contactar', title: 'Contactar' }
-    ];
-  } else if (pedidosActivos.length > 0) {
+  if (pedidosActivos.length > 0) {
+    // Cliente con pedidos activos: mostrar resumen directo
     mensaje = `${saludo}\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
       const nombreProd = obtenerNombreProducto(p.productos) || 'Pedido';
@@ -382,12 +365,20 @@ async function mostrarMenuPrincipal(from, context) {
       { id: 'ver_pedidos', title: 'Ver pedidos' },
       { id: 'ver_catalogo', title: 'Nuevo pedido' }
     ];
-  } else {
-    const nombreCliente = cliente?.nombre?.split(' ')[0] || '';
-    mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
+  } else if (cliente) {
+    // Cliente recurrente sin pedidos activos
+    const nombreCliente = cliente.nombre?.split(' ')[0] || '';
+    mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}\n\n¿Qué te gustaría hacer?`;
     botones = [
       { id: 'ver_catalogo', title: 'Ver catálogo' },
       { id: 'ver_pedidos', title: 'Mis pedidos' },
+      { id: 'contactar', title: 'Contactar' }
+    ];
+  } else {
+    // Cliente nuevo
+    mensaje = `${saludo}\n\n¿En qué te puedo ayudar?`;
+    botones = [
+      { id: 'ver_catalogo', title: 'Ver catálogo' },
       { id: 'contactar', title: 'Contactar' }
     ];
   }
@@ -798,7 +789,6 @@ async function manejarVoucher(from, message, context) {
   const state = stateManager.getState(from, negocio.id);
   let pedidoId = state.data?.pedidoId;
 
-  // Si no hay pedido en el estado, buscar el último pendiente de pago
   if (!pedidoId) {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
     const pendiente = pedidos.find(p => p.estado === 'PENDIENTE_PAGO');
@@ -848,7 +838,6 @@ async function mostrarPedidos(from, context) {
 
   let mensaje = `*TUS PEDIDOS*\n\n`;
 
-  // Separar pedidos activos de historial
   const pedidosActivos = pedidos.filter(p => 
     !['ENTREGADO', 'CANCELADO'].includes(p.estado)
   );
@@ -856,7 +845,6 @@ async function mostrarPedidos(from, context) {
     ['ENTREGADO', 'CANCELADO'].includes(p.estado)
   );
 
-  // Mostrar pedidos activos: Producto - Estado | S/total
   if (pedidosActivos.length > 0) {
     mensaje += `*Activos:*\n`;
     pedidosActivos.slice(0, 4).forEach(p => {
@@ -866,7 +854,6 @@ async function mostrarPedidos(from, context) {
     });
   }
 
-  // Mostrar historial
   if (pedidosHistorial.length > 0) {
     mensaje += `\n*Historial:*\n`;
     pedidosHistorial.slice(0, 2).forEach(p => {
@@ -879,7 +866,6 @@ async function mostrarPedidos(from, context) {
     }
   }
 
-  // Determinar botones según el estado de pedidos
   let botones = [];
   
   const pendientesPago = pedidosActivos.filter(p => p.estado === 'PENDIENTE_PAGO');
