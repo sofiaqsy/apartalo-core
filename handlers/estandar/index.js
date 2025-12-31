@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v5
+ * APARTALO CORE - Handler Estándar v6
  * 
- * Flujo conversacional limpio - sin emojis excesivos, sin mostrar stock
+ * Flujo conversacional con soporte para consulta de pedidos
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -24,7 +24,7 @@ async function handle(from, message, context) {
   const mensajeNormalizado = mensajeLimpio.toLowerCase();
 
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  console.log(`📨 HANDLER ESTÁNDAR`);
+  console.log(`HANDLER ESTÁNDAR`);
   console.log(`   From: ${from}`);
   console.log(`   Negocio: ${negocio.nombre} (${negocio.id})`);
   console.log(`   Mensaje: "${mensajeLimpio}"`);
@@ -96,7 +96,7 @@ async function manejarMensajeConIA(from, message, context) {
   const mensajeLimpio = (text || '').trim();
   const state = stateManager.getState(from, negocio.id);
   
-  console.log(`\n🤖 manejarMensajeConIA`);
+  console.log(`\nIA manejarMensajeConIA`);
   console.log(`   Mensaje: "${mensajeLimpio}"`);
   console.log(`   Tipo: ${type}`);
   
@@ -117,9 +117,13 @@ async function manejarMensajeConIA(from, message, context) {
   };
 
   const resultado = await aiService.procesarMensaje(mensajeLimpio, contextoIA);
-  console.log(`   🤖 IA: accion=${resultado.accion}`);
+  console.log(`   IA: accion=${resultado.accion}`);
 
   switch (resultado.accion) {
+    case 'ver_pedidos':
+      // NUEVA ACCIÓN: Ver pedidos del cliente
+      return await mostrarPedidos(from, context);
+
     case 'ver_catalogo':
       if (resultado.respuesta) {
         await whatsapp.sendMessage(from, resultado.respuesta);
@@ -344,7 +348,7 @@ async function mostrarMenuPrincipal(from, context) {
     mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
     botones = [
       { id: 'ver_catalogo', title: 'Ver catálogo' },
-      { id: 'repetir_pedido', title: 'Repetir pedido' },
+      { id: 'ver_pedidos', title: 'Mis pedidos' },
       { id: 'contactar', title: 'Contactar' }
     ];
   }
@@ -762,7 +766,7 @@ async function manejarVoucher(from, message, context) {
     `*COMPROBANTE RECIBIDO*\n\n` +
     `Pedido *${pedidoId}* en validación.\n\n` +
     `Te avisamos cuando esté confirmado.\n\n` +
-    `¡Gracias!`
+    `Gracias`
   );
 
   stateManager.resetState(from, negocio.id);
@@ -778,7 +782,7 @@ async function mostrarPedidos(from, context) {
   const pedidos = await sheets.getPedidosByWhatsapp(from);
   
   if (pedidos.length === 0) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos aún');
+    await whatsapp.sendMessage(from, 'No tienes pedidos registrados.\n\n¿Te gustaría hacer uno?');
     return await mostrarMenuPrincipal(from, context);
   }
 
@@ -786,8 +790,30 @@ async function mostrarPedidos(from, context) {
 
   pedidos.slice(0, 5).forEach(p => {
     mensaje += `*${p.id}*\n`;
-    mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n\n`;
+    mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n`;
+    
+    // Mostrar productos si existen
+    if (p.productos) {
+      try {
+        const prods = typeof p.productos === 'string' ? JSON.parse(p.productos) : p.productos;
+        if (Array.isArray(prods) && prods.length > 0) {
+          mensaje += `${prods.map(pr => pr.nombre).join(', ')}\n`;
+        }
+      } catch (e) {
+        // Si no se puede parsear, mostrar como texto
+        if (typeof p.productos === 'string' && p.productos.length < 50) {
+          mensaje += `${p.productos}\n`;
+        }
+      }
+    }
+    mensaje += `\n`;
   });
+
+  if (pedidos.length > 5) {
+    mensaje += `_...y ${pedidos.length - 5} pedidos más_\n\n`;
+  }
+
+  mensaje += `¿Necesitas ayuda con algún pedido?`;
 
   await whatsapp.sendMessage(from, mensaje);
 }
