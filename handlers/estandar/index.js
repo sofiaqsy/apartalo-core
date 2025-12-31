@@ -1,7 +1,8 @@
 /**
- * APARTALO CORE - Handler Estándar v3
+ * APARTALO CORE - Handler Estándar v4
  * 
  * Flujo conversacional con soporte para envío de fotos de productos
+ * FIX: Búsqueda de producto cuando IA devuelve solo nombre
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -127,58 +128,82 @@ async function manejarMensajeConIA(from, message, context) {
       return await mostrarCatalogo(from, context);
 
     case 'enviar_foto':
-      // ✨ NUEVA ACCIÓN: Enviar foto del producto
-      if (resultado.datos?.producto) {
-        const producto = resultado.datos.producto;
-        const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
+      // Enviar foto del producto
+      let productoFoto = resultado.datos?.producto;
+      
+      // Si producto es string (nombre), buscar en lista
+      if (typeof productoFoto === 'string') {
+        productoFoto = buscarProductoPorNombre(productoFoto, productos);
+      }
+      
+      // Si no tiene campos completos, buscar por nombre
+      if (productoFoto && (!productoFoto.precio || productoFoto.precio === undefined)) {
+        const nombreBuscar = productoFoto.nombre || productoFoto;
+        productoFoto = buscarProductoPorNombre(String(nombreBuscar), productos);
+      }
+      
+      console.log(`   📦 Producto encontrado:`, productoFoto ? productoFoto.nombre : 'NO');
+      
+      if (productoFoto && productoFoto.precio) {
+        const imagenUrl = productoFoto.imagenUrl || productoFoto.imagen || productoFoto.ImagenURL;
         
         if (imagenUrl) {
-          console.log(`   📷 Enviando foto: ${imagenUrl}`);
-          
-          // Convertir URL de Google Drive si es necesario
+          console.log(`   📷 Enviando foto: ${imagenUrl.substring(0, 50)}...`);
           const urlFinal = convertirUrlGoogleDrive(imagenUrl);
-          
-          const caption = `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n¿Te interesa? 😊`;
+          const caption = `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\n¿Te interesa? 😊`;
           
           try {
             await whatsapp.sendImage(from, urlFinal, caption);
           } catch (error) {
             console.error('❌ Error enviando imagen:', error.message);
-            // Si falla la imagen, enviar solo texto
-            await whatsapp.sendMessage(from, `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n(No pude cargar la imagen)\n\n¿Te interesa?`);
+            await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\n(No pude cargar la imagen)\n\n¿Te interesa?`);
           }
         } else {
-          await whatsapp.sendMessage(from, `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n¿Te interesa?`);
+          await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\nEste producto no tiene foto disponible.\n\n¿Te interesa?`);
         }
-        return;
-      }
-      await whatsapp.sendMessage(from, resultado.respuesta || '¿De qué producto quieres ver la foto?');
-      return;
-
-    case 'info_producto':
-      if (resultado.datos?.producto) {
-        await whatsapp.sendMessage(from, resultado.respuesta);
-        // Preguntar si quiere comprar
-        await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-          { id: `comprar_${resultado.datos.producto.codigo}`, title: '🛒 Comprar' },
-          { id: `foto_${resultado.datos.producto.codigo}`, title: '📷 Ver foto' }
-        ]);
+        
+        // Guardar producto seleccionado
         stateManager.updateData(from, negocio.id, { 
-          ultimoProducto: resultado.datos.producto,
+          ultimoProducto: productoFoto,
           productos 
         });
         return;
       }
-      await whatsapp.sendMessage(from, resultado.respuesta);
+      
+      // No se encontró el producto
+      await whatsapp.sendMessage(from, resultado.respuesta || '¿De qué producto quieres ver la foto? 📷');
       return;
 
+    case 'info_producto':
     case 'confirmar_compra':
-      if (resultado.datos?.producto) {
-        await whatsapp.sendMessage(from, resultado.respuesta);
-        stateManager.setState(from, negocio.id, {
-          step: 'cantidad',
-          data: { productoSeleccionado: resultado.datos.producto, productos }
-        });
+      let productoInfo = resultado.datos?.producto;
+      
+      // Buscar producto si viene incompleto
+      if (typeof productoInfo === 'string') {
+        productoInfo = buscarProductoPorNombre(productoInfo, productos);
+      }
+      if (productoInfo && !productoInfo.precio) {
+        productoInfo = buscarProductoPorNombre(productoInfo.nombre || productoInfo, productos);
+      }
+      
+      if (productoInfo && productoInfo.precio) {
+        await whatsapp.sendMessage(from, resultado.respuesta || `*${productoInfo.nombre}*\nS/${productoInfo.precio}`);
+        
+        if (resultado.accion === 'confirmar_compra') {
+          stateManager.setState(from, negocio.id, {
+            step: 'cantidad',
+            data: { productoSeleccionado: productoInfo, productos }
+          });
+        } else {
+          await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+            { id: `comprar_${productoInfo.codigo}`, title: '🛒 Comprar' },
+            { id: `foto_${productoInfo.codigo}`, title: '📷 Ver foto' }
+          ]);
+          stateManager.updateData(from, negocio.id, { 
+            ultimoProducto: productoInfo,
+            productos 
+          });
+        }
         return;
       }
       await whatsapp.sendMessage(from, resultado.respuesta);
@@ -233,13 +258,48 @@ async function manejarMensajeConIA(from, message, context) {
 }
 
 /**
+ * Buscar producto por nombre en la lista
+ */
+function buscarProductoPorNombre(nombre, productos) {
+  if (!nombre || !productos || productos.length === 0) return null;
+  
+  const nombreLower = String(nombre).toLowerCase();
+  
+  // Búsqueda exacta primero
+  let encontrado = productos.find(p => 
+    p.nombre.toLowerCase() === nombreLower
+  );
+  
+  if (encontrado) return encontrado;
+  
+  // Búsqueda parcial
+  encontrado = productos.find(p => 
+    p.nombre.toLowerCase().includes(nombreLower) ||
+    nombreLower.includes(p.nombre.toLowerCase())
+  );
+  
+  if (encontrado) return encontrado;
+  
+  // Buscar por palabras clave
+  const palabras = nombreLower.split(/\s+/).filter(p => p.length > 3);
+  for (const palabra of palabras) {
+    if (['foto', 'imagen', 'quiero', 'dame', 'muestra'].includes(palabra)) continue;
+    
+    encontrado = productos.find(p => 
+      p.nombre.toLowerCase().includes(palabra)
+    );
+    if (encontrado) return encontrado;
+  }
+  
+  return null;
+}
+
+/**
  * Convertir URL de Google Drive a formato directo
  */
 function convertirUrlGoogleDrive(url) {
   if (!url) return url;
   
-  // Si es thumbnail de Google Drive, convertir a export
-  // https://drive.google.com/thumbnail?id=XXX -> https://drive.google.com/uc?export=view&id=XXX
   if (url.includes('drive.google.com/thumbnail')) {
     const idMatch = url.match(/id=([^&]+)/);
     if (idMatch) {
@@ -247,7 +307,6 @@ function convertirUrlGoogleDrive(url) {
     }
   }
   
-  // Si es formato /file/d/XXX/view
   if (url.includes('/file/d/')) {
     const idMatch = url.match(/\/file\/d\/([^/]+)/);
     if (idMatch) {
@@ -312,10 +371,17 @@ async function manejarMenu(from, text, interactiveData, context) {
   const state = stateManager.getState(from, negocio.id);
 
   // Manejar botones de producto (comprar_XXX, foto_XXX)
-  if (opcion.startsWith('comprar_')) {
-    const codigo = opcion.replace('comprar_', '');
+  if (opcion.startsWith('comprar_') || opcion === 'comprar_ahora') {
+    const codigo = opcion.replace('comprar_', '').replace('ahora', '');
     const productos = await sheets.getProductos('PUBLICADO');
-    const producto = productos.find(p => p.codigo === codigo) || state.data?.ultimoProducto;
+    let producto = null;
+    
+    if (codigo && codigo !== '') {
+      producto = productos.find(p => p.codigo === codigo);
+    }
+    if (!producto) {
+      producto = state.data?.ultimoProducto || state.data?.productoSeleccionado;
+    }
     
     if (producto) {
       await whatsapp.sendMessage(from, `¡Perfecto! *${producto.nombre}* a S/${producto.precio}\n\n¿Cuántas unidades deseas?`);
@@ -453,7 +519,6 @@ async function manejarSeleccionProducto(from, text, context) {
       ]);
     } catch (error) {
       console.error('❌ Error enviando imagen:', error.message);
-      // Fallback sin imagen
       await whatsapp.sendMessage(from, caption + '\n\n(No pude cargar la imagen)');
       await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
         { id: 'comprar_ahora', title: '🛒 Comprar' },
@@ -461,7 +526,6 @@ async function manejarSeleccionProducto(from, text, context) {
       ]);
     }
   } else {
-    // Sin imagen
     let mensaje = `*${producto.nombre}*\n\n`;
     if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
     mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
