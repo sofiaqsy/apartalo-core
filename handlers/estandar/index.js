@@ -1,8 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v4
+ * APARTALO CORE - Handler Estándar v5
  * 
- * Flujo conversacional con soporte para envío de fotos de productos
- * FIX: Búsqueda de producto cuando IA devuelve solo nombre
+ * Flujo conversacional limpio - sin emojis excesivos, sin mostrar stock
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -41,7 +40,7 @@ async function handle(from, message, context) {
 
   if (mensajeNormalizado === 'cancelar') {
     stateManager.resetState(from, negocio.id);
-    await whatsapp.sendMessage(from, 'Operación cancelada. ¿En qué más te puedo ayudar? 😊');
+    await whatsapp.sendMessage(from, 'Operación cancelada. ¿En qué más te puedo ayudar?');
     return await mostrarMenuPrincipal(from, context);
   }
 
@@ -128,41 +127,37 @@ async function manejarMensajeConIA(from, message, context) {
       return await mostrarCatalogo(from, context);
 
     case 'enviar_foto':
-      // Enviar foto del producto
       let productoFoto = resultado.datos?.producto;
       
-      // Si producto es string (nombre), buscar en lista
       if (typeof productoFoto === 'string') {
         productoFoto = buscarProductoPorNombre(productoFoto, productos);
       }
       
-      // Si no tiene campos completos, buscar por nombre
       if (productoFoto && (!productoFoto.precio || productoFoto.precio === undefined)) {
         const nombreBuscar = productoFoto.nombre || productoFoto;
         productoFoto = buscarProductoPorNombre(String(nombreBuscar), productos);
       }
       
-      console.log(`   📦 Producto encontrado:`, productoFoto ? productoFoto.nombre : 'NO');
+      console.log(`   Producto encontrado:`, productoFoto ? productoFoto.nombre : 'NO');
       
       if (productoFoto && productoFoto.precio) {
         const imagenUrl = productoFoto.imagenUrl || productoFoto.imagen || productoFoto.ImagenURL;
         
         if (imagenUrl) {
-          console.log(`   📷 Enviando foto: ${imagenUrl.substring(0, 50)}...`);
+          console.log(`   Enviando foto: ${imagenUrl.substring(0, 50)}...`);
           const urlFinal = convertirUrlGoogleDrive(imagenUrl);
-          const caption = `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\n¿Te interesa? 😊`;
+          const caption = `*${productoFoto.nombre}*\nS/${productoFoto.precio}\n\n¿Te interesa?`;
           
           try {
             await whatsapp.sendImage(from, urlFinal, caption);
           } catch (error) {
-            console.error('❌ Error enviando imagen:', error.message);
-            await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\n(No pude cargar la imagen)\n\n¿Te interesa?`);
+            console.error('Error enviando imagen:', error.message);
+            await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\nS/${productoFoto.precio}\n\n(No pude cargar la imagen)\n\n¿Te interesa?`);
           }
         } else {
-          await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\n💰 S/${productoFoto.precio}\n📦 Stock: ${productoFoto.disponible || productoFoto.stock || 'Disponible'}\n\nEste producto no tiene foto disponible.\n\n¿Te interesa?`);
+          await whatsapp.sendMessage(from, `*${productoFoto.nombre}*\nS/${productoFoto.precio}\n\nEste producto no tiene foto disponible.\n\n¿Te interesa?`);
         }
         
-        // Guardar producto seleccionado
         stateManager.updateData(from, negocio.id, { 
           ultimoProducto: productoFoto,
           productos 
@@ -170,15 +165,13 @@ async function manejarMensajeConIA(from, message, context) {
         return;
       }
       
-      // No se encontró el producto
-      await whatsapp.sendMessage(from, resultado.respuesta || '¿De qué producto quieres ver la foto? 📷');
+      await whatsapp.sendMessage(from, resultado.respuesta || '¿De qué producto quieres ver la foto?');
       return;
 
     case 'info_producto':
     case 'confirmar_compra':
       let productoInfo = resultado.datos?.producto;
       
-      // Buscar producto si viene incompleto
       if (typeof productoInfo === 'string') {
         productoInfo = buscarProductoPorNombre(productoInfo, productos);
       }
@@ -196,8 +189,8 @@ async function manejarMensajeConIA(from, message, context) {
           });
         } else {
           await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-            { id: `comprar_${productoInfo.codigo}`, title: '🛒 Comprar' },
-            { id: `foto_${productoInfo.codigo}`, title: '📷 Ver foto' }
+            { id: `comprar_${productoInfo.codigo}`, title: 'Comprar' },
+            { id: `foto_${productoInfo.codigo}`, title: 'Ver foto' }
           ]);
           stateManager.updateData(from, negocio.id, { 
             ultimoProducto: productoInfo,
@@ -214,11 +207,11 @@ async function manejarMensajeConIA(from, message, context) {
       return;
 
     case 'contactar':
-      await whatsapp.sendMessage(from, resultado.respuesta || 'Te conecto con alguien del equipo 👤');
+      await whatsapp.sendMessage(from, resultado.respuesta || 'Te conecto con alguien del equipo');
       await whatsapp.sendMessage(from, 
-        `📱 *${negocio.nombre}*\n\n` +
+        `*${negocio.nombre}*\n\n` +
         `Escribe tu consulta y te responderemos pronto.\n\n` +
-        `⏰ Horario: Lun-Sab 9am-6pm\n\n` +
+        `Horario: Lun-Sab 9am-6pm\n\n` +
         `_Escribe "menu" para volver_`
       );
       return;
@@ -249,7 +242,6 @@ async function manejarMensajeConIA(from, message, context) {
         await whatsapp.sendMessage(from, resultado.respuesta);
       }
       
-      // Solo mostrar menú si es un saludo explícito
       if (/^(hola|buenos días|buenas tardes|buenas noches)$/i.test(mensajeLimpio)) {
         return await mostrarMenuPrincipal(from, context);
       }
@@ -265,14 +257,12 @@ function buscarProductoPorNombre(nombre, productos) {
   
   const nombreLower = String(nombre).toLowerCase();
   
-  // Búsqueda exacta primero
   let encontrado = productos.find(p => 
     p.nombre.toLowerCase() === nombreLower
   );
   
   if (encontrado) return encontrado;
   
-  // Búsqueda parcial
   encontrado = productos.find(p => 
     p.nombre.toLowerCase().includes(nombreLower) ||
     nombreLower.includes(p.nombre.toLowerCase())
@@ -280,7 +270,6 @@ function buscarProductoPorNombre(nombre, productos) {
   
   if (encontrado) return encontrado;
   
-  // Buscar por palabras clave
   const palabras = nombreLower.split(/\s+/).filter(p => p.length > 3);
   for (const palabra of palabras) {
     if (['foto', 'imagen', 'quiero', 'dame', 'muestra'].includes(palabra)) continue;
@@ -335,28 +324,28 @@ async function mostrarMenuPrincipal(from, context) {
   let botones = [];
 
   if (!cliente && pedidosActivos.length === 0) {
-    mensaje = `${saludo}! 👋\n\nBienvenido a *${negocio.nombre}*\n\n¿En qué te puedo ayudar?`;
+    mensaje = `${saludo}\n\nBienvenido a *${negocio.nombre}*\n\n¿En qué te puedo ayudar?`;
     botones = [
-      { id: 'ver_catalogo', title: 'Ver catálogo 📦' },
-      { id: 'contactar', title: 'Contactar 💬' }
+      { id: 'ver_catalogo', title: 'Ver catálogo' },
+      { id: 'contactar', title: 'Contactar' }
     ];
   } else if (pedidosActivos.length > 0) {
-    mensaje = `${saludo}! 👋\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
+    mensaje = `${saludo}\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
-      mensaje += `• *${p.id}* - ${formatOrderStatus(p.estado)}\n`;
+      mensaje += `*${p.id}* - ${formatOrderStatus(p.estado)}\n`;
     });
     mensaje += `\n¿Qué deseas hacer?`;
     botones = [
-      { id: 'ver_pedidos', title: 'Ver pedidos 📋' },
-      { id: 'ver_catalogo', title: 'Nuevo pedido 🛒' }
+      { id: 'ver_pedidos', title: 'Ver pedidos' },
+      { id: 'ver_catalogo', title: 'Nuevo pedido' }
     ];
   } else {
     const nombreCliente = cliente?.nombre?.split(' ')[0] || '';
-    mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}! 👋\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
+    mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}\n\nBienvenido de vuelta a *${negocio.nombre}*\n\n¿Qué te gustaría hacer?`;
     botones = [
-      { id: 'ver_catalogo', title: 'Ver catálogo 📦' },
-      { id: 'repetir_pedido', title: 'Repetir pedido 🔄' },
-      { id: 'contactar', title: 'Contactar 💬' }
+      { id: 'ver_catalogo', title: 'Ver catálogo' },
+      { id: 'repetir_pedido', title: 'Repetir pedido' },
+      { id: 'contactar', title: 'Contactar' }
     ];
   }
 
@@ -370,7 +359,6 @@ async function manejarMenu(from, text, interactiveData, context) {
   const opcion = interactiveData?.id || text?.toLowerCase() || '';
   const state = stateManager.getState(from, negocio.id);
 
-  // Manejar botones de producto (comprar_XXX, foto_XXX)
   if (opcion.startsWith('comprar_') || opcion === 'comprar_ahora') {
     const codigo = opcion.replace('comprar_', '').replace('ahora', '');
     const productos = await sheets.getProductos('PUBLICADO');
@@ -384,7 +372,7 @@ async function manejarMenu(from, text, interactiveData, context) {
     }
     
     if (producto) {
-      await whatsapp.sendMessage(from, `¡Perfecto! *${producto.nombre}* a S/${producto.precio}\n\n¿Cuántas unidades deseas?`);
+      await whatsapp.sendMessage(from, `*${producto.nombre}* - S/${producto.precio}\n\n¿Cuántas unidades deseas?`);
       stateManager.setState(from, negocio.id, {
         step: 'cantidad',
         data: { productoSeleccionado: producto, productos }
@@ -405,10 +393,10 @@ async function manejarMenu(from, text, interactiveData, context) {
         try {
           await whatsapp.sendImage(from, urlFinal, `*${producto.nombre}*\nS/${producto.precio}`);
         } catch (error) {
-          await whatsapp.sendMessage(from, 'No pude cargar la imagen 😅');
+          await whatsapp.sendMessage(from, 'No pude cargar la imagen');
         }
       } else {
-        await whatsapp.sendMessage(from, 'Este producto no tiene foto disponible 😅');
+        await whatsapp.sendMessage(from, 'Este producto no tiene foto disponible');
       }
       return;
     }
@@ -428,21 +416,20 @@ async function manejarMenu(from, text, interactiveData, context) {
 
   if (opcion.includes('contactar') || opcion === 'contactar') {
     await whatsapp.sendMessage(from, 
-      `📱 *${negocio.nombre}*\n\n` +
-      `Escribe tu consulta y te responderemos pronto 😊\n\n` +
-      `⏰ Horario: Lun-Sab 9am-6pm\n\n` +
+      `*${negocio.nombre}*\n\n` +
+      `Escribe tu consulta y te responderemos pronto.\n\n` +
+      `Horario: Lun-Sab 9am-6pm\n\n` +
       `_Escribe "menu" para volver_`
     );
     return;
   }
 
   if (opcion === 'es_voucher') {
-    await whatsapp.sendMessage(from, '📸 Perfecto! Envía la foto de tu comprobante.');
+    await whatsapp.sendMessage(from, 'Envía la foto de tu comprobante.');
     stateManager.setStep(from, negocio.id, 'esperando_voucher');
     return;
   }
 
-  // Si no es comando conocido, usar IA
   return await manejarMensajeConIA(from, { text, type: 'text', interactiveData }, context);
 }
 
@@ -456,25 +443,22 @@ async function mostrarCatalogo(from, context) {
   const productos = await sheets.getProductos('PUBLICADO');
 
   if (productos.length === 0) {
-    await whatsapp.sendMessage(from, 'No hay productos disponibles en este momento 😅');
+    await whatsapp.sendMessage(from, 'No hay productos disponibles en este momento.');
     return await mostrarMenuPrincipal(from, context);
   }
 
-  let mensaje = `📦 *CATÁLOGO ${negocio.nombre.toUpperCase()}*\n\n`;
+  let mensaje = `*CATÁLOGO ${negocio.nombre.toUpperCase()}*\n\n`;
 
   productos.slice(0, 10).forEach((p, i) => {
-    const stock = p.disponible || p.stock || 0;
-    const stockInfo = stock > 0 ? `✅ ${stock} disp.` : '⚠️ Agotado';
-    const tieneImagen = (p.imagenUrl || p.imagen || p.ImagenURL) ? '📷' : '';
-    mensaje += `*${i + 1}.* ${p.nombre} ${tieneImagen}\n`;
-    mensaje += `   ${formatPrice(p.precio)} | ${stockInfo}\n\n`;
+    mensaje += `*${i + 1}.* ${p.nombre}\n`;
+    mensaje += `   S/${p.precio}\n\n`;
   });
 
   if (productos.length > 10) {
     mensaje += `_...y ${productos.length - 10} más_\n\n`;
   }
 
-  mensaje += `Escribe el *número* para ver detalles y foto 👇`;
+  mensaje += `Escribe el *número* para ver detalles y foto`;
 
   await whatsapp.sendMessage(from, mensaje);
 
@@ -496,45 +480,42 @@ async function manejarSeleccionProducto(from, text, context) {
   }
 
   if (numero < 1 || numero > productos.length) {
-    await whatsapp.sendMessage(from, `Elige un número del 1 al ${productos.length} 😊`);
+    await whatsapp.sendMessage(from, `Elige un número del 1 al ${productos.length}`);
     return;
   }
 
   const producto = productos[numero - 1];
   const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
 
-  // Si tiene imagen, enviarla con botones
   if (imagenUrl) {
     const urlFinal = convertirUrlGoogleDrive(imagenUrl);
-    const caption = `*${producto.nombre}*\n\n` +
-      (producto.descripcion ? `${producto.descripcion}\n\n` : '') +
-      `💰 Precio: ${formatPrice(producto.precio)}\n` +
-      `📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}`;
+    const caption = `*${producto.nombre}*\n` +
+      (producto.descripcion ? `${producto.descripcion}\n\n` : '\n') +
+      `Precio: S/${producto.precio}`;
     
     try {
       await whatsapp.sendImage(from, urlFinal, caption);
       await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-        { id: 'comprar_ahora', title: '🛒 Comprar' },
-        { id: 'ver_catalogo', title: '👀 Ver más' }
+        { id: 'comprar_ahora', title: 'Comprar' },
+        { id: 'ver_catalogo', title: 'Ver más' }
       ]);
     } catch (error) {
-      console.error('❌ Error enviando imagen:', error.message);
+      console.error('Error enviando imagen:', error.message);
       await whatsapp.sendMessage(from, caption + '\n\n(No pude cargar la imagen)');
       await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-        { id: 'comprar_ahora', title: '🛒 Comprar' },
-        { id: 'ver_catalogo', title: '👀 Ver más' }
+        { id: 'comprar_ahora', title: 'Comprar' },
+        { id: 'ver_catalogo', title: 'Ver más' }
       ]);
     }
   } else {
-    let mensaje = `*${producto.nombre}*\n\n`;
+    let mensaje = `*${producto.nombre}*\n`;
     if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
-    mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
-    mensaje += `📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}`;
+    mensaje += `Precio: S/${producto.precio}`;
     
     await whatsapp.sendMessage(from, mensaje);
     await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-      { id: 'comprar_ahora', title: '🛒 Comprar' },
-      { id: 'ver_catalogo', title: '👀 Ver más' }
+      { id: 'comprar_ahora', title: 'Comprar' },
+      { id: 'ver_catalogo', title: 'Ver más' }
     ]);
   }
 
@@ -546,7 +527,6 @@ async function manejarCantidad(from, text, context) {
   const state = stateManager.getState(from, negocio.id);
   const producto = state.data?.productoSeleccionado;
 
-  // Manejar botón "Comprar"
   if (text === 'comprar_ahora') {
     await whatsapp.sendMessage(from, `¿Cuántas unidades de *${producto.nombre}* deseas?`);
     stateManager.setStep(from, negocio.id, 'cantidad');
@@ -560,30 +540,30 @@ async function manejarCantidad(from, text, context) {
   const cantidad = parseInt(text);
 
   if (isNaN(cantidad) || cantidad < 1) {
-    await whatsapp.sendMessage(from, 'Ingresa una cantidad válida (mínimo 1) 😊');
+    await whatsapp.sendMessage(from, 'Ingresa una cantidad válida (mínimo 1)');
     return;
   }
 
   const disponible = producto.disponible || producto.stock || 999;
   if (cantidad > disponible) {
-    await whatsapp.sendMessage(from, `Solo tenemos ${disponible} disponibles 😅`);
+    await whatsapp.sendMessage(from, `Lo sentimos, no tenemos suficiente stock disponible.`);
     return;
   }
 
   const total = cantidad * producto.precio;
 
-  const mensaje = `*📋 RESUMEN*\n\n` +
-    `📦 ${producto.nombre}\n` +
-    `   Cantidad: ${cantidad}\n` +
-    `   Precio: ${formatPrice(producto.precio)} c/u\n\n` +
+  const mensaje = `*RESUMEN*\n\n` +
+    `${producto.nombre}\n` +
+    `Cantidad: ${cantidad}\n` +
+    `Precio: S/${producto.precio} c/u\n\n` +
     `━━━━━━━━━━━━━━━━━\n` +
-    `*TOTAL: ${formatPrice(total)}*\n` +
+    `*TOTAL: S/${total}*\n` +
     `━━━━━━━━━━━━━━━━━\n\n` +
-    `¿Confirmamos? 🛒`;
+    `¿Confirmamos?`;
 
   await whatsapp.sendButtonMessage(from, mensaje, [
-    { id: 'confirmar_si', title: '✅ Sí, confirmar' },
-    { id: 'confirmar_no', title: '❌ Cancelar' }
+    { id: 'confirmar_si', title: 'Sí, confirmar' },
+    { id: 'confirmar_no', title: 'Cancelar' }
   ]);
 
   stateManager.updateData(from, negocio.id, { cantidad, total });
@@ -600,12 +580,12 @@ async function manejarConfirmacion(from, text, interactiveData, context) {
 
   if (opcion.includes('no') || opcion === 'confirmar_no') {
     stateManager.resetState(from, negocio.id);
-    await whatsapp.sendMessage(from, 'Pedido cancelado. ¿Algo más? 😊');
+    await whatsapp.sendMessage(from, 'Pedido cancelado. ¿Algo más en que te pueda ayudar?');
     return await mostrarMenuPrincipal(from, context);
   }
 
   if (!opcion.includes('sí') && !opcion.includes('si') && opcion !== 'confirmar_si') {
-    await whatsapp.sendMessage(from, 'Usa los botones para confirmar o cancelar 👆');
+    await whatsapp.sendMessage(from, 'Usa los botones para confirmar o cancelar');
     return;
   }
 
@@ -616,7 +596,7 @@ async function manejarConfirmacion(from, text, interactiveData, context) {
   }
 
   await whatsapp.sendMessage(from, 
-    '*📝 DATOS DE ENVÍO*\n\n' +
+    '*DATOS DE ENVÍO*\n\n' +
     'Necesito algunos datos.\n\n' +
     '¿Cuál es tu *nombre completo*?'
   );
@@ -627,12 +607,12 @@ async function manejarDatosNombre(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
 
   if (!text || text.length < 3) {
-    await whatsapp.sendMessage(from, 'Ingresa tu nombre completo 😊');
+    await whatsapp.sendMessage(from, 'Ingresa tu nombre completo');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { nombre: text });
-  await whatsapp.sendMessage(from, `Gracias ${text.split(' ')[0]}! 😊\n\n¿Tu *teléfono*?`);
+  await whatsapp.sendMessage(from, `Gracias ${text.split(' ')[0]}\n\n¿Tu *teléfono*?`);
   stateManager.setStep(from, negocio.id, 'datos_telefono');
 }
 
@@ -641,12 +621,12 @@ async function manejarDatosTelefono(from, text, context) {
   const telefono = text.replace(/[^0-9]/g, '');
 
   if (telefono.length < 9) {
-    await whatsapp.sendMessage(from, 'Ingresa un teléfono válido (9 dígitos) 📱');
+    await whatsapp.sendMessage(from, 'Ingresa un teléfono válido (9 dígitos)');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { telefono });
-  await whatsapp.sendMessage(from, '¡Perfecto! 📍\n\n¿Tu *dirección completa* (con distrito)?');
+  await whatsapp.sendMessage(from, 'Perfecto\n\n¿Tu *dirección completa* (con distrito)?');
   stateManager.setStep(from, negocio.id, 'datos_direccion');
 }
 
@@ -654,12 +634,12 @@ async function manejarDatosDireccion(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
 
   if (!text || text.length < 10) {
-    await whatsapp.sendMessage(from, 'Dirección más completa por favor (incluye distrito) 📍');
+    await whatsapp.sendMessage(from, 'Dirección más completa por favor (incluye distrito)');
     return;
   }
 
   stateManager.updateData(from, negocio.id, { direccion: text });
-  await whatsapp.sendMessage(from, 'Último dato! 🏙️\n\n¿*Ciudad o distrito*?');
+  await whatsapp.sendMessage(from, 'Último dato\n\n¿*Ciudad o distrito*?');
   stateManager.setStep(from, negocio.id, 'datos_ciudad');
 }
 
@@ -698,7 +678,7 @@ async function crearPedido(from, context, cliente) {
   const reserva = await sheets.reservarStock(productoSeleccionado.codigo, cantidad);
   
   if (!reserva.success) {
-    await whatsapp.sendMessage(from, `😅 ${reserva.error}\n\n¿Quieres ver otros productos?`);
+    await whatsapp.sendMessage(from, `${reserva.error}\n\n¿Quieres ver otros productos?`);
     return await mostrarMenuPrincipal(from, context);
   }
 
@@ -720,33 +700,33 @@ async function crearPedido(from, context, cliente) {
   });
 
   if (!pedido) {
-    await whatsapp.sendMessage(from, '😅 Error al crear pedido. Intenta de nuevo.');
+    await whatsapp.sendMessage(from, 'Error al crear pedido. Intenta de nuevo.');
     return;
   }
 
   const metodosPago = await sheets.getMetodosPago();
   
-  let mensajePago = `🎉 *¡PEDIDO REGISTRADO!*\n\n`;
-  mensajePago += `📋 Código: *${pedido.id}*\n`;
-  mensajePago += `📦 ${productoSeleccionado.nombre} x${cantidad}\n`;
-  mensajePago += `💰 Total: *${formatPrice(total)}*\n\n`;
+  let mensajePago = `*PEDIDO REGISTRADO*\n\n`;
+  mensajePago += `Código: *${pedido.id}*\n`;
+  mensajePago += `${productoSeleccionado.nombre} x${cantidad}\n`;
+  mensajePago += `Total: *S/${total}*\n\n`;
   mensajePago += `━━━━━━━━━━━━━━━━━\n`;
   mensajePago += `*MÉTODOS DE PAGO:*\n\n`;
 
   metodosPago.forEach(m => {
     if (m.tipo === 'yape' || m.tipo === 'plin') {
-      mensajePago += `📱 *${m.tipo.toUpperCase()}*: ${m.numero}\n`;
+      mensajePago += `*${m.tipo.toUpperCase()}*: ${m.numero}\n`;
     } else {
-      mensajePago += `🏦 *${m.tipo.toUpperCase()}*\n`;
-      mensajePago += `   Cuenta: ${m.cuenta}\n`;
-      if (m.cci) mensajePago += `   CCI: ${m.cci}\n`;
+      mensajePago += `*${m.tipo.toUpperCase()}*\n`;
+      mensajePago += `Cuenta: ${m.cuenta}\n`;
+      if (m.cci) mensajePago += `CCI: ${m.cci}\n`;
     }
-    if (m.titular) mensajePago += `   Titular: ${m.titular}\n`;
+    if (m.titular) mensajePago += `Titular: ${m.titular}\n`;
     mensajePago += '\n';
   });
 
   mensajePago += `━━━━━━━━━━━━━━━━━\n\n`;
-  mensajePago += `📸 *Envía foto del comprobante* para confirmar.`;
+  mensajePago += `*Envía foto del comprobante* para confirmar.`;
 
   await whatsapp.sendMessage(from, mensajePago);
 
@@ -762,7 +742,7 @@ async function manejarVoucher(from, message, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
   if (message.type !== 'image') {
-    await whatsapp.sendMessage(from, '📸 Envía una *foto* del comprobante.');
+    await whatsapp.sendMessage(from, 'Envía una *foto* del comprobante.');
     return;
   }
 
@@ -771,7 +751,7 @@ async function manejarVoucher(from, message, context) {
 
   if (!pedidoId) {
     await whatsapp.sendMessage(from, 
-      '🤔 No tienes un pedido pendiente.\n\n¿Quieres hacer uno nuevo?'
+      'No tienes un pedido pendiente.\n\n¿Quieres hacer uno nuevo?'
     );
     return await mostrarMenuPrincipal(from, context);
   }
@@ -779,10 +759,10 @@ async function manejarVoucher(from, message, context) {
   await sheets.updateEstadoPedido(pedidoId, config.orderStates.PENDING_VALIDATION);
 
   await whatsapp.sendMessage(from,
-    `✅ *¡COMPROBANTE RECIBIDO!*\n\n` +
+    `*COMPROBANTE RECIBIDO*\n\n` +
     `Pedido *${pedidoId}* en validación.\n\n` +
-    `Te avisamos cuando esté confirmado 📦\n\n` +
-    `¡Gracias! 🙏`
+    `Te avisamos cuando esté confirmado.\n\n` +
+    `¡Gracias!`
   );
 
   stateManager.resetState(from, negocio.id);
@@ -798,16 +778,15 @@ async function mostrarPedidos(from, context) {
   const pedidos = await sheets.getPedidosByWhatsapp(from);
   
   if (pedidos.length === 0) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos aún 📭');
+    await whatsapp.sendMessage(from, 'No tienes pedidos aún');
     return await mostrarMenuPrincipal(from, context);
   }
 
-  let mensaje = `*📋 TUS PEDIDOS*\n\n`;
+  let mensaje = `*TUS PEDIDOS*\n\n`;
 
   pedidos.slice(0, 5).forEach(p => {
-    const emoji = p.estado === 'ENTREGADO' ? '✅' : p.estado === 'CANCELADO' ? '❌' : '📦';
-    mensaje += `${emoji} *${p.id}*\n`;
-    mensaje += `   ${formatOrderStatus(p.estado)} | ${formatPrice(p.total)}\n\n`;
+    mensaje += `*${p.id}*\n`;
+    mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n\n`;
   });
 
   await whatsapp.sendMessage(from, mensaje);
@@ -820,21 +799,21 @@ async function repetirUltimoPedido(from, context) {
   const ultimoPedido = pedidos.find(p => p.estado === 'ENTREGADO');
 
   if (!ultimoPedido) {
-    await whatsapp.sendMessage(from, 'No tienes pedidos anteriores 😅');
+    await whatsapp.sendMessage(from, 'No tienes pedidos anteriores');
     return await mostrarCatalogo(from, context);
   }
 
-  await whatsapp.sendMessage(from, '🔄 Función próximamente disponible.\n\nTe muestro el catálogo:');
+  await whatsapp.sendMessage(from, 'Función próximamente disponible.\n\nTe muestro el catálogo:');
   return await mostrarCatalogo(from, context);
 }
 
 async function procesarPedidoCatalogo(from, items, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  console.log('🛒 Pedido desde catálogo WhatsApp');
+  console.log('Pedido desde catálogo WhatsApp');
 
   await whatsapp.sendMessage(from, 
-    `✅ Recibí tu selección de ${items.length} producto(s) 🛒\n\n` +
+    `Recibí tu selección de ${items.length} producto(s)\n\n` +
     `Procesando...`
   );
 
