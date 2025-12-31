@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA v5
+ * APARTALO CORE - Servicio de IA v6
  * 
- * IA contextual - mejor detección de solicitudes de catálogo
+ * IA contextual - con soporte para consulta de pedidos
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -162,15 +162,16 @@ CONTEXTO: ${contextoEstado}
 REGLAS IMPORTANTES:
 1. NO uses emojis en las respuestas
 2. NO muestres información de stock al cliente
-3. Si piden "listame", "qué tipos", "cuáles hay", "muéstrame opciones" -> usar acción "ver_catalogo"
-4. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
-5. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
-6. Si no es claro -> PREGUNTAR qué necesitan
+3. Si piden "mis pedidos", "estado de pedido", "qué pedidos tengo" -> usar acción "ver_pedidos"
+4. Si piden "listame", "qué tipos", "cuáles hay" -> usar acción "ver_catalogo"
+5. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
+6. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
 7. Respuestas cortas y profesionales (2-3 líneas máximo)
 
 ACCIONES (JSON):
-- ver_catalogo: Si piden ver productos, listar, tipos disponibles, opciones
-- enviar_foto: Enviar foto de un producto {producto: "nombre del producto"}
+- ver_pedidos: Consultar pedidos del cliente
+- ver_catalogo: Si piden ver productos, listar, tipos disponibles
+- enviar_foto: Enviar foto de un producto {producto: "nombre"}
 - info_producto: Info sin foto {producto: "nombre"}
 - confirmar_compra: Quiere comprar {producto: "nombre"}
 - preguntar: Pedir aclaración
@@ -276,8 +277,16 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     const msg = mensaje.toLowerCase().trim();
     const { productos = [], estadoActual = 'inicio', negocio } = contexto;
 
+    // ========== CONSULTA DE PEDIDOS ==========
+    if (this.quiereVerPedidos(msg)) {
+      return {
+        respuesta: '',
+        accion: 'ver_pedidos',
+        datos: {}
+      };
+    }
+
     // ========== SOLICITUD DE LISTAR/VER CATÁLOGO ==========
-    // Detectar frases como: "listame", "qué tipos", "cuáles hay", "opciones", etc.
     if (this.quiereVerCatalogo(msg)) {
       return {
         respuesta: '',
@@ -466,7 +475,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     // ========== AYUDA ==========
     if (msg.includes('ayuda') || msg.includes('help')) {
       return {
-        respuesta: 'Te ayudo.\n\nPuedo:\n- Mostrarte fotos de productos\n- Darte precios\n- Ayudarte a comprar\n\n¿Qué necesitas?',
+        respuesta: 'Te ayudo.\n\nPuedo:\n- Mostrarte fotos de productos\n- Darte precios\n- Ayudarte a comprar\n- Ver tus pedidos\n\n¿Qué necesitas?',
         accion: 'continuar',
         datos: {}
       };
@@ -481,10 +490,38 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
   }
 
   /**
+   * Detectar si el usuario quiere ver sus pedidos
+   */
+  quiereVerPedidos(msg) {
+    const frasesPedidos = [
+      'mis pedidos', 'mi pedido',
+      'pedidos tengo', 'pedido tengo',
+      'estado de mi pedido', 'estado del pedido', 'estado pedido',
+      'ver pedidos', 'ver pedido',
+      'consultar pedido', 'consultar pedidos',
+      'donde está mi pedido', 'donde esta mi pedido',
+      'rastrear pedido', 'rastrear',
+      'seguimiento', 'tracking',
+      'qué pedidos', 'que pedidos',
+      'mis compras', 'mi compra'
+    ];
+    
+    for (const frase of frasesPedidos) {
+      if (msg.includes(frase)) return true;
+    }
+    
+    // Patrones regex
+    if (/qu[eé]\s+pedidos?\s+tengo/.test(msg)) return true;
+    if (/tengo\s+pedidos?/.test(msg)) return true;
+    if (/mis?\s+pedidos?/.test(msg)) return true;
+    
+    return false;
+  }
+
+  /**
    * Detectar si el usuario quiere ver el catálogo/lista de productos
    */
   quiereVerCatalogo(msg) {
-    // Palabras clave directas
     const palabrasCatalogo = [
       'catálogo', 'catalogo', 
       'productos', 
@@ -500,14 +537,11 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       if (msg.includes(palabra)) return true;
     }
     
-    // Frases de tipos/variantes
-    // "qué tipos tiene", "qué tipos hay", "cuáles tipos", etc.
     if (/qu[eé]\s+tipos/.test(msg)) return true;
     if (/cu[aá]les\s+(tipos|hay|tienen|son)/.test(msg)) return true;
     if (/qu[eé]\s+variedades/.test(msg)) return true;
     if (/qu[eé]\s+modelos/.test(msg)) return true;
     
-    // "listame" sin contexto
     if (/^listame$/.test(msg)) return true;
     if (/^lista$/.test(msg)) return true;
     if (/^ver$/.test(msg)) return true;
