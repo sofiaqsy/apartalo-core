@@ -1,8 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA
+ * APARTALO CORE - Servicio de IA Mejorado
  * 
- * Usa Groq (Llama 3.3) como principal y Gemini como backup
- * Para hacer el bot más cálido e inteligente cuando el usuario se pierde
+ * IA contextual que entiende el flujo de compra y responde naturalmente
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -17,9 +16,6 @@ class AIService {
     this.initialized = false;
   }
 
-  /**
-   * Inicializar y verificar conexión
-   */
   async initialize() {
     console.log('🤖 AI Service inicializando...');
     console.log(`   GROQ_API_KEY: ${GROQ_API_KEY ? 'SET (' + GROQ_API_KEY.substring(0, 10) + '...)' : 'NOT SET'}`);
@@ -39,28 +35,42 @@ class AIService {
       return true;
     }
 
-    console.log('⚠️ IA: Sin API keys configuradas - usando respuestas locales');
+    console.log('⚠️ IA: Sin API keys - usando respuestas locales');
     return false;
   }
 
   /**
-   * Generar respuesta inteligente para mensaje no entendido
-   * @param {string} mensaje - Mensaje del usuario
-   * @param {object} contexto - Contexto del negocio y productos
-   * @returns {object} - { respuesta, accion, datos }
+   * Procesar mensaje con contexto completo
    */
   async procesarMensaje(mensaje, contexto = {}) {
-    console.log(`🤖 AI procesarMensaje: "${mensaje}"`);
-    console.log(`   initialized: ${this.initialized}, provider: ${this.provider}`);
+    const { tipoMensaje = 'text' } = contexto;
     
+    console.log(`🤖 AI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
+    
+    // Manejar tipos especiales de mensaje
+    if (tipoMensaje === 'image') {
+      return this.manejarImagen(mensaje, contexto);
+    }
+    
+    if (tipoMensaje === 'location') {
+      return this.manejarUbicacion(mensaje, contexto);
+    }
+    
+    if (tipoMensaje === 'document') {
+      return this.manejarDocumento(mensaje, contexto);
+    }
+    
+    if (tipoMensaje === 'audio' || tipoMensaje === 'voice') {
+      return this.manejarAudio(mensaje, contexto);
+    }
+
+    // Mensaje de texto normal
     if (!this.initialized) {
-      console.log('   → Usando respuesta local (no inicializado)');
       return this.respuestaLocal(mensaje, contexto);
     }
 
     try {
-      const prompt = this.construirPrompt(mensaje, contexto);
-      console.log('   → Llamando a', this.provider);
+      const prompt = this.construirPromptInteligente(mensaje, contexto);
       
       let resultado;
       if (this.provider === 'groq') {
@@ -70,64 +80,174 @@ class AIService {
       }
 
       if (resultado) {
-        console.log(`   → Resultado IA: accion=${resultado.accion}`);
+        console.log(`   → IA resultado: ${resultado.accion}`);
         return resultado;
       }
     } catch (error) {
       console.error('❌ Error IA:', error.message);
     }
 
-    console.log('   → Fallback a respuesta local');
     return this.respuestaLocal(mensaje, contexto);
   }
 
   /**
-   * Construir prompt para la IA
+   * Manejar imagen recibida
    */
-  construirPrompt(mensaje, contexto) {
-    const { negocio, productos = [], estadoActual = 'menu' } = contexto;
-    
-    const productosTexto = productos.slice(0, 10).map(p => 
-      `- ${p.nombre}: S/${p.precio} (stock: ${p.disponible || p.stock || 0})`
-    ).join('\n');
+  manejarImagen(caption, contexto) {
+    const { estadoActual = 'inicio' } = contexto;
+    console.log(`   📷 Imagen recibida en estado: ${estadoActual}`);
 
-    return `Eres el asistente de WhatsApp de "${negocio?.nombre || 'la tienda'}".
-Tu objetivo es ayudar al cliente de forma CÁLIDA y ÚTIL.
+    // Si estamos esperando voucher
+    if (estadoActual === 'esperando_voucher') {
+      return {
+        respuesta: null, // El handler se encarga
+        accion: 'procesar_voucher',
+        datos: {}
+      };
+    }
 
-PRODUCTOS DISPONIBLES:
-${productosTexto || 'No hay productos cargados'}
+    // Si estamos en otro estado, preguntar qué es
+    if (caption) {
+      return {
+        respuesta: `Recibí tu imagen 📷\n\n"${caption}"\n\n¿En qué te puedo ayudar con esto?`,
+        accion: 'continuar',
+        datos: { tieneImagen: true, caption }
+      };
+    }
 
-ESTADO ACTUAL DEL CLIENTE: ${estadoActual}
-
-REGLAS:
-1. Sé amable y usa emojis moderadamente
-2. Si preguntan por un producto, búscalo en la lista
-3. Si quieren comprar algo, guíalos al catálogo
-4. Si no entiendes, pide aclaración amablemente
-5. Respuestas cortas (máximo 3 líneas)
-
-ACCIONES DISPONIBLES (responde en JSON):
-- ver_catalogo: Mostrar productos
-- buscar_producto: Buscar un producto específico {buscar: "término"}
-- contactar: Hablar con humano
-- continuar: Solo responder, no hacer acción
-- menu: Volver al menú principal
-
-MENSAJE DEL CLIENTE: "${mensaje}"
-
-Responde SOLO en este formato JSON:
-{
-  "respuesta": "texto amable para el cliente",
-  "accion": "nombre_accion",
-  "datos": {}
-}`;
+    return {
+      respuesta: '¡Recibí tu imagen! 📷\n\n¿Es un comprobante de pago o quieres que te ayude con algo?',
+      accion: 'preguntar_imagen',
+      datos: { tieneImagen: true }
+    };
   }
 
   /**
-   * Llamar a Groq API
+   * Manejar ubicación recibida
    */
+  manejarUbicacion(mensaje, contexto) {
+    const { estadoActual = 'inicio' } = contexto;
+    console.log(`   📍 Ubicación recibida en estado: ${estadoActual}`);
+
+    if (estadoActual === 'datos_direccion' || estadoActual === 'datos_ciudad') {
+      return {
+        respuesta: '¡Perfecto! Recibí tu ubicación 📍\n\n¿Puedes confirmarme la dirección exacta con número de casa/depto?',
+        accion: 'guardar_ubicacion',
+        datos: { tieneUbicacion: true }
+      };
+    }
+
+    return {
+      respuesta: '¡Gracias por compartir tu ubicación! 📍\n\n¿Quieres que te enviemos algo a esta dirección?',
+      accion: 'continuar',
+      datos: { tieneUbicacion: true }
+    };
+  }
+
+  /**
+   * Manejar documento recibido
+   */
+  manejarDocumento(mensaje, contexto) {
+    return {
+      respuesta: 'Recibí tu documento 📄\n\nPor ahora solo procesamos imágenes de comprobantes de pago.\n\n¿Puedes enviarlo como foto?',
+      accion: 'continuar',
+      datos: { tieneDocumento: true }
+    };
+  }
+
+  /**
+   * Manejar audio/voz recibido
+   */
+  manejarAudio(mensaje, contexto) {
+    return {
+      respuesta: '🎤 Recibí tu mensaje de voz.\n\nPor ahora no puedo escuchar audios, pero puedes escribirme y te ayudo con gusto 😊',
+      accion: 'continuar',
+      datos: { tieneAudio: true }
+    };
+  }
+
+  /**
+   * Construir prompt inteligente con contexto
+   */
+  construirPromptInteligente(mensaje, contexto) {
+    const { 
+      negocio, 
+      productos = [], 
+      estadoActual = 'inicio',
+      datosCliente = {},
+      pedidoActual = null
+    } = contexto;
+    
+    const productosTexto = productos.slice(0, 8).map(p => 
+      `- ${p.nombre}: S/${p.precio}`
+    ).join('\n');
+
+    const contextoEstado = this.describirEstado(estadoActual, pedidoActual, datosCliente);
+
+    return `Eres el asistente de WhatsApp de "${negocio?.nombre || 'la tienda'}".
+Debes responder de forma NATURAL, CÁLIDA y BREVE (máximo 2-3 líneas).
+
+PRODUCTOS DISPONIBLES:
+${productosTexto || 'Sin productos cargados'}
+
+CONTEXTO ACTUAL:
+${contextoEstado}
+
+REGLAS IMPORTANTES:
+1. Sé amable, usa emojis con moderación
+2. Si preguntan por algo que no tenemos, sugiere alternativas o el catálogo
+3. Si quieren comprar, guíalos al catálogo
+4. Si piden foto/imagen de algo, explica que pueden enviar comprobantes
+5. Si no entiendes, pide aclaración amablemente
+6. Nunca inventes productos o precios
+7. Si mencionan "mamá", "papá", "regalo", "cumpleaños" → sugiere el catálogo como regalo
+
+ACCIONES (responde en JSON):
+- ver_catalogo: Mostrar lista de productos
+- buscar_producto: Buscar producto {buscar: "término"}
+- contactar: Conectar con humano
+- continuar: Solo responder sin acción especial
+- menu: Mostrar menú principal
+- solicitar_foto: Pedir que envíen una imagen
+- explicar_proceso: Explicar cómo funciona la compra
+
+MENSAJE DEL CLIENTE: "${mensaje}"
+
+Responde SOLO con JSON válido:
+{"respuesta": "tu mensaje", "accion": "nombre_accion", "datos": {}}`;
+  }
+
+  /**
+   * Describir el estado actual para contexto
+   */
+  describirEstado(estado, pedido, cliente) {
+    const descripciones = {
+      'inicio': 'El cliente acaba de iniciar conversación',
+      'menu': 'El cliente está viendo el menú principal',
+      'seleccion_producto': 'El cliente está eligiendo un producto del catálogo',
+      'cantidad': 'El cliente debe indicar cuántas unidades quiere',
+      'confirmar_pedido': 'El cliente debe confirmar su pedido',
+      'datos_nombre': 'Necesitamos el nombre del cliente para el envío',
+      'datos_telefono': 'Necesitamos el teléfono del cliente',
+      'datos_direccion': 'Necesitamos la dirección de envío',
+      'datos_ciudad': 'Necesitamos la ciudad/distrito del cliente',
+      'esperando_voucher': 'El cliente debe enviar foto del comprobante de pago'
+    };
+
+    let descripcion = descripciones[estado] || `Estado: ${estado}`;
+
+    if (pedido) {
+      descripcion += `\nPedido en proceso: ${pedido.producto} x${pedido.cantidad} = S/${pedido.total}`;
+    }
+
+    if (cliente?.nombre) {
+      descripcion += `\nCliente: ${cliente.nombre}`;
+    }
+
+    return descripcion;
+  }
+
   async llamarGroq(prompt) {
-    console.log('   📡 Llamando Groq API...');
     const response = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
@@ -136,47 +256,30 @@ Responde SOLO en este formato JSON:
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        messages: [{ role: 'user', content: prompt }],
         max_tokens: 300,
         temperature: 0.7
       })
     });
 
-    console.log(`   📡 Groq response status: ${response.status}`);
-    
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('   ❌ Groq error:', errorText);
       throw new Error(`Groq error: ${response.status}`);
     }
 
     const data = await response.json();
     const texto = data.choices?.[0]?.message?.content || '';
-    console.log('   📡 Groq respuesta:', texto.substring(0, 100) + '...');
-    
     return this.parsearRespuesta(texto);
   }
 
-  /**
-   * Llamar a Gemini API
-   */
   async llamarGemini(prompt) {
-    console.log('   📡 Llamando Gemini API...');
     const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 300
-        }
+        generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
       })
     });
-
-    console.log(`   📡 Gemini response status: ${response.status}`);
 
     if (!response.ok) {
       throw new Error(`Gemini error: ${response.status}`);
@@ -184,24 +287,15 @@ Responde SOLO en este formato JSON:
 
     const data = await response.json();
     const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    console.log('   📡 Gemini respuesta:', texto.substring(0, 100) + '...');
-    
     return this.parsearRespuesta(texto);
   }
 
-  /**
-   * Parsear respuesta JSON de la IA
-   */
   parsearRespuesta(texto) {
     try {
-      // Limpiar markdown
       let clean = texto.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-      
-      // Buscar JSON
       const match = clean.match(/\{[\s\S]*\}/);
       if (match) {
         const json = JSON.parse(match[0]);
-        console.log('   ✅ JSON parseado:', json.accion);
         return {
           respuesta: json.respuesta || json.mensaje || '',
           accion: json.accion || 'continuar',
@@ -209,10 +303,9 @@ Responde SOLO en este formato JSON:
         };
       }
     } catch (e) {
-      console.log('   ⚠️ No se pudo parsear JSON de IA:', e.message);
+      console.log('   ⚠️ Error parsing JSON:', e.message);
     }
 
-    // Si no hay JSON válido, usar el texto como respuesta
     if (texto && texto.length > 0 && texto.length < 500) {
       return {
         respuesta: texto.replace(/[{}"]/g, '').trim(),
@@ -225,37 +318,48 @@ Responde SOLO en este formato JSON:
   }
 
   /**
-   * Respuesta local cuando IA no está disponible
+   * Respuestas locales mejoradas
    */
   respuestaLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
-    const { productos = [] } = contexto;
-    
-    console.log('   🏠 Generando respuesta local para:', msg);
+    const { productos = [], estadoActual = 'inicio' } = contexto;
 
-    // Saludos
-    if (/^(hola|buenos|buenas|hey|hi|alo)/.test(msg)) {
-      console.log('   → Detectado: saludo');
+    // === SALUDOS ===
+    if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal)/.test(msg)) {
       return {
-        respuesta: '¡Hola! 👋 ¿En qué te puedo ayudar?\n\nPuedes ver nuestro *catálogo* o preguntarme por algún producto.',
+        respuesta: '¡Hola! 👋 ¿En qué te puedo ayudar hoy?',
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // Preguntas por productos específicos
-    if (msg.includes('tienen') || msg.includes('hay') || msg.includes('venden')) {
-      console.log('   → Detectado: pregunta por producto');
-      // Buscar producto mencionado
+    // === SOLICITUD DE FOTOS/IMÁGENES ===
+    if (msg.includes('foto') || msg.includes('imagen') || msg.includes('picture') || msg.includes('ver')) {
+      if (msg.includes('producto') || msg.includes('catalogo') || msg.includes('catálogo')) {
+        return {
+          respuesta: '📸 Te muestro nuestro catálogo con los productos disponibles:',
+          accion: 'ver_catalogo',
+          datos: {}
+        };
+      }
+      return {
+        respuesta: '📸 ¡Claro! Si quieres ver nuestros productos, te muestro el catálogo.\n\nSi necesitas enviar un comprobante de pago, puedes enviarlo directamente como imagen.',
+        accion: 'ver_catalogo',
+        datos: {}
+      };
+    }
+
+    // === PREGUNTAS POR PRODUCTOS ===
+    if (msg.includes('tienen') || msg.includes('hay') || msg.includes('venden') || msg.includes('tienes')) {
       const palabras = msg.split(/\s+/);
       for (const palabra of palabras) {
-        if (palabra.length > 3) {
+        if (palabra.length > 3 && !['tienen', 'tienes', 'venden', 'tienen'].includes(palabra)) {
           const encontrado = productos.find(p => 
             p.nombre.toLowerCase().includes(palabra)
           );
           if (encontrado) {
             return {
-              respuesta: `¡Sí tenemos! 🎉\n\n*${encontrado.nombre}*\nPrecio: S/${encontrado.precio}\n\n¿Te lo aparto?`,
+              respuesta: `¡Sí tenemos! 🎉\n\n*${encontrado.nombre}*\nPrecio: S/${encontrado.precio}\n\n¿Te interesa?`,
               accion: 'buscar_producto',
               datos: { buscar: palabra, producto: encontrado }
             };
@@ -270,39 +374,62 @@ Responde SOLO en este formato JSON:
       };
     }
 
-    // Preguntas de precio
-    if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta')) {
-      console.log('   → Detectado: pregunta de precio');
+    // === PRECIOS ===
+    if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta') || msg.includes('vale')) {
       return {
-        respuesta: 'Te muestro nuestros productos con precios 💰',
+        respuesta: 'Te muestro los precios de nuestros productos 💰',
         accion: 'ver_catalogo',
         datos: {}
       };
     }
 
-    // Quiere comprar
-    if (msg.includes('quiero') || msg.includes('necesito') || msg.includes('comprar') || msg.includes('pedir')) {
-      console.log('   → Detectado: intención de compra');
+    // === INTENCIÓN DE COMPRA ===
+    if (msg.includes('quiero') || msg.includes('necesito') || msg.includes('comprar') || msg.includes('pedir') || msg.includes('ordenar')) {
       return {
-        respuesta: '¡Perfecto! Te muestro lo que tenemos disponible 🛒',
+        respuesta: '¡Perfecto! 🛒 Te muestro lo que tenemos:',
         accion: 'ver_catalogo',
         datos: {}
       };
     }
 
-    // Regalo / para alguien
-    if (msg.includes('regalo') || msg.includes('mamá') || msg.includes('papa') || msg.includes('cumpleaños')) {
-      console.log('   → Detectado: regalo');
+    // === REGALOS ===
+    if (msg.includes('regalo') || msg.includes('mamá') || msg.includes('mama') || msg.includes('papá') || msg.includes('papa') || msg.includes('cumpleaños') || msg.includes('cumple')) {
       return {
-        respuesta: '¡Qué lindo detalle! 🎁 Te muestro opciones que podrían gustarte...',
+        respuesta: '¡Qué lindo detalle! 🎁 Te muestro opciones perfectas para regalar:',
         accion: 'ver_catalogo',
         datos: {}
       };
     }
 
-    // Ayuda
-    if (msg.includes('ayuda') || msg.includes('help') || msg.includes('no entiendo') || msg.includes('cómo')) {
-      console.log('   → Detectado: ayuda');
+    // === PROCESO DE COMPRA ===
+    if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona') || msg.includes('como funciona') || msg.includes('proceso')) {
+      return {
+        respuesta: '¡Es muy fácil! 😊\n\n1️⃣ Elige del catálogo\n2️⃣ Indica la cantidad\n3️⃣ Confirma tus datos\n4️⃣ Paga por Yape/Plin/transferencia\n5️⃣ Envía foto del comprobante\n\n¿Empezamos?',
+        accion: 'explicar_proceso',
+        datos: {}
+      };
+    }
+
+    // === MÉTODOS DE PAGO ===
+    if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia') || msg.includes('efectivo')) {
+      return {
+        respuesta: '💳 Aceptamos:\n• Yape\n• Plin\n• Transferencia bancaria\n\n¿Quieres hacer un pedido?',
+        accion: 'continuar',
+        datos: {}
+      };
+    }
+
+    // === ENVÍO ===
+    if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery') || msg.includes('llega') || msg.includes('despacho')) {
+      return {
+        respuesta: '🚚 Hacemos envíos a todo Lima y provincias.\n\nEl costo depende de tu ubicación. ¿Quieres ver nuestros productos?',
+        accion: 'continuar',
+        datos: {}
+      };
+    }
+
+    // === AYUDA ===
+    if (msg.includes('ayuda') || msg.includes('help') || msg.includes('no entiendo') || msg.includes('no sé') || msg.includes('no se')) {
       return {
         respuesta: '¡Con gusto te ayudo! 😊\n\nPuedes:\n• Ver el *catálogo*\n• Preguntarme por un producto\n• Escribir *menu* para ver opciones',
         accion: 'continuar',
@@ -310,9 +437,8 @@ Responde SOLO en este formato JSON:
       };
     }
 
-    // Contacto humano
-    if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
-      console.log('   → Detectado: contacto humano');
+    // === CONTACTO HUMANO ===
+    if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor') || msg.includes('vendedor')) {
       return {
         respuesta: 'Te conecto con alguien del equipo 👤',
         accion: 'contactar',
@@ -320,9 +446,8 @@ Responde SOLO en este formato JSON:
       };
     }
 
-    // Agradecimiento
-    if (msg.includes('gracias') || msg.includes('thanks')) {
-      console.log('   → Detectado: agradecimiento');
+    // === AGRADECIMIENTOS ===
+    if (msg.includes('gracias') || msg.includes('thanks') || msg.includes('genial') || msg.includes('perfecto')) {
       return {
         respuesta: '¡De nada! 😊 ¿Hay algo más en que pueda ayudarte?',
         accion: 'continuar',
@@ -330,10 +455,27 @@ Responde SOLO en este formato JSON:
       };
     }
 
-    // Default: no entendió pero amable
-    console.log('   → No detectado, respuesta default');
+    // === DESPEDIDAS ===
+    if (msg.includes('chau') || msg.includes('adiós') || msg.includes('adios') || msg.includes('bye') || msg.includes('hasta luego')) {
+      return {
+        respuesta: '¡Hasta pronto! 👋 Escríbenos cuando quieras.',
+        accion: 'continuar',
+        datos: {}
+      };
+    }
+
+    // === NÚMEROS (posible selección de producto) ===
+    if (/^\d+$/.test(msg)) {
+      return {
+        respuesta: null, // Dejar que el handler lo maneje
+        accion: 'seleccionar_numero',
+        datos: { numero: parseInt(msg) }
+      };
+    }
+
+    // === DEFAULT ===
     return {
-      respuesta: `Disculpa, no entendí bien 🤔\n\n¿Quieres ver nuestro *catálogo* o prefieres que te ayude con algo específico?`,
+      respuesta: `No estoy seguro de entender 🤔\n\n¿Quieres ver nuestro *catálogo* o necesitas ayuda con algo específico?`,
       accion: 'continuar',
       datos: {}
     };
