@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v10
+ * APARTALO CORE - Handler Estándar v11
  * 
- * Mejoras: menú sin duplicar "bienvenido", mejor detección de nuevo pedido
+ * Fix: detalle producto en un solo mensaje
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -354,7 +354,6 @@ async function mostrarMenuPrincipal(from, context) {
   let botones = [];
 
   if (pedidosActivos.length > 0) {
-    // Cliente con pedidos activos: mostrar resumen directo
     mensaje = `${saludo}\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
       const nombreProd = obtenerNombreProducto(p.productos) || 'Pedido';
@@ -366,7 +365,6 @@ async function mostrarMenuPrincipal(from, context) {
       { id: 'ver_catalogo', title: 'Nuevo pedido' }
     ];
   } else if (cliente) {
-    // Cliente recurrente sin pedidos activos
     const nombreCliente = cliente.nombre?.split(' ')[0] || '';
     mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}\n\n¿Qué te gustaría hacer?`;
     botones = [
@@ -375,7 +373,6 @@ async function mostrarMenuPrincipal(from, context) {
       { id: 'contactar', title: 'Contactar' }
     ];
   } else {
-    // Cliente nuevo
     mensaje = `${saludo}\n\n¿En qué te puedo ayudar?`;
     botones = [
       { id: 'ver_catalogo', title: 'Ver catálogo' },
@@ -527,37 +524,30 @@ async function manejarSeleccionProducto(from, text, context) {
   const producto = productos[numero - 1];
   const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
 
+  // Construir mensaje con toda la info
+  let mensaje = `*${producto.nombre}*\n`;
+  if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
+  mensaje += `Precio: S/${producto.precio}`;
+
+  // Enviar imagen con caption completo (un solo mensaje)
   if (imagenUrl) {
     const urlFinal = convertirUrlGoogleDrive(imagenUrl);
-    const caption = `*${producto.nombre}*\n` +
-      (producto.descripcion ? `${producto.descripcion}\n\n` : '\n') +
-      `Precio: S/${producto.precio}`;
-    
     try {
-      await whatsapp.sendImage(from, urlFinal, caption);
-      await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-        { id: 'comprar_ahora', title: 'Comprar' },
-        { id: 'ver_catalogo', title: 'Ver más' }
-      ]);
+      await whatsapp.sendImage(from, urlFinal, mensaje);
     } catch (error) {
       console.error('Error enviando imagen:', error.message);
-      await whatsapp.sendMessage(from, caption + '\n\n(No pude cargar la imagen)');
-      await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-        { id: 'comprar_ahora', title: 'Comprar' },
-        { id: 'ver_catalogo', title: 'Ver más' }
-      ]);
+      mensaje += '\n\n(No pude cargar la imagen)';
+      await whatsapp.sendMessage(from, mensaje);
     }
   } else {
-    let mensaje = `*${producto.nombre}*\n`;
-    if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
-    mensaje += `Precio: S/${producto.precio}`;
-    
     await whatsapp.sendMessage(from, mensaje);
-    await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
-      { id: 'comprar_ahora', title: 'Comprar' },
-      { id: 'ver_catalogo', title: 'Ver más' }
-    ]);
   }
+
+  // Botones separados (necesario porque WhatsApp no soporta botones en imágenes)
+  await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+    { id: 'comprar_ahora', title: 'Comprar' },
+    { id: 'ver_catalogo', title: 'Ver más' }
+  ]);
 
   stateManager.updateData(from, negocio.id, { productoSeleccionado: producto });
 }
