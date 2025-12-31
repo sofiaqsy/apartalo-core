@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v2
+ * APARTALO CORE - Handler Estándar v3
  * 
- * Flujo conversacional inteligente - NO muestra catálogo para todo
+ * Flujo conversacional con soporte para envío de fotos de productos
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -126,18 +126,49 @@ async function manejarMensajeConIA(from, message, context) {
       }
       return await mostrarCatalogo(from, context);
 
-    case 'info_producto':
-    case 'buscar_producto':
+    case 'enviar_foto':
+      // ✨ NUEVA ACCIÓN: Enviar foto del producto
       if (resultado.datos?.producto) {
-        // Producto encontrado, preguntar cantidad
+        const producto = resultado.datos.producto;
+        const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
+        
+        if (imagenUrl) {
+          console.log(`   📷 Enviando foto: ${imagenUrl}`);
+          
+          // Convertir URL de Google Drive si es necesario
+          const urlFinal = convertirUrlGoogleDrive(imagenUrl);
+          
+          const caption = `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n¿Te interesa? 😊`;
+          
+          try {
+            await whatsapp.sendImage(from, urlFinal, caption);
+          } catch (error) {
+            console.error('❌ Error enviando imagen:', error.message);
+            // Si falla la imagen, enviar solo texto
+            await whatsapp.sendMessage(from, `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n(No pude cargar la imagen)\n\n¿Te interesa?`);
+          }
+        } else {
+          await whatsapp.sendMessage(from, `*${producto.nombre}*\n💰 S/${producto.precio}\n📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}\n\n¿Te interesa?`);
+        }
+        return;
+      }
+      await whatsapp.sendMessage(from, resultado.respuesta || '¿De qué producto quieres ver la foto?');
+      return;
+
+    case 'info_producto':
+      if (resultado.datos?.producto) {
         await whatsapp.sendMessage(from, resultado.respuesta);
-        stateManager.setState(from, negocio.id, {
-          step: 'cantidad',
-          data: { productoSeleccionado: resultado.datos.producto, productos }
+        // Preguntar si quiere comprar
+        await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+          { id: `comprar_${resultado.datos.producto.codigo}`, title: '🛒 Comprar' },
+          { id: `foto_${resultado.datos.producto.codigo}`, title: '📷 Ver foto' }
+        ]);
+        stateManager.updateData(from, negocio.id, { 
+          ultimoProducto: resultado.datos.producto,
+          productos 
         });
         return;
       }
-      // Solo dar la info, no hacer nada más
       await whatsapp.sendMessage(from, resultado.respuesta);
       return;
 
@@ -153,13 +184,7 @@ async function manejarMensajeConIA(from, message, context) {
       await whatsapp.sendMessage(from, resultado.respuesta);
       return;
 
-    case 'sin_fotos':
-      // No tenemos fotos disponibles
-      await whatsapp.sendMessage(from, resultado.respuesta);
-      return;
-
     case 'preguntar':
-      // La IA pide aclaración, no hacer nada más
       await whatsapp.sendMessage(from, resultado.respuesta);
       return;
 
@@ -190,7 +215,7 @@ async function manejarMensajeConIA(from, message, context) {
       if (state.step === 'seleccion_producto') {
         return await manejarSeleccionProducto(from, mensajeLimpio, context);
       }
-      await whatsapp.sendMessage(from, '¿Qué producto te interesa? Puedo darte información o mostrarte el catálogo.');
+      await whatsapp.sendMessage(from, '¿Qué producto te interesa?');
       return;
 
     case 'continuar':
@@ -205,6 +230,32 @@ async function manejarMensajeConIA(from, message, context) {
       }
       return;
   }
+}
+
+/**
+ * Convertir URL de Google Drive a formato directo
+ */
+function convertirUrlGoogleDrive(url) {
+  if (!url) return url;
+  
+  // Si es thumbnail de Google Drive, convertir a export
+  // https://drive.google.com/thumbnail?id=XXX -> https://drive.google.com/uc?export=view&id=XXX
+  if (url.includes('drive.google.com/thumbnail')) {
+    const idMatch = url.match(/id=([^&]+)/);
+    if (idMatch) {
+      return `https://drive.google.com/uc?export=view&id=${idMatch[1]}`;
+    }
+  }
+  
+  // Si es formato /file/d/XXX/view
+  if (url.includes('/file/d/')) {
+    const idMatch = url.match(/\/file\/d\/([^/]+)/);
+    if (idMatch) {
+      return `https://drive.google.com/uc?export=view&id=${idMatch[1]}`;
+    }
+  }
+  
+  return url;
 }
 
 // ============================================
@@ -258,6 +309,44 @@ async function manejarMenu(from, text, interactiveData, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   
   const opcion = interactiveData?.id || text?.toLowerCase() || '';
+  const state = stateManager.getState(from, negocio.id);
+
+  // Manejar botones de producto (comprar_XXX, foto_XXX)
+  if (opcion.startsWith('comprar_')) {
+    const codigo = opcion.replace('comprar_', '');
+    const productos = await sheets.getProductos('PUBLICADO');
+    const producto = productos.find(p => p.codigo === codigo) || state.data?.ultimoProducto;
+    
+    if (producto) {
+      await whatsapp.sendMessage(from, `¡Perfecto! *${producto.nombre}* a S/${producto.precio}\n\n¿Cuántas unidades deseas?`);
+      stateManager.setState(from, negocio.id, {
+        step: 'cantidad',
+        data: { productoSeleccionado: producto, productos }
+      });
+      return;
+    }
+  }
+
+  if (opcion.startsWith('foto_')) {
+    const codigo = opcion.replace('foto_', '');
+    const productos = await sheets.getProductos('PUBLICADO');
+    const producto = productos.find(p => p.codigo === codigo) || state.data?.ultimoProducto;
+    
+    if (producto) {
+      const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
+      if (imagenUrl) {
+        const urlFinal = convertirUrlGoogleDrive(imagenUrl);
+        try {
+          await whatsapp.sendImage(from, urlFinal, `*${producto.nombre}*\nS/${producto.precio}`);
+        } catch (error) {
+          await whatsapp.sendMessage(from, 'No pude cargar la imagen 😅');
+        }
+      } else {
+        await whatsapp.sendMessage(from, 'Este producto no tiene foto disponible 😅');
+      }
+      return;
+    }
+  }
 
   if (opcion.includes('catalogo') || opcion.includes('catálogo') || opcion === 'ver_catalogo') {
     return await mostrarCatalogo(from, context);
@@ -310,7 +399,8 @@ async function mostrarCatalogo(from, context) {
   productos.slice(0, 10).forEach((p, i) => {
     const stock = p.disponible || p.stock || 0;
     const stockInfo = stock > 0 ? `✅ ${stock} disp.` : '⚠️ Agotado';
-    mensaje += `*${i + 1}.* ${p.nombre}\n`;
+    const tieneImagen = (p.imagenUrl || p.imagen || p.ImagenURL) ? '📷' : '';
+    mensaje += `*${i + 1}.* ${p.nombre} ${tieneImagen}\n`;
     mensaje += `   ${formatPrice(p.precio)} | ${stockInfo}\n\n`;
   });
 
@@ -318,7 +408,7 @@ async function mostrarCatalogo(from, context) {
     mensaje += `_...y ${productos.length - 10} más_\n\n`;
   }
 
-  mensaje += `Escribe el *número* del producto que te interesa 👇`;
+  mensaje += `Escribe el *número* para ver detalles y foto 👇`;
 
   await whatsapp.sendMessage(from, mensaje);
 
@@ -345,23 +435,59 @@ async function manejarSeleccionProducto(from, text, context) {
   }
 
   const producto = productos[numero - 1];
+  const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
 
-  let mensaje = `*${producto.nombre}*\n\n`;
-  if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
-  mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
-  mensaje += `📦 Disponible: ${producto.disponible || producto.stock || 'Sí'} unidades\n\n`;
-  mensaje += `¿Cuántas unidades deseas? 🛒`;
-
-  await whatsapp.sendMessage(from, mensaje);
+  // Si tiene imagen, enviarla con botones
+  if (imagenUrl) {
+    const urlFinal = convertirUrlGoogleDrive(imagenUrl);
+    const caption = `*${producto.nombre}*\n\n` +
+      (producto.descripcion ? `${producto.descripcion}\n\n` : '') +
+      `💰 Precio: ${formatPrice(producto.precio)}\n` +
+      `📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}`;
+    
+    try {
+      await whatsapp.sendImage(from, urlFinal, caption);
+      await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+        { id: 'comprar_ahora', title: '🛒 Comprar' },
+        { id: 'ver_catalogo', title: '👀 Ver más' }
+      ]);
+    } catch (error) {
+      console.error('❌ Error enviando imagen:', error.message);
+      // Fallback sin imagen
+      await whatsapp.sendMessage(from, caption + '\n\n(No pude cargar la imagen)');
+      await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+        { id: 'comprar_ahora', title: '🛒 Comprar' },
+        { id: 'ver_catalogo', title: '👀 Ver más' }
+      ]);
+    }
+  } else {
+    // Sin imagen
+    let mensaje = `*${producto.nombre}*\n\n`;
+    if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
+    mensaje += `💰 Precio: ${formatPrice(producto.precio)}\n`;
+    mensaje += `📦 Stock: ${producto.disponible || producto.stock || 'Disponible'}`;
+    
+    await whatsapp.sendMessage(from, mensaje);
+    await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
+      { id: 'comprar_ahora', title: '🛒 Comprar' },
+      { id: 'ver_catalogo', title: '👀 Ver más' }
+    ]);
+  }
 
   stateManager.updateData(from, negocio.id, { productoSeleccionado: producto });
-  stateManager.setStep(from, negocio.id, 'cantidad');
 }
 
 async function manejarCantidad(from, text, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
   const producto = state.data?.productoSeleccionado;
+
+  // Manejar botón "Comprar"
+  if (text === 'comprar_ahora') {
+    await whatsapp.sendMessage(from, `¿Cuántas unidades de *${producto.nombre}* deseas?`);
+    stateManager.setStep(from, negocio.id, 'cantidad');
+    return;
+  }
 
   if (!producto) {
     return await mostrarCatalogo(from, context);
