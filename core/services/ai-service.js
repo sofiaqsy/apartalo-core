@@ -21,6 +21,10 @@ class AIService {
    * Inicializar y verificar conexión
    */
   async initialize() {
+    console.log('🤖 AI Service inicializando...');
+    console.log(`   GROQ_API_KEY: ${GROQ_API_KEY ? 'SET (' + GROQ_API_KEY.substring(0, 10) + '...)' : 'NOT SET'}`);
+    console.log(`   GEMINI_API_KEY: ${GEMINI_API_KEY ? 'SET (' + GEMINI_API_KEY.substring(0, 10) + '...)' : 'NOT SET'}`);
+    
     if (GROQ_API_KEY) {
       this.provider = 'groq';
       this.initialized = true;
@@ -35,7 +39,7 @@ class AIService {
       return true;
     }
 
-    console.log('⚠️ IA: Sin API keys configuradas');
+    console.log('⚠️ IA: Sin API keys configuradas - usando respuestas locales');
     return false;
   }
 
@@ -46,12 +50,17 @@ class AIService {
    * @returns {object} - { respuesta, accion, datos }
    */
   async procesarMensaje(mensaje, contexto = {}) {
+    console.log(`🤖 AI procesarMensaje: "${mensaje}"`);
+    console.log(`   initialized: ${this.initialized}, provider: ${this.provider}`);
+    
     if (!this.initialized) {
+      console.log('   → Usando respuesta local (no inicializado)');
       return this.respuestaLocal(mensaje, contexto);
     }
 
     try {
       const prompt = this.construirPrompt(mensaje, contexto);
+      console.log('   → Llamando a', this.provider);
       
       let resultado;
       if (this.provider === 'groq') {
@@ -61,12 +70,14 @@ class AIService {
       }
 
       if (resultado) {
+        console.log(`   → Resultado IA: accion=${resultado.accion}`);
         return resultado;
       }
     } catch (error) {
       console.error('❌ Error IA:', error.message);
     }
 
+    console.log('   → Fallback a respuesta local');
     return this.respuestaLocal(mensaje, contexto);
   }
 
@@ -116,6 +127,7 @@ Responde SOLO en este formato JSON:
    * Llamar a Groq API
    */
   async llamarGroq(prompt) {
+    console.log('   📡 Llamando Groq API...');
     const response = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
@@ -132,12 +144,17 @@ Responde SOLO en este formato JSON:
       })
     });
 
+    console.log(`   📡 Groq response status: ${response.status}`);
+    
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('   ❌ Groq error:', errorText);
       throw new Error(`Groq error: ${response.status}`);
     }
 
     const data = await response.json();
     const texto = data.choices?.[0]?.message?.content || '';
+    console.log('   📡 Groq respuesta:', texto.substring(0, 100) + '...');
     
     return this.parsearRespuesta(texto);
   }
@@ -146,6 +163,7 @@ Responde SOLO en este formato JSON:
    * Llamar a Gemini API
    */
   async llamarGemini(prompt) {
+    console.log('   📡 Llamando Gemini API...');
     const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -158,12 +176,15 @@ Responde SOLO en este formato JSON:
       })
     });
 
+    console.log(`   📡 Gemini response status: ${response.status}`);
+
     if (!response.ok) {
       throw new Error(`Gemini error: ${response.status}`);
     }
 
     const data = await response.json();
     const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    console.log('   📡 Gemini respuesta:', texto.substring(0, 100) + '...');
     
     return this.parsearRespuesta(texto);
   }
@@ -180,6 +201,7 @@ Responde SOLO en este formato JSON:
       const match = clean.match(/\{[\s\S]*\}/);
       if (match) {
         const json = JSON.parse(match[0]);
+        console.log('   ✅ JSON parseado:', json.accion);
         return {
           respuesta: json.respuesta || json.mensaje || '',
           accion: json.accion || 'continuar',
@@ -187,7 +209,7 @@ Responde SOLO en este formato JSON:
         };
       }
     } catch (e) {
-      console.log('⚠️ No se pudo parsear JSON de IA');
+      console.log('   ⚠️ No se pudo parsear JSON de IA:', e.message);
     }
 
     // Si no hay JSON válido, usar el texto como respuesta
@@ -208,9 +230,12 @@ Responde SOLO en este formato JSON:
   respuestaLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
     const { productos = [] } = contexto;
+    
+    console.log('   🏠 Generando respuesta local para:', msg);
 
     // Saludos
     if (/^(hola|buenos|buenas|hey|hi|alo)/.test(msg)) {
+      console.log('   → Detectado: saludo');
       return {
         respuesta: '¡Hola! 👋 ¿En qué te puedo ayudar?\n\nPuedes ver nuestro *catálogo* o preguntarme por algún producto.',
         accion: 'continuar',
@@ -220,6 +245,7 @@ Responde SOLO en este formato JSON:
 
     // Preguntas por productos específicos
     if (msg.includes('tienen') || msg.includes('hay') || msg.includes('venden')) {
+      console.log('   → Detectado: pregunta por producto');
       // Buscar producto mencionado
       const palabras = msg.split(/\s+/);
       for (const palabra of palabras) {
@@ -246,6 +272,7 @@ Responde SOLO en este formato JSON:
 
     // Preguntas de precio
     if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta')) {
+      console.log('   → Detectado: pregunta de precio');
       return {
         respuesta: 'Te muestro nuestros productos con precios 💰',
         accion: 'ver_catalogo',
@@ -255,6 +282,7 @@ Responde SOLO en este formato JSON:
 
     // Quiere comprar
     if (msg.includes('quiero') || msg.includes('necesito') || msg.includes('comprar') || msg.includes('pedir')) {
+      console.log('   → Detectado: intención de compra');
       return {
         respuesta: '¡Perfecto! Te muestro lo que tenemos disponible 🛒',
         accion: 'ver_catalogo',
@@ -264,6 +292,7 @@ Responde SOLO en este formato JSON:
 
     // Regalo / para alguien
     if (msg.includes('regalo') || msg.includes('mamá') || msg.includes('papa') || msg.includes('cumpleaños')) {
+      console.log('   → Detectado: regalo');
       return {
         respuesta: '¡Qué lindo detalle! 🎁 Te muestro opciones que podrían gustarte...',
         accion: 'ver_catalogo',
@@ -273,6 +302,7 @@ Responde SOLO en este formato JSON:
 
     // Ayuda
     if (msg.includes('ayuda') || msg.includes('help') || msg.includes('no entiendo') || msg.includes('cómo')) {
+      console.log('   → Detectado: ayuda');
       return {
         respuesta: '¡Con gusto te ayudo! 😊\n\nPuedes:\n• Ver el *catálogo*\n• Preguntarme por un producto\n• Escribir *menu* para ver opciones',
         accion: 'continuar',
@@ -282,6 +312,7 @@ Responde SOLO en este formato JSON:
 
     // Contacto humano
     if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
+      console.log('   → Detectado: contacto humano');
       return {
         respuesta: 'Te conecto con alguien del equipo 👤',
         accion: 'contactar',
@@ -291,6 +322,7 @@ Responde SOLO en este formato JSON:
 
     // Agradecimiento
     if (msg.includes('gracias') || msg.includes('thanks')) {
+      console.log('   → Detectado: agradecimiento');
       return {
         respuesta: '¡De nada! 😊 ¿Hay algo más en que pueda ayudarte?',
         accion: 'continuar',
@@ -299,6 +331,7 @@ Responde SOLO en este formato JSON:
     }
 
     // Default: no entendió pero amable
+    console.log('   → No detectado, respuesta default');
     return {
       respuesta: `Disculpa, no entendí bien 🤔\n\n¿Quieres ver nuestro *catálogo* o prefieres que te ayude con algo específico?`,
       accion: 'continuar',
