@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v11
+ * APARTALO CORE - Handler Estándar v12
  * 
- * Fix: detalle producto en un solo mensaje
+ * IA-first: La IA siempre decide la acción basándose en contexto completo
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -58,7 +58,7 @@ async function handle(from, message, context) {
   const mensajeNormalizado = mensajeLimpio.toLowerCase();
 
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-  console.log(`HANDLER ESTÁNDAR`);
+  console.log(`HANDLER ESTÁNDAR v12`);
   console.log(`   From: ${from}`);
   console.log(`   Negocio: ${negocio.nombre} (${negocio.id})`);
   console.log(`   Mensaje: "${mensajeLimpio}"`);
@@ -130,16 +130,23 @@ async function manejarMensajeConIA(from, message, context) {
   const mensajeLimpio = (text || '').trim();
   const state = stateManager.getState(from, negocio.id);
   
-  console.log(`\nIA manejarMensajeConIA`);
-  console.log(`   Mensaje: "${mensajeLimpio}"`);
+  console.log(`\nIA procesando mensaje...`);
+  console.log(`   Texto: "${mensajeLimpio}"`);
   console.log(`   Tipo: ${type}`);
   
+  // Obtener datos para contexto COMPLETO
   const productos = await sheets.getProductos('PUBLICADO');
   const cliente = await sheets.buscarCliente(from);
+  const pedidos = await sheets.getPedidosByWhatsapp(from);
+  const pedidosActivos = pedidos.filter(p => 
+    !['ENTREGADO', 'CANCELADO'].includes(p.estado)
+  );
   
+  // Contexto completo para que la IA decida
   const contextoIA = {
     negocio,
     productos,
+    pedidosActivos,  // <-- Ahora la IA sabe cuántos pedidos tiene
     estadoActual: state.step,
     tipoMensaje: type,
     datosCliente: cliente || {},
@@ -150,9 +157,11 @@ async function manejarMensajeConIA(from, message, context) {
     } : null
   };
 
+  // IA decide la acción
   const resultado = await aiService.procesarMensaje(mensajeLimpio, contextoIA);
-  console.log(`   IA: accion=${resultado.accion}`);
+  console.log(`   IA decidió: ${resultado.accion}`);
 
+  // Ejecutar la acción decidida por la IA
   switch (resultado.accion) {
     case 'ver_pedidos':
       return await mostrarPedidos(from, context);
@@ -172,13 +181,10 @@ async function manejarMensajeConIA(from, message, context) {
         productoFoto = buscarProductoPorNombre(String(nombreBuscar), productos);
       }
       
-      console.log(`   Producto encontrado:`, productoFoto ? productoFoto.nombre : 'NO');
-      
       if (productoFoto && productoFoto.precio) {
         const imagenUrl = productoFoto.imagenUrl || productoFoto.imagen || productoFoto.ImagenURL;
         
         if (imagenUrl) {
-          console.log(`   Enviando foto: ${imagenUrl.substring(0, 50)}...`);
           const urlFinal = convertirUrlGoogleDrive(imagenUrl);
           const caption = `*${productoFoto.nombre}*\nS/${productoFoto.precio}\n\n¿Te interesa?`;
           
@@ -467,6 +473,7 @@ async function manejarMenu(from, text, interactiveData, context) {
     return;
   }
 
+  // Si no es un botón conocido, enviar a la IA
   return await manejarMensajeConIA(from, { text, type: 'text', interactiveData }, context);
 }
 
@@ -524,12 +531,10 @@ async function manejarSeleccionProducto(from, text, context) {
   const producto = productos[numero - 1];
   const imagenUrl = producto.imagenUrl || producto.imagen || producto.ImagenURL;
 
-  // Construir mensaje con toda la info
   let mensaje = `*${producto.nombre}*\n`;
   if (producto.descripcion) mensaje += `${producto.descripcion}\n\n`;
   mensaje += `Precio: S/${producto.precio}`;
 
-  // Enviar imagen con caption completo (un solo mensaje)
   if (imagenUrl) {
     const urlFinal = convertirUrlGoogleDrive(imagenUrl);
     try {
@@ -543,7 +548,6 @@ async function manejarSeleccionProducto(from, text, context) {
     await whatsapp.sendMessage(from, mensaje);
   }
 
-  // Botones separados (necesario porque WhatsApp no soporta botones en imágenes)
   await whatsapp.sendButtonMessage(from, '¿Qué deseas hacer?', [
     { id: 'comprar_ahora', title: 'Comprar' },
     { id: 'ver_catalogo', title: 'Ver más' }
