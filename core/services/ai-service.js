@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA v6
+ * APARTALO CORE - Servicio de IA v7
  * 
- * IA contextual - con soporte para consulta de pedidos
+ * Mejoras: detección "nuevo pedido", saludos limpios
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -163,19 +163,21 @@ REGLAS IMPORTANTES:
 1. NO uses emojis en las respuestas
 2. NO muestres información de stock al cliente
 3. Si piden "mis pedidos", "estado de pedido", "qué pedidos tengo" -> usar acción "ver_pedidos"
-4. Si piden "listame", "qué tipos", "cuáles hay" -> usar acción "ver_catalogo"
-5. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
-6. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
-7. Respuestas cortas y profesionales (2-3 líneas máximo)
+4. Si piden "nuevo pedido", "quiero comprar", "hacer pedido" -> usar acción "ver_catalogo"
+5. Si piden "listame", "qué tipos", "cuáles hay" -> usar acción "ver_catalogo"
+6. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
+7. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
+8. Respuestas cortas y profesionales (2-3 líneas máximo)
 
 ACCIONES (JSON):
 - ver_pedidos: Consultar pedidos del cliente
-- ver_catalogo: Si piden ver productos, listar, tipos disponibles
+- ver_catalogo: Si piden ver productos, listar, tipos disponibles, nuevo pedido
 - enviar_foto: Enviar foto de un producto {producto: "nombre"}
 - info_producto: Info sin foto {producto: "nombre"}
 - confirmar_compra: Quiere comprar {producto: "nombre"}
 - preguntar: Pedir aclaración
 - contactar: Hablar con humano
+- menu: Mostrar menú principal (solo para saludos simples como "hola")
 - continuar: Solo responder
 
 MENSAJE: "${mensaje}"
@@ -276,6 +278,15 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
   respuestaLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
     const { productos = [], estadoActual = 'inicio', negocio } = contexto;
+
+    // ========== NUEVO PEDIDO / QUIERO COMPRAR ==========
+    if (this.quiereNuevoPedido(msg)) {
+      return {
+        respuesta: '',
+        accion: 'ver_catalogo',
+        datos: {}
+      };
+    }
 
     // ========== CONSULTA DE PEDIDOS ==========
     if (this.quiereVerPedidos(msg)) {
@@ -383,11 +394,12 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // ========== SALUDOS ==========
-    if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal)/.test(msg)) {
+    // ========== SALUDOS (van al menú principal) ==========
+    if (/^(hola|buenos días|buenas tardes|buenas noches|hey|hi|alo|buen día)$/i.test(msg) ||
+        /^(hola|buenos|buenas|buen)\s*$/i.test(msg)) {
       return {
-        respuesta: `Hola, soy el asistente de ${negocio?.nombre || 'la tienda'}.\n\n¿En qué te ayudo?`,
-        accion: 'continuar',
+        respuesta: '',
+        accion: 'menu',
         datos: {}
       };
     }
@@ -490,6 +502,30 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
   }
 
   /**
+   * Detectar si el usuario quiere hacer un nuevo pedido
+   */
+  quiereNuevoPedido(msg) {
+    const frasesNuevoPedido = [
+      'nuevo pedido', 'nueva compra',
+      'hacer pedido', 'hacer un pedido', 'realizar pedido', 'realizar un pedido',
+      'quiero comprar', 'quiero pedir', 'quiero ordenar',
+      'deseo comprar', 'deseo pedir',
+      'me interesa comprar', 'quisiera comprar',
+      'hacer una compra', 'realizar una compra'
+    ];
+    
+    for (const frase of frasesNuevoPedido) {
+      if (msg.includes(frase)) return true;
+    }
+    
+    // Patrones regex
+    if (/quiero\s+(hacer|realizar)\s+(un\s+)?(nuevo\s+)?pedido/.test(msg)) return true;
+    if (/quisiera\s+(hacer|realizar)\s+(un\s+)?pedido/.test(msg)) return true;
+    
+    return false;
+  }
+
+  /**
    * Detectar si el usuario quiere ver sus pedidos
    */
   quiereVerPedidos(msg) {
@@ -497,7 +533,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       'mis pedidos', 'mi pedido',
       'pedidos tengo', 'pedido tengo',
       'estado de mi pedido', 'estado del pedido', 'estado pedido',
-      'ver pedidos', 'ver pedido',
+      'ver pedidos', 'ver pedido', 'ver mis pedidos',
       'consultar pedido', 'consultar pedidos',
       'donde está mi pedido', 'donde esta mi pedido',
       'rastrear pedido', 'rastrear',
