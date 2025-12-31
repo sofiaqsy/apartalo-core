@@ -1,7 +1,7 @@
 /**
  * APARTALO CORE - Formatters
  * 
- * Funciones de formateo reutilizables
+ * Funciones de formateo reutilizables (sin emojis)
  */
 
 /**
@@ -138,17 +138,17 @@ function formatProductList(productos) {
 }
 
 /**
- * Formatear estado de pedido con emoji
+ * Formatear estado de pedido (sin emojis)
  */
 function formatOrderStatus(estado) {
   const statusMap = {
-    'PENDIENTE_PAGO': '⏳ Pendiente de pago',
-    'PENDIENTE_VALIDACION': '🔍 Validando pago',
-    'CONFIRMADO': '✅ Confirmado',
-    'EN_PREPARACION': '📦 En preparación',
-    'ENVIADO': '🚚 Enviado',
-    'ENTREGADO': '✅ Entregado',
-    'CANCELADO': '❌ Cancelado'
+    'PENDIENTE_PAGO': 'Pendiente de pago',
+    'PENDIENTE_VALIDACION': 'Validando pago',
+    'CONFIRMADO': 'Confirmado',
+    'EN_PREPARACION': 'En preparación',
+    'ENVIADO': 'Enviado',
+    'ENTREGADO': 'Entregado',
+    'CANCELADO': 'Cancelado'
   };
   
   return statusMap[estado] || estado;
