@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA v4
+ * APARTALO CORE - Servicio de IA v5
  * 
- * IA contextual - respuestas limpias sin emojis ni stock
+ * IA contextual - mejor detección de solicitudes de catálogo
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -162,14 +162,14 @@ CONTEXTO: ${contextoEstado}
 REGLAS IMPORTANTES:
 1. NO uses emojis en las respuestas
 2. NO muestres información de stock al cliente
-3. NO muestres catálogo a menos que lo pidan explícitamente
-4. Si piden "foto" o "ver" un producto -> usar acción "enviar_foto"
+3. Si piden "listame", "qué tipos", "cuáles hay", "muéstrame opciones" -> usar acción "ver_catalogo"
+4. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
 5. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
 6. Si no es claro -> PREGUNTAR qué necesitan
 7. Respuestas cortas y profesionales (2-3 líneas máximo)
 
 ACCIONES (JSON):
-- ver_catalogo: SOLO si piden ver todos los productos
+- ver_catalogo: Si piden ver productos, listar, tipos disponibles, opciones
 - enviar_foto: Enviar foto de un producto {producto: "nombre del producto"}
 - info_producto: Info sin foto {producto: "nombre"}
 - confirmar_compra: Quiere comprar {producto: "nombre"}
@@ -276,8 +276,18 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     const msg = mensaje.toLowerCase().trim();
     const { productos = [], estadoActual = 'inicio', negocio } = contexto;
 
-    // SOLICITUD DE FOTOS
-    if ((msg.includes('foto') || msg.includes('imagen') || msg.includes('ver') || msg.includes('muestra') || msg.includes('enseña')) && 
+    // ========== SOLICITUD DE LISTAR/VER CATÁLOGO ==========
+    // Detectar frases como: "listame", "qué tipos", "cuáles hay", "opciones", etc.
+    if (this.quiereVerCatalogo(msg)) {
+      return {
+        respuesta: '',
+        accion: 'ver_catalogo',
+        datos: {}
+      };
+    }
+
+    // ========== SOLICITUD DE FOTOS ==========
+    if ((msg.includes('foto') || msg.includes('imagen') || msg.includes('muestra') || msg.includes('enseña')) && 
         !msg.includes('comprobante') && !msg.includes('voucher') && !msg.includes('pago')) {
       
       const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
@@ -305,7 +315,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // PREGUNTAS POR PRODUCTO ESPECÍFICO
+    // ========== PREGUNTAS POR PRODUCTO ESPECÍFICO ==========
     const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
     
     if (productoMencionado) {
@@ -364,7 +374,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // SALUDOS
+    // ========== SALUDOS ==========
     if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal)/.test(msg)) {
       return {
         respuesta: `Hola, soy el asistente de ${negocio?.nombre || 'la tienda'}.\n\n¿En qué te ayudo?`,
@@ -373,17 +383,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // VER CATÁLOGO
-    if (msg.includes('catálogo') || msg.includes('catalogo') || msg.includes('productos') || 
-        msg.includes('qué tienen') || msg.includes('que tienen') || msg.includes('lista') || msg.includes('mostrar todo')) {
-      return {
-        respuesta: 'Te muestro nuestros productos:',
-        accion: 'ver_catalogo',
-        datos: {}
-      };
-    }
-
-    // PREGUNTAS SIN PRODUCTO
+    // ========== PREGUNTAS SIN PRODUCTO ==========
     if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio')) {
       return {
         respuesta: '¿De qué producto quieres saber el precio?',
@@ -400,7 +400,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // PROCESO DE COMPRA
+    // ========== PROCESO DE COMPRA ==========
     if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona')) {
       return {
         respuesta: 'Es fácil:\n\n1. Elige un producto\n2. Indicas cantidad\n3. Pagas por Yape/Plin\n4. Envías foto del comprobante\n\n¿Qué te interesa?',
@@ -409,7 +409,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // MÉTODOS DE PAGO
+    // ========== MÉTODOS DE PAGO ==========
     if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia')) {
       return {
         respuesta: 'Aceptamos Yape, Plin y transferencia.\n\n¿Quieres hacer un pedido?',
@@ -418,7 +418,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // ENVÍO
+    // ========== ENVÍO ==========
     if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery')) {
       return {
         respuesta: 'Sí hacemos envíos. El costo depende de tu zona.\n\n¿Qué producto te interesa?',
@@ -427,7 +427,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // CONTACTO HUMANO
+    // ========== CONTACTO HUMANO ==========
     if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
       return {
         respuesta: 'Te conecto con alguien del equipo',
@@ -436,7 +436,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // AGRADECIMIENTOS
+    // ========== AGRADECIMIENTOS ==========
     if (msg.includes('gracias') || msg.includes('genial') || msg.includes('perfecto') || msg.includes('ok')) {
       return {
         respuesta: 'De nada. ¿Algo más?',
@@ -445,7 +445,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // DESPEDIDAS
+    // ========== DESPEDIDAS ==========
     if (msg.includes('chau') || msg.includes('adiós') || msg.includes('adios') || msg.includes('bye')) {
       return {
         respuesta: 'Hasta pronto',
@@ -454,7 +454,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // NÚMEROS
+    // ========== NÚMEROS ==========
     if (/^\d+$/.test(msg)) {
       return {
         respuesta: null,
@@ -463,7 +463,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // AYUDA
+    // ========== AYUDA ==========
     if (msg.includes('ayuda') || msg.includes('help')) {
       return {
         respuesta: 'Te ayudo.\n\nPuedo:\n- Mostrarte fotos de productos\n- Darte precios\n- Ayudarte a comprar\n\n¿Qué necesitas?',
@@ -472,12 +472,47 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // DEFAULT
+    // ========== DEFAULT ==========
     return {
       respuesta: 'No entendí bien.\n\n¿Qué necesitas? Puedo mostrarte productos o ayudarte a comprar.',
       accion: 'preguntar',
       datos: {}
     };
+  }
+
+  /**
+   * Detectar si el usuario quiere ver el catálogo/lista de productos
+   */
+  quiereVerCatalogo(msg) {
+    // Palabras clave directas
+    const palabrasCatalogo = [
+      'catálogo', 'catalogo', 
+      'productos', 
+      'lista', 'listame', 'listar', 'listado',
+      'opciones',
+      'mostrar todo', 'ver todo', 'todos los',
+      'qué tienen', 'que tienen',
+      'qué hay', 'que hay',
+      'qué venden', 'que venden'
+    ];
+    
+    for (const palabra of palabrasCatalogo) {
+      if (msg.includes(palabra)) return true;
+    }
+    
+    // Frases de tipos/variantes
+    // "qué tipos tiene", "qué tipos hay", "cuáles tipos", etc.
+    if (/qu[eé]\s+tipos/.test(msg)) return true;
+    if (/cu[aá]les\s+(tipos|hay|tienen|son)/.test(msg)) return true;
+    if (/qu[eé]\s+variedades/.test(msg)) return true;
+    if (/qu[eé]\s+modelos/.test(msg)) return true;
+    
+    // "listame" sin contexto
+    if (/^listame$/.test(msg)) return true;
+    if (/^lista$/.test(msg)) return true;
+    if (/^ver$/.test(msg)) return true;
+    
+    return false;
   }
 
   buscarProductoEnMensaje(mensaje, productos) {
