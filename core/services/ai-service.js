@@ -1,7 +1,9 @@
 /**
- * APARTALO CORE - Servicio de IA v8
+ * APARTALO CORE - Servicio de IA v9
  * 
- * Fix: mejor detección "nuevo pedido" vs "ver pedidos"
+ * Arquitectura: IA-first
+ * La IA siempre procesa el mensaje y decide la acción.
+ * Respuestas locales solo como fallback si la IA falla.
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -35,15 +37,19 @@ class AIService {
       return true;
     }
 
-    console.log('IA: Sin API keys - usando respuestas locales');
+    console.log('IA: Sin API keys - usando respuestas locales como fallback');
     return false;
   }
 
+  /**
+   * Procesar mensaje - SIEMPRE intenta usar IA primero
+   */
   async procesarMensaje(mensaje, contexto = {}) {
     const { tipoMensaje = 'text' } = contexto;
     
-    console.log(`AI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
+    console.log(`\nAI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
     
+    // Tipos especiales que no necesitan IA
     if (tipoMensaje === 'image') {
       return this.manejarImagen(mensaje, contexto);
     }
@@ -60,30 +66,194 @@ class AIService {
       return this.manejarAudio(mensaje, contexto);
     }
 
-    if (!this.initialized) {
-      return this.respuestaLocal(mensaje, contexto);
+    // SIEMPRE intentar IA primero si está configurada
+    if (this.initialized) {
+      try {
+        const prompt = this.construirPrompt(mensaje, contexto);
+        
+        let resultado;
+        if (this.provider === 'groq') {
+          resultado = await this.llamarGroq(prompt);
+        } else {
+          resultado = await this.llamarGemini(prompt);
+        }
+
+        if (resultado && resultado.accion) {
+          console.log(`   IA decidió: ${resultado.accion}`);
+          return resultado;
+        }
+      } catch (error) {
+        console.error('Error IA:', error.message);
+      }
     }
 
-    try {
-      const prompt = this.construirPromptInteligente(mensaje, contexto);
-      
-      let resultado;
-      if (this.provider === 'groq') {
-        resultado = await this.llamarGroq(prompt);
-      } else {
-        resultado = await this.llamarGemini(prompt);
-      }
-
-      if (resultado) {
-        console.log(`   IA resultado: ${resultado.accion}`);
-        return resultado;
-      }
-    } catch (error) {
-      console.error('Error IA:', error.message);
-    }
-
-    return this.respuestaLocal(mensaje, contexto);
+    // Fallback: respuestas locales básicas
+    console.log('   Usando fallback local');
+    return this.fallbackLocal(mensaje, contexto);
   }
+
+  /**
+   * Construir prompt con contexto completo para que la IA decida
+   */
+  construirPrompt(mensaje, contexto) {
+    const { 
+      negocio, 
+      productos = [], 
+      pedidosActivos = [],
+      estadoActual = 'inicio',
+      datosCliente = {},
+      pedidoActual = null
+    } = contexto;
+    
+    // Resumen de productos disponibles
+    const productosTexto = productos.slice(0, 10).map(p => 
+      `- ${p.nombre}: S/${p.precio}`
+    ).join('\n');
+
+    // Resumen de pedidos activos del cliente
+    const pedidosTexto = pedidosActivos.length > 0 
+      ? pedidosActivos.map(p => `- ${p.id}: ${p.estado}`).join('\n')
+      : 'Sin pedidos activos';
+
+    // Estado actual de la conversación
+    const estadoTexto = this.describirEstado(estadoActual, pedidoActual, datosCliente);
+
+    return `Eres el asistente virtual de "${negocio?.nombre || 'la tienda'}" en WhatsApp.
+Tu trabajo es entender la INTENCIÓN del cliente y responder con la ACCIÓN correcta.
+
+CONTEXTO DEL CLIENTE:
+- Estado conversación: ${estadoTexto}
+- Pedidos activos: ${pedidosTexto}
+${datosCliente?.nombre ? `- Nombre: ${datosCliente.nombre}` : '- Cliente nuevo'}
+
+PRODUCTOS DISPONIBLES:
+${productosTexto || 'Sin productos'}
+
+REGLAS:
+1. NO uses emojis
+2. Respuestas cortas (máximo 2-3 líneas)
+3. Interpreta la INTENCIÓN, no las palabras exactas
+
+ACCIONES DISPONIBLES (responde SOLO con una):
+- "menu": Saludos simples (hola, buenos días) → mostrar menú principal
+- "ver_catalogo": Quiere comprar algo nuevo, ver productos, hacer pedido nuevo
+- "ver_pedidos": Consultar estado de sus pedidos existentes
+- "enviar_foto": Pide foto de un producto específico → incluir {producto: "nombre"}
+- "info_producto": Pregunta sobre un producto → incluir {producto: "nombre"}
+- "confirmar_compra": Quiere comprar un producto específico → incluir {producto: "nombre"}
+- "contactar": Quiere hablar con una persona
+- "continuar": Conversación general, agradecer, etc.
+- "preguntar": Necesitas más información para ayudar
+
+EJEMPLOS DE INTERPRETACIÓN:
+- "Un nuevo pedido" → ver_catalogo (quiere comprar)
+- "Quiero hacer un pedido" → ver_catalogo (quiere comprar)
+- "Mis pedidos" → ver_pedidos (consultar existentes)
+- "Qué pedidos tengo" → ver_pedidos (consultar existentes)
+- "Hola" → menu
+- "Tienen monstera?" → info_producto o enviar_foto con {producto: "Monstera"}
+- "Cuánto cuesta X" → info_producto con {producto: "X"}
+- "Quiero una monstera" → confirmar_compra con {producto: "Monstera"}
+
+MENSAJE DEL CLIENTE: "${mensaje}"
+
+Responde SOLO en formato JSON:
+{"respuesta": "texto corto o vacío", "accion": "accion", "datos": {}}`;
+  }
+
+  describirEstado(estado, pedido, cliente) {
+    const descripciones = {
+      'inicio': 'Conversación nueva',
+      'menu': 'Viendo menú principal',
+      'seleccion_producto': 'Eligiendo producto del catálogo',
+      'cantidad': 'Indicando cantidad',
+      'confirmar_pedido': 'Confirmando pedido',
+      'datos_nombre': 'Pidiendo nombre',
+      'datos_telefono': 'Pidiendo teléfono',
+      'datos_direccion': 'Pidiendo dirección',
+      'datos_ciudad': 'Pidiendo ciudad',
+      'esperando_voucher': 'Esperando comprobante de pago'
+    };
+
+    let desc = descripciones[estado] || estado;
+    if (pedido) desc += ` | Pedido en curso: ${pedido.producto}`;
+    return desc;
+  }
+
+  // ============================================
+  // LLAMADAS A PROVEEDORES DE IA
+  // ============================================
+
+  async llamarGroq(prompt) {
+    const response = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200,
+        temperature: 0.3  // Más determinístico
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Groq error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const texto = data.choices?.[0]?.message?.content || '';
+    return this.parsearRespuestaIA(texto);
+  }
+
+  async llamarGemini(prompt) {
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { 
+          temperature: 0.3,  // Más determinístico
+          maxOutputTokens: 200 
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return this.parsearRespuestaIA(texto);
+  }
+
+  parsearRespuestaIA(texto) {
+    try {
+      // Limpiar markdown
+      let clean = texto.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      
+      // Buscar JSON
+      const match = clean.match(/\{[\s\S]*\}/);
+      if (match) {
+        const json = JSON.parse(match[0]);
+        return {
+          respuesta: json.respuesta || '',
+          accion: json.accion || 'continuar',
+          datos: json.datos || {}
+        };
+      }
+    } catch (e) {
+      console.log('   Error parsing JSON:', e.message);
+    }
+    return null;
+  }
+
+  // ============================================
+  // MANEJADORES DE TIPOS ESPECIALES
+  // ============================================
 
   manejarImagen(caption, contexto) {
     const { estadoActual = 'inicio' } = contexto;
@@ -137,487 +307,43 @@ class AIService {
     };
   }
 
-  construirPromptInteligente(mensaje, contexto) {
-    const { 
-      negocio, 
-      productos = [], 
-      estadoActual = 'inicio',
-      datosCliente = {},
-      pedidoActual = null
-    } = contexto;
-    
-    const productosTexto = productos.slice(0, 8).map(p => 
-      `- ${p.nombre}: S/${p.precio} (tiene foto: ${p.imagenUrl ? 'sí' : 'no'})`
-    ).join('\n');
+  // ============================================
+  // FALLBACK LOCAL (solo si IA falla)
+  // ============================================
 
-    const contextoEstado = this.describirEstado(estadoActual, pedidoActual, datosCliente);
-
-    return `Eres el asistente de "${negocio?.nombre || 'la tienda'}" en WhatsApp.
-
-PRODUCTOS:
-${productosTexto || 'Sin productos'}
-
-CONTEXTO: ${contextoEstado}
-
-REGLAS IMPORTANTES:
-1. NO uses emojis en las respuestas
-2. NO muestres información de stock al cliente
-3. PRIORIDAD: Si dicen "nuevo pedido", "hacer pedido", "quiero comprar" -> usar acción "ver_catalogo"
-4. Si piden "mis pedidos", "estado de pedido", "qué pedidos tengo" (sin "nuevo/hacer") -> usar acción "ver_pedidos"
-5. Si piden "listame", "qué tipos", "cuáles hay" -> usar acción "ver_catalogo"
-6. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
-7. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
-8. Respuestas cortas y profesionales (2-3 líneas máximo)
-
-ACCIONES (JSON):
-- ver_pedidos: Consultar pedidos del cliente
-- ver_catalogo: Si piden ver productos, listar, tipos disponibles, nuevo pedido
-- enviar_foto: Enviar foto de un producto {producto: "nombre"}
-- info_producto: Info sin foto {producto: "nombre"}
-- confirmar_compra: Quiere comprar {producto: "nombre"}
-- preguntar: Pedir aclaración
-- contactar: Hablar con humano
-- menu: Mostrar menú principal (solo para saludos simples como "hola")
-- continuar: Solo responder
-
-MENSAJE: "${mensaje}"
-
-JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
-  }
-
-  describirEstado(estado, pedido, cliente) {
-    const descripciones = {
-      'inicio': 'Conversación nueva',
-      'menu': 'Viendo menú',
-      'seleccion_producto': 'Eligiendo producto',
-      'cantidad': 'Indicando cantidad',
-      'confirmar_pedido': 'Confirmando pedido',
-      'datos_nombre': 'Pidiendo nombre',
-      'datos_telefono': 'Pidiendo teléfono',
-      'datos_direccion': 'Pidiendo dirección',
-      'datos_ciudad': 'Pidiendo ciudad',
-      'esperando_voucher': 'Esperando comprobante'
-    };
-
-    let desc = descripciones[estado] || estado;
-    if (pedido) desc += ` | Pedido: ${pedido.producto}`;
-    if (cliente?.nombre) desc += ` | Cliente: ${cliente.nombre}`;
-    return desc;
-  }
-
-  async llamarGroq(prompt) {
-    const response = await fetch(GROQ_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 250,
-        temperature: 0.6
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Groq error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const texto = data.choices?.[0]?.message?.content || '';
-    return this.parsearRespuesta(texto);
-  }
-
-  async llamarGemini(prompt) {
-    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 250 }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Gemini error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return this.parsearRespuesta(texto);
-  }
-
-  parsearRespuesta(texto) {
-    try {
-      let clean = texto.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-      const match = clean.match(/\{[\s\S]*\}/);
-      if (match) {
-        const json = JSON.parse(match[0]);
-        return {
-          respuesta: json.respuesta || json.mensaje || '',
-          accion: json.accion || 'continuar',
-          datos: json.datos || {}
-        };
-      }
-    } catch (e) {
-      console.log('   Error parsing JSON:', e.message);
-    }
-
-    if (texto && texto.length > 0 && texto.length < 500) {
-      return {
-        respuesta: texto.replace(/[{}"]/g, '').trim(),
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    return null;
-  }
-
-  respuestaLocal(mensaje, contexto) {
+  fallbackLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
-    const { productos = [], estadoActual = 'inicio', negocio } = contexto;
+    const { productos = [], negocio } = contexto;
 
-    // ========== NUEVO PEDIDO / QUIERO COMPRAR (PRIORIDAD MÁXIMA) ==========
-    if (this.quiereNuevoPedido(msg)) {
-      console.log('   -> Detectado: NUEVO PEDIDO');
-      return {
-        respuesta: '',
-        accion: 'ver_catalogo',
-        datos: {}
-      };
+    // Saludos simples
+    if (/^(hola|buenos|buenas|hey|hi|alo)/.test(msg)) {
+      return { respuesta: '', accion: 'menu', datos: {} };
     }
 
-    // ========== CONSULTA DE PEDIDOS (después de nuevo pedido) ==========
-    if (this.quiereVerPedidos(msg)) {
-      console.log('   -> Detectado: VER PEDIDOS');
-      return {
-        respuesta: '',
-        accion: 'ver_pedidos',
-        datos: {}
-      };
-    }
-
-    // ========== SOLICITUD DE LISTAR/VER CATÁLOGO ==========
-    if (this.quiereVerCatalogo(msg)) {
-      return {
-        respuesta: '',
-        accion: 'ver_catalogo',
-        datos: {}
-      };
-    }
-
-    // ========== SOLICITUD DE FOTOS ==========
-    if ((msg.includes('foto') || msg.includes('imagen') || msg.includes('muestra') || msg.includes('enseña')) && 
-        !msg.includes('comprobante') && !msg.includes('voucher') && !msg.includes('pago')) {
-      
-      const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
-      
-      if (productoMencionado) {
-        if (productoMencionado.imagenUrl) {
-          return {
-            respuesta: '',
-            accion: 'enviar_foto',
-            datos: { producto: productoMencionado }
-          };
-        } else {
-          return {
-            respuesta: `No tengo foto de *${productoMencionado.nombre}*\n\nPrecio: S/${productoMencionado.precio}\n\n¿Te interesa?`,
-            accion: 'info_producto',
-            datos: { producto: productoMencionado }
-          };
-        }
-      }
-      
-      return {
-        respuesta: '¿De qué producto quieres ver la foto?',
-        accion: 'preguntar',
-        datos: {}
-      };
-    }
-
-    // ========== PREGUNTAS POR PRODUCTO ESPECÍFICO ==========
-    const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
-    
-    if (productoMencionado) {
-      if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta') || msg.includes('vale')) {
-        return {
-          respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}\n\n¿Te interesa?`,
-          accion: 'info_producto',
-          datos: { producto: productoMencionado }
-        };
-      }
-      
-      if (msg.includes('quiero') || msg.includes('dame') || msg.includes('necesito') || msg.includes('comprar')) {
-        return {
-          respuesta: `*${productoMencionado.nombre}* - S/${productoMencionado.precio}\n\n¿Cuántas unidades?`,
-          accion: 'confirmar_compra',
-          datos: { producto: productoMencionado }
-        };
-      }
-
-      if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes')) {
-        const stock = productoMencionado.disponible || productoMencionado.stock || 0;
-        if (stock > 0) {
-          if (productoMencionado.imagenUrl) {
-            return {
-              respuesta: 'Sí tenemos',
-              accion: 'enviar_foto',
-              datos: { producto: productoMencionado }
-            };
-          }
-          return {
-            respuesta: `Sí, *${productoMencionado.nombre}* a S/${productoMencionado.precio}\n\n¿Te interesa?`,
-            accion: 'info_producto',
-            datos: { producto: productoMencionado }
-          };
-        } else {
-          return {
-            respuesta: `*${productoMencionado.nombre}* está agotado.\n\n¿Te interesa otro producto?`,
-            accion: 'continuar',
-            datos: {}
-          };
-        }
-      }
-
-      if (productoMencionado.imagenUrl) {
-        return {
-          respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}`,
-          accion: 'enviar_foto',
-          datos: { producto: productoMencionado }
-        };
-      }
-      
-      return {
-        respuesta: `*${productoMencionado.nombre}*\nS/${productoMencionado.precio}\n\n¿Te interesa?`,
-        accion: 'info_producto',
-        datos: { producto: productoMencionado }
-      };
-    }
-
-    // ========== SALUDOS (van al menú principal) ==========
-    if (/^(hola|buenos días|buenas tardes|buenas noches|hey|hi|alo|buen día)$/i.test(msg) ||
-        /^(hola|buenos|buenas|buen)\s*$/i.test(msg)) {
-      return {
-        respuesta: '',
-        accion: 'menu',
-        datos: {}
-      };
-    }
-
-    // ========== PREGUNTAS SIN PRODUCTO ==========
-    if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio')) {
-      return {
-        respuesta: '¿De qué producto quieres saber el precio?',
-        accion: 'preguntar',
-        datos: {}
-      };
-    }
-
-    if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes') || msg.includes('venden')) {
-      return {
-        respuesta: '¿Qué producto buscas?',
-        accion: 'preguntar',
-        datos: {}
-      };
-    }
-
-    // ========== PROCESO DE COMPRA ==========
-    if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona')) {
-      return {
-        respuesta: 'Es fácil:\n\n1. Elige un producto\n2. Indicas cantidad\n3. Pagas por Yape/Plin\n4. Envías foto del comprobante\n\n¿Qué te interesa?',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // ========== MÉTODOS DE PAGO ==========
-    if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia')) {
-      return {
-        respuesta: 'Aceptamos Yape, Plin y transferencia.\n\n¿Quieres hacer un pedido?',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // ========== ENVÍO ==========
-    if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery')) {
-      return {
-        respuesta: 'Sí hacemos envíos. El costo depende de tu zona.\n\n¿Qué producto te interesa?',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // ========== CONTACTO HUMANO ==========
-    if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
-      return {
-        respuesta: 'Te conecto con alguien del equipo',
-        accion: 'contactar',
-        datos: {}
-      };
-    }
-
-    // ========== AGRADECIMIENTOS ==========
-    if (msg.includes('gracias') || msg.includes('genial') || msg.includes('perfecto') || msg.includes('ok')) {
-      return {
-        respuesta: 'De nada. ¿Algo más?',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // ========== DESPEDIDAS ==========
-    if (msg.includes('chau') || msg.includes('adiós') || msg.includes('adios') || msg.includes('bye')) {
-      return {
-        respuesta: 'Hasta pronto',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // ========== NÚMEROS ==========
+    // Números (selección de producto)
     if (/^\d+$/.test(msg)) {
-      return {
-        respuesta: null,
-        accion: 'seleccionar_numero',
-        datos: { numero: parseInt(msg) }
+      return { 
+        respuesta: null, 
+        accion: 'seleccionar_numero', 
+        datos: { numero: parseInt(msg) } 
       };
     }
 
-    // ========== AYUDA ==========
-    if (msg.includes('ayuda') || msg.includes('help')) {
-      return {
-        respuesta: 'Te ayudo.\n\nPuedo:\n- Mostrarte fotos de productos\n- Darte precios\n- Ayudarte a comprar\n- Ver tus pedidos\n\n¿Qué necesitas?',
-        accion: 'continuar',
-        datos: {}
-      };
+    // Palabras clave obvias
+    if (msg.includes('catálogo') || msg.includes('catalogo') || msg.includes('productos')) {
+      return { respuesta: '', accion: 'ver_catalogo', datos: {} };
     }
 
-    // ========== DEFAULT ==========
+    if (msg.includes('mis pedidos') || msg.includes('mi pedido')) {
+      return { respuesta: '', accion: 'ver_pedidos', datos: {} };
+    }
+
+    // Default: preguntar
     return {
-      respuesta: 'No entendí bien.\n\n¿Qué necesitas? Puedo mostrarte productos o ayudarte a comprar.',
+      respuesta: '¿En qué te puedo ayudar?\n\nPuedo mostrarte productos o el estado de tus pedidos.',
       accion: 'preguntar',
       datos: {}
     };
-  }
-
-  /**
-   * Detectar si el usuario quiere hacer un nuevo pedido
-   * PRIORIDAD: Esta función se evalúa ANTES que quiereVerPedidos
-   */
-  quiereNuevoPedido(msg) {
-    // Frases exactas con "nuevo/nueva"
-    if (msg.includes('nuevo pedido') || msg.includes('nueva compra') || msg.includes('nuevos pedidos')) {
-      return true;
-    }
-    
-    // "hacer/realizar pedido" (sin importar si dice "nuevo" o no)
-    if (/hacer\s+(un\s+)?(nuevo\s+)?pedidos?/.test(msg)) return true;
-    if (/realizar\s+(un\s+)?(nuevo\s+)?pedidos?/.test(msg)) return true;
-    
-    // "quiero + acción de compra" (sin producto específico mencionado después)
-    if (/quiero\s+(comprar|pedir|ordenar|hacer|realizar)/.test(msg)) return true;
-    if (/quisiera\s+(comprar|pedir|ordenar|hacer|realizar)/.test(msg)) return true;
-    if (/deseo\s+(comprar|pedir|ordenar)/.test(msg)) return true;
-    if (/me\s+interesa\s+comprar/.test(msg)) return true;
-    
-    // "otra compra/pedido"
-    if (msg.includes('otra compra') || msg.includes('otro pedido')) return true;
-    
-    return false;
-  }
-
-  /**
-   * Detectar si el usuario quiere ver sus pedidos existentes
-   * Esta función se evalúa DESPUÉS de quiereNuevoPedido
-   */
-  quiereVerPedidos(msg) {
-    // Si ya matcheó con "nuevo pedido", no debería llegar aquí
-    // pero por seguridad, excluimos frases de nuevo pedido
-    if (msg.includes('nuevo') || msg.includes('hacer') || msg.includes('realizar')) {
-      return false;
-    }
-    
-    const frasesPedidos = [
-      'mis pedidos', 'mi pedido',
-      'pedidos tengo', 'pedido tengo',
-      'estado de mi pedido', 'estado del pedido', 'estado pedido',
-      'ver pedidos', 'ver pedido', 'ver mis pedidos',
-      'consultar pedido', 'consultar pedidos',
-      'donde está mi pedido', 'donde esta mi pedido',
-      'rastrear pedido', 'rastrear',
-      'seguimiento', 'tracking',
-      'qué pedidos', 'que pedidos',
-      'mis compras', 'mi compra'
-    ];
-    
-    for (const frase of frasesPedidos) {
-      if (msg.includes(frase)) return true;
-    }
-    
-    // Patrones regex
-    if (/qu[eé]\s+pedidos?\s+tengo/.test(msg)) return true;
-    if (/tengo\s+pedidos?/.test(msg) && !msg.includes('quiero')) return true;
-    
-    return false;
-  }
-
-  /**
-   * Detectar si el usuario quiere ver el catálogo/lista de productos
-   */
-  quiereVerCatalogo(msg) {
-    const palabrasCatalogo = [
-      'catálogo', 'catalogo', 
-      'productos', 
-      'lista', 'listame', 'listar', 'listado',
-      'opciones',
-      'mostrar todo', 'ver todo', 'todos los',
-      'qué tienen', 'que tienen',
-      'qué hay', 'que hay',
-      'qué venden', 'que venden'
-    ];
-    
-    for (const palabra of palabrasCatalogo) {
-      if (msg.includes(palabra)) return true;
-    }
-    
-    if (/qu[eé]\s+tipos/.test(msg)) return true;
-    if (/cu[aá]les\s+(tipos|hay|tienen|son)/.test(msg)) return true;
-    if (/qu[eé]\s+variedades/.test(msg)) return true;
-    if (/qu[eé]\s+modelos/.test(msg)) return true;
-    
-    if (/^listame$/.test(msg)) return true;
-    if (/^lista$/.test(msg)) return true;
-    if (/^ver$/.test(msg)) return true;
-    
-    return false;
-  }
-
-  buscarProductoEnMensaje(mensaje, productos) {
-    if (!productos || productos.length === 0) return null;
-    
-    const msgLower = mensaje.toLowerCase();
-    
-    for (const producto of productos) {
-      const nombreLower = producto.nombre.toLowerCase();
-      
-      if (msgLower.includes(nombreLower)) {
-        return producto;
-      }
-      
-      const palabrasProducto = nombreLower.split(/\s+/).filter(p => p.length >= 4);
-      for (const palabra of palabrasProducto) {
-        if (['para', 'como', 'una', 'uno', 'los', 'las', 'del', 'planta', 'maceta'].includes(palabra)) continue;
-        
-        if (msgLower.includes(palabra)) {
-          return producto;
-        }
-      }
-    }
-    
-    return null;
   }
 }
 
