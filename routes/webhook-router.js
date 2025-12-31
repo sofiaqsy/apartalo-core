@@ -4,6 +4,8 @@
  * Enruta mensajes de WhatsApp al handler correcto según:
  * - Negocios con número PROPIO: webhook específico
  * - Negocios con número COMPARTIDO: identifica por contexto
+ * 
+ * NUEVO: Guarda relación usuario-negocio en Sheets para persistencia
  */
 
 const express = require('express');
@@ -11,12 +13,22 @@ const router = express.Router();
 const config = require('../config');
 const negociosService = require('../config/negocios');
 const stateManager = require('../core/services/state-manager');
+const usuariosNegociosService = require('../core/services/usuarios-negocios-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
 
 // Handlers
 let estandarHandler = null;
 const customHandlers = {};
+
+// Prefijos para links directos
+const PREFIJOS_NEGOCIOS = {
+  'PLANTAS': 'plantas-vivero',
+  'VIVERO': 'plantas-vivero',
+  'ROSAL': 'tienda-rosal',
+  'TIENDA': 'tienda-rosal',
+  'CAFE': 'tienda-rosal'
+};
 
 /**
  * Inicializar handlers
@@ -43,6 +55,9 @@ function initializeHandlers() {
       }
     }
   }
+
+  // Inicializar servicio de usuarios-negocios
+  usuariosNegociosService.initialize().catch(console.error);
 }
 
 // ============================================
@@ -118,13 +133,29 @@ router.post('/', async (req, res) => {
     }
 
     const from = message.from;
-    let negocio = await identificarNegocio(from, message);
+    const text = message.text?.body || message.interactive?.button_reply?.id || '';
+    
+    console.log(`\n📨 Webhook compartido: ${from}`);
+    console.log(`   Mensaje: "${text}"`);
 
-    if (!negocio) {
+    // 1. Verificar si es comando para cambiar de tienda
+    if (text.toLowerCase() === 'cambiar tienda' || text.toLowerCase() === 'otra tienda') {
+      await usuariosNegociosService.desvincularUsuario(from);
+      stateManager.clearActiveBusiness(from);
       await mostrarSelectorNegocios(from);
       return res.sendStatus(200);
     }
 
+    // 2. Intentar identificar negocio
+    let negocio = await identificarNegocio(from, message);
+
+    if (!negocio) {
+      // No hay negocio vinculado, mostrar selector
+      await mostrarSelectorNegocios(from);
+      return res.sendStatus(200);
+    }
+
+    // 3. Procesar mensaje con el negocio identificado
     await processWebhook(body, negocio);
     res.sendStatus(200);
   } catch (error) {
@@ -175,7 +206,9 @@ async function processMessage(message, negocio) {
   console.log(`   Tipo: ${type}`);
   console.log(`   Texto: ${text}`);
 
+  // Guardar negocio activo en memoria Y en Sheets
   stateManager.setActiveBusiness(from, negocio.id);
+  usuariosNegociosService.vincularUsuario(from, negocio.id).catch(console.error);
 
   const handler = customHandlers[negocio.id] || estandarHandler;
 
@@ -251,38 +284,91 @@ function extractMessageContent(message) {
   return { text, mediaId, type, interactiveData };
 }
 
+/**
+ * Identificar negocio del usuario
+ * Orden de prioridad:
+ * 1. Selección de botón (select_xxx)
+ * 2. Prefijo en mensaje (PLANTAS, ROSAL, etc.)
+ * 3. Negocio guardado en Sheets (persistente)
+ * 4. Negocio en memoria (stateManager)
+ * 5. Si solo hay 1 negocio compartido, usar ese
+ */
 async function identificarNegocio(from, message) {
-  const activeBusinessId = stateManager.getActiveBusiness(from);
-  if (activeBusinessId) {
-    const negocio = negociosService.getById(activeBusinessId);
-    if (negocio) return negocio;
-  }
-
   const text = message.text?.body || message.interactive?.button_reply?.id || '';
+  const textUpper = text.toUpperCase().trim();
   
+  // 1. Selección directa por botón
   if (text.startsWith('select_')) {
     const businessId = text.replace('select_', '');
-    return negociosService.getById(businessId);
-  }
-
-  const negocios = negociosService.getSharedNegocios();
-  for (const negocio of negocios) {
-    if (text.toUpperCase().includes(negocio.whatsapp.prefijo)) {
+    const negocio = negociosService.getById(businessId);
+    if (negocio) {
+      console.log(`   → Selección por botón: ${businessId}`);
+      // Guardar vinculación
+      await usuariosNegociosService.vincularUsuario(from, businessId);
       return negocio;
     }
   }
 
-  if (negocios.length === 1) return negocios[0];
+  // 2. Prefijo en mensaje (para links directos)
+  for (const [prefijo, negocioId] of Object.entries(PREFIJOS_NEGOCIOS)) {
+    if (textUpper === prefijo || textUpper.startsWith(prefijo + ' ')) {
+      const negocio = negociosService.getById(negocioId);
+      if (negocio) {
+        console.log(`   → Prefijo detectado: ${prefijo} -> ${negocioId}`);
+        // Guardar vinculación
+        await usuariosNegociosService.vincularUsuario(from, negocioId);
+        return negocio;
+      }
+    }
+  }
+
+  // 3. Buscar en Sheets (persistente)
+  const negocioGuardado = await usuariosNegociosService.getNegocioUsuario(from);
+  if (negocioGuardado) {
+    const negocio = negociosService.getById(negocioGuardado);
+    if (negocio) {
+      console.log(`   → Negocio guardado en Sheets: ${negocioGuardado}`);
+      return negocio;
+    }
+  }
+
+  // 4. Buscar en memoria (stateManager)
+  const activeBusinessId = stateManager.getActiveBusiness(from);
+  if (activeBusinessId) {
+    const negocio = negociosService.getById(activeBusinessId);
+    if (negocio) {
+      console.log(`   → Negocio en memoria: ${activeBusinessId}`);
+      return negocio;
+    }
+  }
+
+  // 5. Si solo hay 1 negocio compartido, usar ese
+  const negocios = negociosService.getSharedNegocios();
+  if (negocios.length === 1) {
+    console.log(`   → Único negocio compartido: ${negocios[0].id}`);
+    return negocios[0];
+  }
+
+  // No se pudo identificar
+  console.log(`   → No se identificó negocio`);
   return null;
 }
 
+/**
+ * Mostrar selector de negocios
+ */
 async function mostrarSelectorNegocios(from) {
   const negocios = negociosService.getSharedNegocios();
   if (negocios.length === 0) return;
 
   const whatsapp = new WhatsAppService(config.whatsappShared);
-  const mensaje = '¡Hola! 👋\n\n¿Con qué tienda deseas comunicarte?';
-  const botones = negocios.slice(0, 3).map(n => ({ id: `select_${n.id}`, title: n.nombre.substring(0, 20) }));
+  
+  const mensaje = '¡Hola! 👋\n\n¿Con qué tienda deseas comunicarte?\n\n_Esta será tu tienda por defecto. Escribe "cambiar tienda" para elegir otra._';
+  
+  const botones = negocios.slice(0, 3).map(n => ({
+    id: `select_${n.id}`,
+    title: n.nombre.substring(0, 20)
+  }));
 
   await whatsapp.sendButtonMessage(from, mensaje, botones);
 }
