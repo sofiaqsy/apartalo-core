@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA Mejorado
+ * APARTALO CORE - Servicio de IA Mejorado v2
  * 
- * IA contextual que entiende el flujo de compra y responde naturalmente
+ * IA contextual que entiende intenciones reales del cliente
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -47,7 +47,7 @@ class AIService {
     
     console.log(`🤖 AI procesarMensaje: "${mensaje}" (tipo: ${tipoMensaje})`);
     
-    // Manejar tipos especiales de mensaje
+    // Manejar tipos especiales de mensaje (media)
     if (tipoMensaje === 'image') {
       return this.manejarImagen(mensaje, contexto);
     }
@@ -64,7 +64,7 @@ class AIService {
       return this.manejarAudio(mensaje, contexto);
     }
 
-    // Mensaje de texto normal
+    // Mensaje de texto - usar IA o respuesta local
     if (!this.initialized) {
       return this.respuestaLocal(mensaje, contexto);
     }
@@ -97,77 +97,65 @@ class AIService {
     const { estadoActual = 'inicio' } = contexto;
     console.log(`   📷 Imagen recibida en estado: ${estadoActual}`);
 
-    // Si estamos esperando voucher
     if (estadoActual === 'esperando_voucher') {
       return {
-        respuesta: null, // El handler se encarga
+        respuesta: null,
         accion: 'procesar_voucher',
         datos: {}
       };
     }
 
-    // Si estamos en otro estado, preguntar qué es
     if (caption) {
       return {
-        respuesta: `Recibí tu imagen 📷\n\n"${caption}"\n\n¿En qué te puedo ayudar con esto?`,
+        respuesta: `Recibí tu imagen 📷\n\n"${caption}"\n\n¿Es un comprobante de pago o me quieres mostrar algo?`,
         accion: 'continuar',
         datos: { tieneImagen: true, caption }
       };
     }
 
     return {
-      respuesta: '¡Recibí tu imagen! 📷\n\n¿Es un comprobante de pago o quieres que te ayude con algo?',
+      respuesta: '¡Recibí tu imagen! 📷\n\n¿Es un comprobante de pago?',
       accion: 'preguntar_imagen',
       datos: { tieneImagen: true }
     };
   }
 
-  /**
-   * Manejar ubicación recibida
-   */
   manejarUbicacion(mensaje, contexto) {
     const { estadoActual = 'inicio' } = contexto;
-    console.log(`   📍 Ubicación recibida en estado: ${estadoActual}`);
 
     if (estadoActual === 'datos_direccion' || estadoActual === 'datos_ciudad') {
       return {
-        respuesta: '¡Perfecto! Recibí tu ubicación 📍\n\n¿Puedes confirmarme la dirección exacta con número de casa/depto?',
+        respuesta: '¡Perfecto! Recibí tu ubicación 📍\n\n¿Puedes confirmarme la dirección exacta?',
         accion: 'guardar_ubicacion',
         datos: { tieneUbicacion: true }
       };
     }
 
     return {
-      respuesta: '¡Gracias por compartir tu ubicación! 📍\n\n¿Quieres que te enviemos algo a esta dirección?',
+      respuesta: '¡Gracias por tu ubicación! 📍 La tendré en cuenta para el envío.',
       accion: 'continuar',
       datos: { tieneUbicacion: true }
     };
   }
 
-  /**
-   * Manejar documento recibido
-   */
   manejarDocumento(mensaje, contexto) {
     return {
-      respuesta: 'Recibí tu documento 📄\n\nPor ahora solo procesamos imágenes de comprobantes de pago.\n\n¿Puedes enviarlo como foto?',
+      respuesta: 'Recibí tu documento 📄\n\nSi es un comprobante de pago, ¿puedes enviarlo como foto para verlo mejor?',
       accion: 'continuar',
       datos: { tieneDocumento: true }
     };
   }
 
-  /**
-   * Manejar audio/voz recibido
-   */
   manejarAudio(mensaje, contexto) {
     return {
-      respuesta: '🎤 Recibí tu mensaje de voz.\n\nPor ahora no puedo escuchar audios, pero puedes escribirme y te ayudo con gusto 😊',
+      respuesta: '🎤 Recibí tu audio, pero por ahora no puedo escucharlo.\n\n¿Puedes escribirme tu consulta?',
       accion: 'continuar',
       datos: { tieneAudio: true }
     };
   }
 
   /**
-   * Construir prompt inteligente con contexto
+   * Construir prompt inteligente - MEJORADO
    */
   construirPromptInteligente(mensaje, contexto) {
     const { 
@@ -185,66 +173,62 @@ class AIService {
     const contextoEstado = this.describirEstado(estadoActual, pedidoActual, datosCliente);
 
     return `Eres el asistente de WhatsApp de "${negocio?.nombre || 'la tienda'}".
-Debes responder de forma NATURAL, CÁLIDA y BREVE (máximo 2-3 líneas).
+Tu rol es ayudar al cliente de forma NATURAL y CONVERSACIONAL.
 
-PRODUCTOS DISPONIBLES:
-${productosTexto || 'Sin productos cargados'}
+PRODUCTOS:
+${productosTexto || 'Sin productos'}
 
-CONTEXTO ACTUAL:
-${contextoEstado}
+CONTEXTO: ${contextoEstado}
 
-REGLAS IMPORTANTES:
-1. Sé amable, usa emojis con moderación
-2. Si preguntan por algo que no tenemos, sugiere alternativas o el catálogo
-3. Si quieren comprar, guíalos al catálogo
-4. Si piden foto/imagen de algo, explica que pueden enviar comprobantes
-5. Si no entiendes, pide aclaración amablemente
-6. Nunca inventes productos o precios
-7. Si mencionan "mamá", "papá", "regalo", "cumpleaños" → sugiere el catálogo como regalo
+REGLAS CRÍTICAS:
+1. NO muestres el catálogo a menos que el cliente EXPLÍCITAMENTE lo pida
+2. Si piden "foto" o "imagen" de un producto → NO TENEMOS fotos disponibles por WhatsApp, discúlpate amablemente
+3. Si preguntan por un producto específico → Da info del producto SIN mostrar todo el catálogo
+4. Si la intención no es clara → PREGUNTA qué necesitan, no asumas
+5. Sé breve (2-3 líneas máximo)
+6. Usa emojis con moderación
 
-ACCIONES (responde en JSON):
-- ver_catalogo: Mostrar lista de productos
-- buscar_producto: Buscar producto {buscar: "término"}
+INTENCIONES A DETECTAR:
+- "quiero ver foto/imagen de X" → No tenemos fotos, ofrecer descripción o visita presencial
+- "quiero comprar X" → Dar info del producto y preguntar cantidad
+- "cuánto cuesta X" → Solo dar precio de X
+- "tienen X" → Confirmar si hay stock de X
+- "ver catálogo/productos" → SOLO aquí mostrar catálogo
+- pregunta general → Responder conversacionalmente
+
+ACCIONES (JSON):
+- ver_catalogo: SOLO si piden explícitamente ver todos los productos
+- info_producto: Dar información de un producto específico {producto: "nombre"}
+- sin_fotos: Explicar que no tenemos fotos disponibles
+- preguntar: Pedir aclaración al cliente
 - contactar: Conectar con humano
-- continuar: Solo responder sin acción especial
-- menu: Mostrar menú principal
-- solicitar_foto: Pedir que envíen una imagen
-- explicar_proceso: Explicar cómo funciona la compra
+- continuar: Solo responder, sin acción extra
+- confirmar_compra: El cliente quiere comprar algo específico {producto: "nombre"}
 
-MENSAJE DEL CLIENTE: "${mensaje}"
+MENSAJE: "${mensaje}"
 
-Responde SOLO con JSON válido:
-{"respuesta": "tu mensaje", "accion": "nombre_accion", "datos": {}}`;
+JSON válido:
+{"respuesta": "mensaje corto", "accion": "nombre", "datos": {}}`;
   }
 
-  /**
-   * Describir el estado actual para contexto
-   */
   describirEstado(estado, pedido, cliente) {
     const descripciones = {
-      'inicio': 'El cliente acaba de iniciar conversación',
-      'menu': 'El cliente está viendo el menú principal',
-      'seleccion_producto': 'El cliente está eligiendo un producto del catálogo',
-      'cantidad': 'El cliente debe indicar cuántas unidades quiere',
-      'confirmar_pedido': 'El cliente debe confirmar su pedido',
-      'datos_nombre': 'Necesitamos el nombre del cliente para el envío',
-      'datos_telefono': 'Necesitamos el teléfono del cliente',
-      'datos_direccion': 'Necesitamos la dirección de envío',
-      'datos_ciudad': 'Necesitamos la ciudad/distrito del cliente',
-      'esperando_voucher': 'El cliente debe enviar foto del comprobante de pago'
+      'inicio': 'Conversación nueva',
+      'menu': 'Viendo menú',
+      'seleccion_producto': 'Eligiendo producto del catálogo',
+      'cantidad': 'Debe indicar cantidad',
+      'confirmar_pedido': 'Confirmando pedido',
+      'datos_nombre': 'Pidiendo nombre',
+      'datos_telefono': 'Pidiendo teléfono',
+      'datos_direccion': 'Pidiendo dirección',
+      'datos_ciudad': 'Pidiendo ciudad',
+      'esperando_voucher': 'Esperando comprobante de pago'
     };
 
-    let descripcion = descripciones[estado] || `Estado: ${estado}`;
-
-    if (pedido) {
-      descripcion += `\nPedido en proceso: ${pedido.producto} x${pedido.cantidad} = S/${pedido.total}`;
-    }
-
-    if (cliente?.nombre) {
-      descripcion += `\nCliente: ${cliente.nombre}`;
-    }
-
-    return descripcion;
+    let desc = descripciones[estado] || estado;
+    if (pedido) desc += ` | Pedido: ${pedido.producto} x${pedido.cantidad}`;
+    if (cliente?.nombre) desc += ` | Cliente: ${cliente.nombre}`;
+    return desc;
   }
 
   async llamarGroq(prompt) {
@@ -257,8 +241,8 @@ Responde SOLO con JSON válido:
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300,
-        temperature: 0.7
+        max_tokens: 250,
+        temperature: 0.6
       })
     });
 
@@ -277,7 +261,7 @@ Responde SOLO con JSON válido:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
+        generationConfig: { temperature: 0.6, maxOutputTokens: 250 }
       })
     });
 
@@ -318,127 +302,137 @@ Responde SOLO con JSON válido:
   }
 
   /**
-   * Respuestas locales mejoradas
+   * Respuestas locales MEJORADAS - más inteligentes
    */
   respuestaLocal(mensaje, contexto) {
     const msg = mensaje.toLowerCase().trim();
-    const { productos = [], estadoActual = 'inicio' } = contexto;
+    const { productos = [], estadoActual = 'inicio', negocio } = contexto;
+
+    // === SOLICITUD DE FOTOS/IMÁGENES DE PRODUCTOS ===
+    // El cliente quiere VER fotos, no enviar
+    if ((msg.includes('foto') || msg.includes('imagen') || msg.includes('ver')) && 
+        (msg.includes('producto') || msg.includes('planta') || msg.includes('anturio') || 
+         msg.includes('monstera') || msg.includes('cómo es') || msg.includes('como es'))) {
+      return {
+        respuesta: `Lo siento, por WhatsApp no puedo enviarte fotos de los productos 😅\n\nPero te puedo dar una descripción detallada o puedes visitarnos para verlos en persona. ¿Qué producto te interesa?`,
+        accion: 'sin_fotos',
+        datos: {}
+      };
+    }
+
+    // === PREGUNTAS POR PRODUCTO ESPECÍFICO ===
+    // Buscar si menciona algún producto
+    const productoMencionado = this.buscarProductoEnMensaje(msg, productos);
+    
+    if (productoMencionado) {
+      // Quiere info de un producto específico
+      if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta') || msg.includes('vale')) {
+        return {
+          respuesta: `El *${productoMencionado.nombre}* cuesta S/${productoMencionado.precio} 💰\n\n¿Te interesa?`,
+          accion: 'info_producto',
+          datos: { producto: productoMencionado }
+        };
+      }
+      
+      if (msg.includes('quiero') || msg.includes('dame') || msg.includes('necesito') || msg.includes('comprar')) {
+        return {
+          respuesta: `¡Perfecto! *${productoMencionado.nombre}* a S/${productoMencionado.precio}\n\n¿Cuántas unidades deseas?`,
+          accion: 'confirmar_compra',
+          datos: { producto: productoMencionado }
+        };
+      }
+
+      if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes')) {
+        const stock = productoMencionado.disponible || productoMencionado.stock || 0;
+        if (stock > 0) {
+          return {
+            respuesta: `¡Sí tenemos! *${productoMencionado.nombre}* a S/${productoMencionado.precio}\nStock: ${stock} disponibles 📦\n\n¿Te interesa?`,
+            accion: 'info_producto',
+            datos: { producto: productoMencionado }
+          };
+        } else {
+          return {
+            respuesta: `😅 El *${productoMencionado.nombre}* está agotado por el momento.\n\n¿Te interesa otro producto?`,
+            accion: 'continuar',
+            datos: {}
+          };
+        }
+      }
+
+      // Solo mencionó el producto
+      return {
+        respuesta: `*${productoMencionado.nombre}*\nPrecio: S/${productoMencionado.precio}\nStock: ${productoMencionado.disponible || productoMencionado.stock || 'Disponible'}\n\n¿Lo quieres?`,
+        accion: 'info_producto',
+        datos: { producto: productoMencionado }
+      };
+    }
 
     // === SALUDOS ===
-    if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal)/.test(msg)) {
+    if (/^(hola|buenos|buenas|hey|hi|alo|qué tal|que tal|buen día|buenas noches)/.test(msg)) {
       return {
-        respuesta: '¡Hola! 👋 ¿En qué te puedo ayudar hoy?',
+        respuesta: `¡Hola! 👋 Soy el asistente de ${negocio?.nombre || 'la tienda'}.\n\n¿En qué te puedo ayudar?`,
         accion: 'continuar',
         datos: {}
       };
     }
 
-    // === SOLICITUD DE FOTOS/IMÁGENES ===
-    if (msg.includes('foto') || msg.includes('imagen') || msg.includes('picture') || msg.includes('ver')) {
-      if (msg.includes('producto') || msg.includes('catalogo') || msg.includes('catálogo')) {
-        return {
-          respuesta: '📸 Te muestro nuestro catálogo con los productos disponibles:',
-          accion: 'ver_catalogo',
-          datos: {}
-        };
-      }
+    // === VER CATÁLOGO (explícito) ===
+    if (msg.includes('catálogo') || msg.includes('catalogo') || msg.includes('productos') || 
+        msg.includes('qué tienen') || msg.includes('que tienen') || msg.includes('qué venden') ||
+        msg.includes('lista') || msg.includes('mostrar todo')) {
       return {
-        respuesta: '📸 ¡Claro! Si quieres ver nuestros productos, te muestro el catálogo.\n\nSi necesitas enviar un comprobante de pago, puedes enviarlo directamente como imagen.',
+        respuesta: 'Te muestro nuestros productos:',
         accion: 'ver_catalogo',
         datos: {}
       };
     }
 
-    // === PREGUNTAS POR PRODUCTOS ===
-    if (msg.includes('tienen') || msg.includes('hay') || msg.includes('venden') || msg.includes('tienes')) {
-      const palabras = msg.split(/\s+/);
-      for (const palabra of palabras) {
-        if (palabra.length > 3 && !['tienen', 'tienes', 'venden', 'tienen'].includes(palabra)) {
-          const encontrado = productos.find(p => 
-            p.nombre.toLowerCase().includes(palabra)
-          );
-          if (encontrado) {
-            return {
-              respuesta: `¡Sí tenemos! 🎉\n\n*${encontrado.nombre}*\nPrecio: S/${encontrado.precio}\n\n¿Te interesa?`,
-              accion: 'buscar_producto',
-              datos: { buscar: palabra, producto: encontrado }
-            };
-          }
-        }
-      }
-      
+    // === PREGUNTAS GENERALES SIN PRODUCTO ESPECÍFICO ===
+    if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio')) {
       return {
-        respuesta: 'Déjame mostrarte lo que tenemos disponible 📦',
-        accion: 'ver_catalogo',
+        respuesta: '¿De qué producto quieres saber el precio? 🤔',
+        accion: 'preguntar',
         datos: {}
       };
     }
 
-    // === PRECIOS ===
-    if (msg.includes('cuánto') || msg.includes('cuanto') || msg.includes('precio') || msg.includes('cuesta') || msg.includes('vale')) {
+    if (msg.includes('tienen') || msg.includes('hay') || msg.includes('tienes') || msg.includes('venden')) {
       return {
-        respuesta: 'Te muestro los precios de nuestros productos 💰',
-        accion: 'ver_catalogo',
-        datos: {}
-      };
-    }
-
-    // === INTENCIÓN DE COMPRA ===
-    if (msg.includes('quiero') || msg.includes('necesito') || msg.includes('comprar') || msg.includes('pedir') || msg.includes('ordenar')) {
-      return {
-        respuesta: '¡Perfecto! 🛒 Te muestro lo que tenemos:',
-        accion: 'ver_catalogo',
-        datos: {}
-      };
-    }
-
-    // === REGALOS ===
-    if (msg.includes('regalo') || msg.includes('mamá') || msg.includes('mama') || msg.includes('papá') || msg.includes('papa') || msg.includes('cumpleaños') || msg.includes('cumple')) {
-      return {
-        respuesta: '¡Qué lindo detalle! 🎁 Te muestro opciones perfectas para regalar:',
-        accion: 'ver_catalogo',
+        respuesta: '¿Qué producto estás buscando? 🌱',
+        accion: 'preguntar',
         datos: {}
       };
     }
 
     // === PROCESO DE COMPRA ===
-    if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona') || msg.includes('como funciona') || msg.includes('proceso')) {
+    if (msg.includes('cómo compro') || msg.includes('como compro') || msg.includes('cómo funciona') || msg.includes('como funciona')) {
       return {
-        respuesta: '¡Es muy fácil! 😊\n\n1️⃣ Elige del catálogo\n2️⃣ Indica la cantidad\n3️⃣ Confirma tus datos\n4️⃣ Paga por Yape/Plin/transferencia\n5️⃣ Envía foto del comprobante\n\n¿Empezamos?',
-        accion: 'explicar_proceso',
+        respuesta: '¡Es fácil! 😊\n\n1️⃣ Elige un producto\n2️⃣ Me dices la cantidad\n3️⃣ Pagas por Yape/Plin\n4️⃣ Envías foto del comprobante\n\n¿Qué te interesa?',
+        accion: 'continuar',
         datos: {}
       };
     }
 
     // === MÉTODOS DE PAGO ===
-    if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia') || msg.includes('efectivo')) {
+    if (msg.includes('pago') || msg.includes('yape') || msg.includes('plin') || msg.includes('transferencia')) {
       return {
-        respuesta: '💳 Aceptamos:\n• Yape\n• Plin\n• Transferencia bancaria\n\n¿Quieres hacer un pedido?',
+        respuesta: '💳 Aceptamos Yape, Plin y transferencia bancaria.\n\n¿Quieres hacer un pedido?',
         accion: 'continuar',
         datos: {}
       };
     }
 
     // === ENVÍO ===
-    if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery') || msg.includes('llega') || msg.includes('despacho')) {
+    if (msg.includes('envío') || msg.includes('envio') || msg.includes('delivery') || msg.includes('despacho')) {
       return {
-        respuesta: '🚚 Hacemos envíos a todo Lima y provincias.\n\nEl costo depende de tu ubicación. ¿Quieres ver nuestros productos?',
-        accion: 'continuar',
-        datos: {}
-      };
-    }
-
-    // === AYUDA ===
-    if (msg.includes('ayuda') || msg.includes('help') || msg.includes('no entiendo') || msg.includes('no sé') || msg.includes('no se')) {
-      return {
-        respuesta: '¡Con gusto te ayudo! 😊\n\nPuedes:\n• Ver el *catálogo*\n• Preguntarme por un producto\n• Escribir *menu* para ver opciones',
+        respuesta: '🚚 Sí hacemos envíos. El costo depende de tu ubicación.\n\n¿Qué producto te interesa?',
         accion: 'continuar',
         datos: {}
       };
     }
 
     // === CONTACTO HUMANO ===
-    if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor') || msg.includes('vendedor')) {
+    if (msg.includes('hablar') || msg.includes('persona') || msg.includes('humano') || msg.includes('asesor')) {
       return {
         respuesta: 'Te conecto con alguien del equipo 👤',
         accion: 'contactar',
@@ -447,9 +441,9 @@ Responde SOLO con JSON válido:
     }
 
     // === AGRADECIMIENTOS ===
-    if (msg.includes('gracias') || msg.includes('thanks') || msg.includes('genial') || msg.includes('perfecto')) {
+    if (msg.includes('gracias') || msg.includes('thanks') || msg.includes('genial') || msg.includes('perfecto') || msg.includes('ok')) {
       return {
-        respuesta: '¡De nada! 😊 ¿Hay algo más en que pueda ayudarte?',
+        respuesta: '¡De nada! 😊 ¿Algo más en que te pueda ayudar?',
         accion: 'continuar',
         datos: {}
       };
@@ -464,21 +458,59 @@ Responde SOLO con JSON válido:
       };
     }
 
-    // === NÚMEROS (posible selección de producto) ===
+    // === NÚMEROS ===
     if (/^\d+$/.test(msg)) {
       return {
-        respuesta: null, // Dejar que el handler lo maneje
+        respuesta: null,
         accion: 'seleccionar_numero',
         datos: { numero: parseInt(msg) }
       };
     }
 
-    // === DEFAULT ===
+    // === AYUDA ===
+    if (msg.includes('ayuda') || msg.includes('help') || msg.includes('no entiendo')) {
+      return {
+        respuesta: '¡Te ayudo! 😊\n\nPuedes preguntarme por:\n• Un producto específico\n• Precios\n• Formas de pago\n• Envíos\n\n¿Qué necesitas?',
+        accion: 'continuar',
+        datos: {}
+      };
+    }
+
+    // === DEFAULT - NO MOSTRAR CATÁLOGO ===
     return {
-      respuesta: `No estoy seguro de entender 🤔\n\n¿Quieres ver nuestro *catálogo* o necesitas ayuda con algo específico?`,
-      accion: 'continuar',
+      respuesta: `No estoy seguro de entender 🤔\n\n¿Qué necesitas? Puedo ayudarte con información de productos, precios o pedidos.`,
+      accion: 'preguntar',
       datos: {}
     };
+  }
+
+  /**
+   * Buscar producto mencionado en el mensaje
+   */
+  buscarProductoEnMensaje(mensaje, productos) {
+    if (!productos || productos.length === 0) return null;
+    
+    const msgLower = mensaje.toLowerCase();
+    
+    // Buscar coincidencia exacta o parcial
+    for (const producto of productos) {
+      const nombreLower = producto.nombre.toLowerCase();
+      
+      // Coincidencia exacta del nombre
+      if (msgLower.includes(nombreLower)) {
+        return producto;
+      }
+      
+      // Buscar palabras clave del nombre del producto
+      const palabrasProducto = nombreLower.split(/\s+/).filter(p => p.length > 3);
+      for (const palabra of palabrasProducto) {
+        if (msgLower.includes(palabra) && palabra !== 'para' && palabra !== 'como') {
+          return producto;
+        }
+      }
+    }
+    
+    return null;
   }
 }
 
