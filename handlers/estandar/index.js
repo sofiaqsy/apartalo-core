@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v7
+ * APARTALO CORE - Handler Estándar v8
  * 
- * Flujo conversacional con pedidos mejorados con botones
+ * Flujo conversacional con mejor parsing de productos en pedidos
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -11,6 +11,47 @@ const config = require('../../config');
 
 // Inicializar IA al cargar
 aiService.initialize().catch(console.error);
+
+/**
+ * Obtener nombre de producto desde diferentes formatos
+ * Soporta: JSON array, "codigo:nombre:cantidad:precio", texto plano
+ */
+function obtenerNombreProducto(productos) {
+  if (!productos) return null;
+  
+  try {
+    // Intentar parsear como JSON
+    const prods = typeof productos === 'string' ? JSON.parse(productos) : productos;
+    if (Array.isArray(prods) && prods.length > 0) {
+      return prods.map(pr => pr.nombre).join(', ');
+    }
+  } catch (e) {
+    // No es JSON, intentar otros formatos
+  }
+  
+  // Formato "codigo:nombre:cantidad:precio" o "codigo:nombre:cantidad:precio\ncodigo:nombre:cantidad:precio"
+  if (typeof productos === 'string') {
+    const lineas = productos.split('\n').filter(l => l.trim());
+    const nombres = [];
+    
+    for (const linea of lineas) {
+      const partes = linea.split(':');
+      if (partes.length >= 2) {
+        // La segunda parte es el nombre
+        nombres.push(partes[1].trim());
+      } else if (linea.length < 50) {
+        // Texto plano corto
+        nombres.push(linea.trim());
+      }
+    }
+    
+    if (nombres.length > 0) {
+      return nombres.join(', ');
+    }
+  }
+  
+  return null;
+}
 
 /**
  * Manejar mensaje entrante
@@ -335,9 +376,12 @@ async function mostrarMenuPrincipal(from, context) {
   } else if (pedidosActivos.length > 0) {
     mensaje = `${saludo}\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
-      mensaje += `*${p.id}* - ${formatOrderStatus(p.estado)}\n`;
+      const nombreProd = obtenerNombreProducto(p.productos);
+      mensaje += `*${p.id}* - ${formatOrderStatus(p.estado)}`;
+      if (nombreProd) mensaje += `\n${nombreProd}`;
+      mensaje += `\n\n`;
     });
-    mensaje += `\n¿Qué deseas hacer?`;
+    mensaje += `¿Qué deseas hacer?`;
     botones = [
       { id: 'ver_pedidos', title: 'Ver pedidos' },
       { id: 'ver_catalogo', title: 'Nuevo pedido' }
@@ -820,20 +864,12 @@ async function mostrarPedidos(from, context) {
   if (pedidosActivos.length > 0) {
     mensaje += `*Activos:*\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
+      const nombreProd = obtenerNombreProducto(p.productos);
+      
       mensaje += `\n*${p.id}*\n`;
       mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n`;
-      
-      if (p.productos) {
-        try {
-          const prods = typeof p.productos === 'string' ? JSON.parse(p.productos) : p.productos;
-          if (Array.isArray(prods) && prods.length > 0) {
-            mensaje += `${prods.map(pr => pr.nombre).join(', ')}\n`;
-          }
-        } catch (e) {
-          if (typeof p.productos === 'string' && p.productos.length < 50) {
-            mensaje += `${p.productos}\n`;
-          }
-        }
+      if (nombreProd) {
+        mensaje += `${nombreProd}\n`;
       }
     });
   }
@@ -842,7 +878,10 @@ async function mostrarPedidos(from, context) {
   if (pedidosHistorial.length > 0) {
     mensaje += `\n*Historial:*\n`;
     pedidosHistorial.slice(0, 2).forEach(p => {
-      mensaje += `\n*${p.id}* - ${formatOrderStatus(p.estado)} | S/${p.total}\n`;
+      const nombreProd = obtenerNombreProducto(p.productos);
+      mensaje += `\n*${p.id}* - ${formatOrderStatus(p.estado)} | S/${p.total}`;
+      if (nombreProd) mensaje += `\n${nombreProd}`;
+      mensaje += `\n`;
     });
     
     if (pedidosHistorial.length > 2) {
