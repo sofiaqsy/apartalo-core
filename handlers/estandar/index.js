@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Handler Estándar v8
+ * APARTALO CORE - Handler Estándar v9
  * 
- * Flujo conversacional con mejor parsing de productos en pedidos
+ * Formato de pedidos mejorado: Producto - Estado | Precio (sin emojis)
  */
 
 const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../../core/utils/formatters');
@@ -29,7 +29,7 @@ function obtenerNombreProducto(productos) {
     // No es JSON, intentar otros formatos
   }
   
-  // Formato "codigo:nombre:cantidad:precio" o "codigo:nombre:cantidad:precio\ncodigo:nombre:cantidad:precio"
+  // Formato "codigo:nombre:cantidad:precio"
   if (typeof productos === 'string') {
     const lineas = productos.split('\n').filter(l => l.trim());
     const nombres = [];
@@ -37,10 +37,8 @@ function obtenerNombreProducto(productos) {
     for (const linea of lineas) {
       const partes = linea.split(':');
       if (partes.length >= 2) {
-        // La segunda parte es el nombre
         nombres.push(partes[1].trim());
       } else if (linea.length < 50) {
-        // Texto plano corto
         nombres.push(linea.trim());
       }
     }
@@ -376,12 +374,10 @@ async function mostrarMenuPrincipal(from, context) {
   } else if (pedidosActivos.length > 0) {
     mensaje = `${saludo}\n\nTienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 3).forEach(p => {
-      const nombreProd = obtenerNombreProducto(p.productos);
-      mensaje += `*${p.id}* - ${formatOrderStatus(p.estado)}`;
-      if (nombreProd) mensaje += `\n${nombreProd}`;
-      mensaje += `\n\n`;
+      const nombreProd = obtenerNombreProducto(p.productos) || 'Pedido';
+      mensaje += `*${nombreProd}* - ${formatOrderStatus(p.estado)}\n`;
     });
-    mensaje += `¿Qué deseas hacer?`;
+    mensaje += `\n¿Qué deseas hacer?`;
     botones = [
       { id: 'ver_pedidos', title: 'Ver pedidos' },
       { id: 'ver_catalogo', title: 'Nuevo pedido' }
@@ -860,28 +856,22 @@ async function mostrarPedidos(from, context) {
     ['ENTREGADO', 'CANCELADO'].includes(p.estado)
   );
 
-  // Mostrar pedidos activos primero
+  // Mostrar pedidos activos: Producto - Estado | S/total
   if (pedidosActivos.length > 0) {
     mensaje += `*Activos:*\n`;
-    pedidosActivos.slice(0, 3).forEach(p => {
-      const nombreProd = obtenerNombreProducto(p.productos);
-      
-      mensaje += `\n*${p.id}*\n`;
-      mensaje += `${formatOrderStatus(p.estado)} | S/${p.total}\n`;
-      if (nombreProd) {
-        mensaje += `${nombreProd}\n`;
-      }
+    pedidosActivos.slice(0, 4).forEach(p => {
+      const nombreProd = obtenerNombreProducto(p.productos) || 'Pedido';
+      mensaje += `\n*${nombreProd}* - ${formatOrderStatus(p.estado)} | S/${p.total}\n`;
+      mensaje += `_${p.id}_\n`;
     });
   }
 
-  // Mostrar historial (últimos 2)
+  // Mostrar historial
   if (pedidosHistorial.length > 0) {
     mensaje += `\n*Historial:*\n`;
     pedidosHistorial.slice(0, 2).forEach(p => {
-      const nombreProd = obtenerNombreProducto(p.productos);
-      mensaje += `\n*${p.id}* - ${formatOrderStatus(p.estado)} | S/${p.total}`;
-      if (nombreProd) mensaje += `\n${nombreProd}`;
-      mensaje += `\n`;
+      const nombreProd = obtenerNombreProducto(p.productos) || 'Pedido';
+      mensaje += `\n${nombreProd} - ${formatOrderStatus(p.estado)} | S/${p.total}\n`;
     });
     
     if (pedidosHistorial.length > 2) {
@@ -892,7 +882,6 @@ async function mostrarPedidos(from, context) {
   // Determinar botones según el estado de pedidos
   let botones = [];
   
-  // Si hay pedidos pendientes de pago, ofrecer enviar voucher
   const pendientesPago = pedidosActivos.filter(p => p.estado === 'PENDIENTE_PAGO');
   if (pendientesPago.length > 0) {
     botones.push({ id: 'enviar_voucher', title: 'Enviar voucher' });
