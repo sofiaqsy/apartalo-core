@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Servicio de IA v7
+ * APARTALO CORE - Servicio de IA v8
  * 
- * Mejoras: detección "nuevo pedido", saludos limpios
+ * Fix: mejor detección "nuevo pedido" vs "ver pedidos"
  */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -162,8 +162,8 @@ CONTEXTO: ${contextoEstado}
 REGLAS IMPORTANTES:
 1. NO uses emojis en las respuestas
 2. NO muestres información de stock al cliente
-3. Si piden "mis pedidos", "estado de pedido", "qué pedidos tengo" -> usar acción "ver_pedidos"
-4. Si piden "nuevo pedido", "quiero comprar", "hacer pedido" -> usar acción "ver_catalogo"
+3. PRIORIDAD: Si dicen "nuevo pedido", "hacer pedido", "quiero comprar" -> usar acción "ver_catalogo"
+4. Si piden "mis pedidos", "estado de pedido", "qué pedidos tengo" (sin "nuevo/hacer") -> usar acción "ver_pedidos"
 5. Si piden "listame", "qué tipos", "cuáles hay" -> usar acción "ver_catalogo"
 6. Si piden "foto" o "ver" un producto específico -> usar acción "enviar_foto"
 7. Si preguntan por producto específico -> dar info de ESE producto (solo nombre y precio)
@@ -279,8 +279,9 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     const msg = mensaje.toLowerCase().trim();
     const { productos = [], estadoActual = 'inicio', negocio } = contexto;
 
-    // ========== NUEVO PEDIDO / QUIERO COMPRAR ==========
+    // ========== NUEVO PEDIDO / QUIERO COMPRAR (PRIORIDAD MÁXIMA) ==========
     if (this.quiereNuevoPedido(msg)) {
+      console.log('   -> Detectado: NUEVO PEDIDO');
       return {
         respuesta: '',
         accion: 'ver_catalogo',
@@ -288,8 +289,9 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
       };
     }
 
-    // ========== CONSULTA DE PEDIDOS ==========
+    // ========== CONSULTA DE PEDIDOS (después de nuevo pedido) ==========
     if (this.quiereVerPedidos(msg)) {
+      console.log('   -> Detectado: VER PEDIDOS');
       return {
         respuesta: '',
         accion: 'ver_pedidos',
@@ -503,32 +505,41 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
 
   /**
    * Detectar si el usuario quiere hacer un nuevo pedido
+   * PRIORIDAD: Esta función se evalúa ANTES que quiereVerPedidos
    */
   quiereNuevoPedido(msg) {
-    const frasesNuevoPedido = [
-      'nuevo pedido', 'nueva compra',
-      'hacer pedido', 'hacer un pedido', 'realizar pedido', 'realizar un pedido',
-      'quiero comprar', 'quiero pedir', 'quiero ordenar',
-      'deseo comprar', 'deseo pedir',
-      'me interesa comprar', 'quisiera comprar',
-      'hacer una compra', 'realizar una compra'
-    ];
-    
-    for (const frase of frasesNuevoPedido) {
-      if (msg.includes(frase)) return true;
+    // Frases exactas con "nuevo/nueva"
+    if (msg.includes('nuevo pedido') || msg.includes('nueva compra') || msg.includes('nuevos pedidos')) {
+      return true;
     }
     
-    // Patrones regex
-    if (/quiero\s+(hacer|realizar)\s+(un\s+)?(nuevo\s+)?pedido/.test(msg)) return true;
-    if (/quisiera\s+(hacer|realizar)\s+(un\s+)?pedido/.test(msg)) return true;
+    // "hacer/realizar pedido" (sin importar si dice "nuevo" o no)
+    if (/hacer\s+(un\s+)?(nuevo\s+)?pedidos?/.test(msg)) return true;
+    if (/realizar\s+(un\s+)?(nuevo\s+)?pedidos?/.test(msg)) return true;
+    
+    // "quiero + acción de compra" (sin producto específico mencionado después)
+    if (/quiero\s+(comprar|pedir|ordenar|hacer|realizar)/.test(msg)) return true;
+    if (/quisiera\s+(comprar|pedir|ordenar|hacer|realizar)/.test(msg)) return true;
+    if (/deseo\s+(comprar|pedir|ordenar)/.test(msg)) return true;
+    if (/me\s+interesa\s+comprar/.test(msg)) return true;
+    
+    // "otra compra/pedido"
+    if (msg.includes('otra compra') || msg.includes('otro pedido')) return true;
     
     return false;
   }
 
   /**
-   * Detectar si el usuario quiere ver sus pedidos
+   * Detectar si el usuario quiere ver sus pedidos existentes
+   * Esta función se evalúa DESPUÉS de quiereNuevoPedido
    */
   quiereVerPedidos(msg) {
+    // Si ya matcheó con "nuevo pedido", no debería llegar aquí
+    // pero por seguridad, excluimos frases de nuevo pedido
+    if (msg.includes('nuevo') || msg.includes('hacer') || msg.includes('realizar')) {
+      return false;
+    }
+    
     const frasesPedidos = [
       'mis pedidos', 'mi pedido',
       'pedidos tengo', 'pedido tengo',
@@ -548,8 +559,7 @@ JSON: {"respuesta": "...", "accion": "...", "datos": {}}`;
     
     // Patrones regex
     if (/qu[eé]\s+pedidos?\s+tengo/.test(msg)) return true;
-    if (/tengo\s+pedidos?/.test(msg)) return true;
-    if (/mis?\s+pedidos?/.test(msg)) return true;
+    if (/tengo\s+pedidos?/.test(msg) && !msg.includes('quiero')) return true;
     
     return false;
   }
