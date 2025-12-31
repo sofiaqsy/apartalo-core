@@ -24,16 +24,25 @@ async function handle(from, message, context) {
   const mensajeLimpio = (text || '').trim();
   const mensajeNormalizado = mensajeLimpio.toLowerCase();
 
+  console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`📨 HANDLER ESTÁNDAR`);
+  console.log(`   From: ${from}`);
+  console.log(`   Negocio: ${negocio.nombre} (${negocio.id})`);
+  console.log(`   Mensaje: "${mensajeLimpio}"`);
+  console.log(`   Tipo: ${type}`);
   console.log(`   Estado: ${state.step}`);
-  console.log(`   Negocio: ${negocio.nombre}`);
+  console.log(`   InteractiveData:`, interactiveData);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
   // Comandos globales
   if (mensajeNormalizado === 'menu' || mensajeNormalizado === 'menú' || mensajeNormalizado === 'inicio') {
+    console.log('   → Comando: menu');
     stateManager.resetState(from, negocio.id);
     return await mostrarMenuPrincipal(from, context);
   }
 
   if (mensajeNormalizado === 'cancelar') {
+    console.log('   → Comando: cancelar');
     stateManager.resetState(from, negocio.id);
     await whatsapp.sendMessage(from, 'Operación cancelada. ¿En qué más te puedo ayudar? 😊');
     return await mostrarMenuPrincipal(from, context);
@@ -41,15 +50,19 @@ async function handle(from, message, context) {
 
   // Manejar pedido desde catálogo WhatsApp
   if (interactiveData?.type === 'order') {
+    console.log('   → Procesando order de catálogo');
     return await procesarPedidoCatalogo(from, interactiveData.items, context);
   }
 
   // Flujo según estado
+  console.log(`   → Switch por estado: ${state.step}`);
   switch (state.step) {
     case 'inicio':
+      console.log('   → Llamando manejarMensajeInicial');
       return await manejarMensajeInicial(from, mensajeLimpio, context);
 
     case 'menu':
+      console.log('   → Llamando manejarMenu');
       return await manejarMenu(from, text, interactiveData, context);
 
     case 'seleccion_producto':
@@ -77,7 +90,7 @@ async function handle(from, message, context) {
       return await manejarVoucher(from, message, context);
 
     default:
-      // Si no está en un flujo conocido, usar IA
+      console.log('   → Default: llamando manejarMensajeInicial');
       return await manejarMensajeInicial(from, mensajeLimpio, context);
   }
 }
@@ -89,29 +102,34 @@ async function handle(from, message, context) {
 async function manejarMensajeInicial(from, mensaje, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   
+  console.log(`\n🤖 manejarMensajeInicial: "${mensaje}"`);
+  
   // Obtener productos para contexto
   const productos = await sheets.getProductos('PUBLICADO');
+  console.log(`   Productos encontrados: ${productos.length}`);
   
   // Usar IA para entender el mensaje
+  console.log('   Llamando aiService.procesarMensaje...');
   const resultado = await aiService.procesarMensaje(mensaje, {
     negocio,
     productos,
     estadoActual: 'inicio'
   });
 
-  console.log(`   🤖 IA: accion=${resultado.accion}`);
+  console.log(`   🤖 IA resultado: accion=${resultado.accion}, respuesta="${resultado.respuesta?.substring(0, 50)}..."`);
 
   // Ejecutar acción según lo que entendió la IA
   switch (resultado.accion) {
     case 'ver_catalogo':
+      console.log('   → Acción: ver_catalogo');
       if (resultado.respuesta) {
         await whatsapp.sendMessage(from, resultado.respuesta);
       }
       return await mostrarCatalogo(from, context);
 
     case 'buscar_producto':
+      console.log('   → Acción: buscar_producto');
       if (resultado.datos?.producto) {
-        // Si encontró un producto específico
         await whatsapp.sendMessage(from, resultado.respuesta);
         stateManager.setState(from, negocio.id, {
           step: 'cantidad',
@@ -119,10 +137,10 @@ async function manejarMensajeInicial(from, mensaje, context) {
         });
         return;
       }
-      // Si solo tiene término de búsqueda
       return await buscarProducto(from, resultado.datos?.buscar || mensaje, context);
 
     case 'contactar':
+      console.log('   → Acción: contactar');
       await whatsapp.sendMessage(from, resultado.respuesta || 'Te conecto con alguien del equipo 👤');
       await whatsapp.sendMessage(from, 
         `📱 *${negocio.nombre}*\n\n` +
@@ -133,15 +151,17 @@ async function manejarMensajeInicial(from, mensaje, context) {
       return;
 
     case 'menu':
+      console.log('   → Acción: menu');
       return await mostrarMenuPrincipal(from, context);
 
     case 'continuar':
     default:
-      // Solo enviar respuesta cálida de la IA
+      console.log('   → Acción: continuar (enviar respuesta)');
       await whatsapp.sendMessage(from, resultado.respuesta);
       
       // Si es saludo o ayuda, mostrar opciones
       if (/hola|ayuda|help/.test(mensaje.toLowerCase())) {
+        console.log('   → Es saludo/ayuda, mostrando menú');
         return await mostrarMenuPrincipal(from, context);
       }
       return;
@@ -201,6 +221,8 @@ async function buscarProducto(from, termino, context) {
 async function mostrarMenuPrincipal(from, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
+  console.log('   📋 mostrarMenuPrincipal');
+
   // Buscar cliente existente
   const cliente = await sheets.buscarCliente(from);
   
@@ -243,6 +265,7 @@ async function mostrarMenuPrincipal(from, context) {
     ];
   }
 
+  console.log(`   Enviando menú con ${botones.length} botones`);
   await whatsapp.sendButtonMessage(from, mensaje, botones);
   stateManager.setStep(from, negocio.id, 'menu');
 }
@@ -252,6 +275,7 @@ async function manejarMenu(from, text, interactiveData, context) {
   
   // Priorizar respuesta de botones
   const opcion = interactiveData?.id || text?.toLowerCase() || '';
+  console.log(`   manejarMenu opcion: "${opcion}"`);
 
   if (opcion.includes('catalogo') || opcion.includes('catálogo') || opcion === 'ver_catalogo') {
     return await mostrarCatalogo(from, context);
@@ -276,6 +300,7 @@ async function manejarMenu(from, text, interactiveData, context) {
   }
 
   // Si no es un comando conocido, usar IA
+  console.log('   → Opción no reconocida, usando IA');
   return await manejarMensajeInicial(from, text, context);
 }
 
