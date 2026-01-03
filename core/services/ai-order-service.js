@@ -1,12 +1,12 @@
 /**
- * APARTALO CORE - AI Order Service
+ * APARTALO CORE - AI Order Service v2
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
  * CARACTERISTICAS:
  * - Carga prompt dinamico desde Configuracion del negocio
- * - Incluye productos actuales del Inventario
+ * - Incluye productos actuales del Inventario con formato claro
  * - Extrae datos estructurados (producto, cantidad, datos cliente)
  * - Mantiene historial de conversacion
  */
@@ -66,7 +66,7 @@ class AIOrderService {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
         max_tokens: 1024,
-        temperature: 0.7
+        temperature: 0.5
       }, {
         headers: {
           'Authorization': 'Bearer ' + this.apiKey,
@@ -143,49 +143,56 @@ class AIOrderService {
    * Construir prompt del sistema con contexto del negocio
    */
   construirSystemPrompt(negocio, config, productos, datosCliente) {
+    // Formato de productos mas claro y estructurado
     const productosTexto = productos.map(p => 
-      '- ' + p.nombre + ' (' + p.codigo + '): S/' + p.precio + (p.descripcion ? ' - ' + p.descripcion : '')
+      'CODIGO: ' + p.codigo + '\n' +
+      '  Nombre: ' + p.nombre + '\n' +
+      '  Precio: S/' + p.precio + '\n' +
+      (p.descripcion ? '  Descripcion: ' + p.descripcion + '\n' : '')
     ).join('\n');
 
     const clienteTexto = datosCliente 
       ? '\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ' + (datosCliente.nombre || 'No registrado') + '\n- Direccion: ' + (datosCliente.direccion || 'No registrada') + '\n- Telefono: ' + (datosCliente.telefono || 'No registrado')
       : '\nCLIENTE NUEVO: No tenemos datos registrados.';
 
-    return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos de manera conversacional y natural.
+    return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos.
 
 SOBRE EL NEGOCIO:
 ${config.prompt_negocio || 'Somos un negocio dedicado a ofrecer productos de calidad.'}
 
-REGLAS DE VENTA:
+REGLAS DE VENTA IMPORTANTES:
 ${config.reglas_venta || 'Consultar disponibilidad y precios.'}
 
 INFORMACION ADICIONAL:
 ${config.info_adicional || ''}
 
-TONO DE COMUNICACION:
-${config.tono || 'Amable y profesional'}
-
-PRODUCTOS DISPONIBLES:
+CATALOGO DE PRODUCTOS (USA ESTOS CODIGOS Y PRECIOS EXACTOS):
 ${productosTexto || 'Consultar catalogo'}
 ${clienteTexto}
 
-INSTRUCCIONES:
-1. Responde de manera natural y conversacional, como un vendedor humano
-2. NO uses emojis
-3. Guia al cliente para obtener: producto, cantidad, direccion de entrega, nombre y telefono
-4. Si el cliente pregunta por productos, describe las opciones disponibles
-5. Si el cliente indica un producto, confirma y pregunta la cantidad
-6. Si ya tienes producto y cantidad, solicita datos de entrega (si no los tienes)
-7. Cuando tengas TODOS los datos, confirma el pedido completo
-8. Respuestas cortas y directas, maximo 3-4 lineas
+INSTRUCCIONES CRITICAS:
+1. SIEMPRE usa el CODIGO exacto del producto del catalogo
+2. SIEMPRE usa el PRECIO exacto del catalogo para calcular totales
+3. Responde de manera natural y conversacional
+4. NO uses emojis
+5. Si el cliente pide "cafe en grano" o "cafe por kilo" sin especificar, pregunta cual producto del catalogo desea
+6. Guia al cliente: producto -> cantidad -> datos de entrega
+7. Respuestas cortas, maximo 3-4 lineas
 
-IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON con los datos extraidos:
+CALCULO DE TOTALES:
+- Busca el producto en el catalogo
+- Multiplica: precio_unitario x cantidad = total
+- Ejemplo: Si CAF-001 cuesta S/70 y piden 8kg, total = 70 x 8 = S/560
+
+IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
 {
   "intent": "consulta|pedido|otro",
-  "producto_codigo": "CODIGO o null",
-  "producto_nombre": "nombre o null", 
+  "producto_codigo": "CODIGO_EXACTO_DEL_CATALOGO o null",
+  "producto_nombre": "nombre exacto o null", 
   "cantidad": numero o null,
+  "precio_unitario": numero o null,
+  "total_calculado": numero o null,
   "nombre_cliente": "nombre o null",
   "direccion": "direccion o null",
   "telefono": "telefono o null",
@@ -194,7 +201,7 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON con los datos ex
 }
 \`\`\`
 
-El JSON debe reflejar TODOS los datos que tienes hasta el momento (de mensajes anteriores + mensaje actual).`;
+El JSON debe tener los datos acumulados de toda la conversacion.`;
   }
 
   /**
