@@ -110,7 +110,8 @@ router.post('/:businessId', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    await processWebhook(body, negocio);
+    // Para webhook específico, usar credenciales propias del negocio
+    await processWebhook(body, negocio, false);
     res.sendStatus(200);
   } catch (error) {
     console.error('❌ Error en webhook:', error);
@@ -152,8 +153,8 @@ router.post('/', async (req, res) => {
     // 2. Intentar identificar negocio
     let negocio = await identificarNegocio(from, message);
 
-    // 3. Procesar mensaje con el negocio identificado
-    await processWebhook(body, negocio);
+    // 3. Procesar mensaje con el negocio identificado (usar credenciales compartidas)
+    await processWebhook(body, negocio, true);
     res.sendStatus(200);
   } catch (error) {
     console.error('❌ Error en webhook compartido:', error);
@@ -165,7 +166,7 @@ router.post('/', async (req, res) => {
 // PROCESAMIENTO
 // ============================================
 
-async function processWebhook(body, negocio) {
+async function processWebhook(body, negocio, useSharedCredentials = false) {
   if (!body.entry || body.entry.length === 0) return;
 
   for (const entry of body.entry) {
@@ -176,7 +177,7 @@ async function processWebhook(body, negocio) {
 
       if (value.messages && value.messages.length > 0) {
         for (const message of value.messages) {
-          await processMessage(message, negocio);
+          await processMessage(message, negocio, useSharedCredentials);
         }
       }
 
@@ -189,13 +190,13 @@ async function processWebhook(body, negocio) {
   }
 }
 
-async function processMessage(message, negocio) {
+async function processMessage(message, negocio, useSharedCredentials = false) {
   const from = message.from;
   const messageId = message.id;
 
   console.log(`\n📱 Mensaje de ${from} para ${negocio.nombre}`);
 
-  const context = await createContext(negocio);
+  const context = await createContext(negocio, useSharedCredentials);
   await context.whatsapp.markAsRead(messageId);
 
   const { text, mediaId, type, interactiveData } = extractMessageContent(message);
@@ -223,8 +224,26 @@ async function processMessage(message, negocio) {
   }
 }
 
-async function createContext(negocio) {
-  const whatsapp = new WhatsAppService(negocio.whatsapp);
+/**
+ * Crear contexto para el handler
+ * @param {Object} negocio - Datos del negocio
+ * @param {boolean} useSharedCredentials - Si true, usa credenciales del número compartido
+ */
+async function createContext(negocio, useSharedCredentials = false) {
+  // Determinar qué credenciales de WhatsApp usar
+  let whatsappConfig;
+  
+  if (useSharedCredentials || negocio.whatsapp?.tipo === 'COMPARTIDO') {
+    // Usar credenciales del número compartido (de variables de entorno)
+    whatsappConfig = config.whatsappShared;
+    console.log(`   📞 Usando WhatsApp COMPARTIDO (${config.whatsappShared.phoneId})`);
+  } else {
+    // Usar credenciales propias del negocio
+    whatsappConfig = negocio.whatsapp;
+    console.log(`   📞 Usando WhatsApp PROPIO (${negocio.whatsapp?.phoneId})`);
+  }
+
+  const whatsapp = new WhatsAppService(whatsappConfig);
   const sheets = new SheetsService(negocio.spreadsheetId);
   await sheets.initialize();
 
