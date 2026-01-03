@@ -9,6 +9,11 @@
  * - Guarda relación usuario-negocio en Sheets para persistencia
  * - Registra TODOS los mensajes (cliente y bot) para historial
  * - Soporta modo asesor (bloquea bot cuando asesor está activo)
+ * 
+ * HANDLERS:
+ * - UNIFICADO: Handler principal (por defecto para todos)
+ * - CUSTOM: Si existe /handlers/{negocioId}, lo usa
+ * - ESTANDAR: Fallback legacy (handlers/estandar)
  */
 
 const express = require('express');
@@ -23,8 +28,9 @@ const asesorService = require('../core/services/asesor-service');
 const mensajeLogger = require('../core/services/mensaje-logger');
 
 // Handlers
-let estandarHandler = null;
-const customHandlers = {};
+let unificadoHandler = null;  // Handler principal
+let estandarHandler = null;   // Fallback legacy
+const customHandlers = {};    // Handlers específicos por negocio
 
 // Prefijos para links directos
 const PREFIJOS_NEGOCIOS = {
@@ -46,30 +52,66 @@ async function initializeHandlers() {
   // Primero cargar negocios
   await negociosService.initialize();
   
-  // Handler estándar (ApartaLo)
+  // Handler UNIFICADO (nuevo, principal)
+  try {
+    unificadoHandler = require('../handlers/unificado');
+    console.log('✅ Handler UNIFICADO cargado (principal)');
+  } catch (error) {
+    console.log('⚠️ Handler unificado no disponible:', error.message);
+  }
+
+  // Handler estándar (legacy fallback)
   try {
     estandarHandler = require('../handlers/estandar');
-    console.log('✅ Handler estándar cargado');
+    console.log('✅ Handler estándar cargado (fallback)');
   } catch (error) {
     console.log('⚠️ Handler estándar no disponible:', error.message);
   }
 
-  // Cargar handlers custom
+  // Cargar handlers custom específicos (solo si flujo=CUSTOM y existe el archivo)
   const negocios = negociosService.getAll();
   
   for (const negocio of negocios) {
+    // Solo cargar custom si tiene flujo CUSTOM y NO es el handler unificado
     if (negocio.flujo === 'CUSTOM') {
       try {
         customHandlers[negocio.id] = require(`../handlers/${negocio.id}`);
         console.log(`✅ Handler custom cargado: ${negocio.id}`);
       } catch (error) {
-        console.log(`⚠️ Handler custom no encontrado para ${negocio.id}`);
+        // Si no existe handler custom, usará el unificado
+        console.log(`ℹ️ ${negocio.id} usará handler unificado (no tiene custom)`);
       }
     }
   }
 
   // Inicializar servicio de usuarios-negocios
   usuariosNegociosService.initialize().catch(console.error);
+}
+
+/**
+ * Obtener el handler correcto para un negocio
+ * Prioridad: Custom > Unificado > Estándar
+ */
+function getHandler(negocio) {
+  // 1. Si tiene handler custom específico, usarlo
+  if (customHandlers[negocio.id]) {
+    console.log(`   🔧 Usando handler CUSTOM: ${negocio.id}`);
+    return customHandlers[negocio.id];
+  }
+  
+  // 2. Handler unificado (principal)
+  if (unificadoHandler) {
+    console.log(`   🔧 Usando handler UNIFICADO`);
+    return unificadoHandler;
+  }
+  
+  // 3. Fallback al estándar legacy
+  if (estandarHandler) {
+    console.log(`   🔧 Usando handler ESTÁNDAR (fallback)`);
+    return estandarHandler;
+  }
+  
+  return null;
 }
 
 // ============================================
@@ -271,7 +313,8 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
   stateManager.setActiveBusiness(from, negocio.id);
   usuariosNegociosService.vincularUsuario(from, negocio.id).catch(console.error);
 
-  const handler = customHandlers[negocio.id] || estandarHandler;
+  // Obtener handler correcto
+  const handler = getHandler(negocio);
 
   if (!handler) {
     console.log('⚠️ No hay handler disponible');
