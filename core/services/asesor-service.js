@@ -2,49 +2,41 @@
  * APARTALO CORE - Asesor Service
  * 
  * Servicio común para manejo de conversaciones con asesor humano.
- * Funcionalidades:
- * - Crear/gestionar conversaciones
- * - Bloquear bot cuando asesor está activo
- * - Guardar todos los mensajes (tracking)
- * - Compatible con todos los negocios
+ * 
+ * REGLA IMPORTANTE: Solo 1 conversación por cliente (WhatsApp)
+ * - Si ya existe una conversación (cualquier estado), se reutiliza
+ * - Nunca se crean duplicados
  * 
  * Estados de conversación:
  * - LISTENING: Bot activo, mensajes se registran para monitoreo
  * - ACTIVA: Asesor humano activo, bot NO responde
- * - CERRADA: Conversación finalizada
+ * - CERRADA: Conversación finalizada (puede reactivarse)
  */
-
-const SheetsService = require('./sheets-service');
 
 class AsesorService {
   constructor() {
-    this.conversacionesActivas = new Map(); // whatsapp -> { negocioId, conversacionId }
+    this.conversacionesActivas = new Map();
   }
 
   /**
-   * Verificar si un usuario tiene conversación activa con asesor
-   * @param {string} from - Número de WhatsApp
-   * @param {SheetsService} sheets - Instancia de SheetsService del negocio
-   * @returns {string|null} - Estado de la conversación o null
+   * Verificar estado de conversación del usuario
+   * @returns {string|null} - 'ACTIVA', 'LISTENING', 'CERRADA' o null
    */
   async verificarEstado(from, sheets) {
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
-      
       const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
+      
       if (!rows || rows.length <= 1) return null;
 
+      // Buscar conversación del usuario (cualquier estado)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const whatsappRow = this.limpiarWhatsapp(row[3] || '');
         const estado = row[4] || '';
 
         if (whatsappRow === cleanFrom) {
-          if (estado === 'ACTIVA') {
-            return 'ACTIVA';
-          } else if (estado === 'LISTENING') {
-            return 'LISTENING';
-          }
+          return estado; // Retorna el estado actual
         }
       }
 
@@ -56,18 +48,53 @@ class AsesorService {
   }
 
   /**
-   * Verificar si debe bloquear el bot (asesor activo)
+   * Verificar si debe bloquear el bot (SOLO si estado es ACTIVA)
    */
   async debeBloquerBot(from, sheets) {
     const estado = await this.verificarEstado(from, sheets);
-    return estado === 'ACTIVA';
+    const bloquear = estado === 'ACTIVA';
+    
+    if (bloquear) {
+      console.log(`🛑 [ASESOR] Bot BLOQUEADO para ${from} - Estado: ${estado}`);
+    }
+    
+    return bloquear;
+  }
+
+  /**
+   * Obtener conversación existente del usuario (cualquier estado)
+   * @returns {object|null} - { id, estado, rowIndex } o null
+   */
+  async obtenerConversacionExistente(from, sheets) {
+    try {
+      const cleanFrom = this.limpiarWhatsapp(from);
+      const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
+      
+      if (!rows || rows.length <= 1) return null;
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const whatsappRow = this.limpiarWhatsapp(row[3] || '');
+
+        if (whatsappRow === cleanFrom) {
+          return {
+            id: row[0],
+            estado: row[4] || '',
+            rowIndex: i + 1 // Para actualizar después
+          };
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
   }
 
   /**
    * Activar modo asesor para un cliente
-   * @param {string} from - Número de WhatsApp
-   * @param {object} context - Contexto del handler (sheets, whatsapp, negocio)
-   * @returns {object} - { success, conversacionId, mensaje }
+   * - Si no existe conversación, la crea
+   * - Si existe (cualquier estado), la cambia a ACTIVA
    */
   async activarModoAsesor(from, context) {
     const { sheets, whatsapp, negocio } = context;
@@ -76,7 +103,7 @@ class AsesorService {
       const cleanFrom = this.limpiarWhatsapp(from);
       const timestamp = new Date().toISOString();
 
-      // Buscar cliente para obtener nombre
+      // Buscar nombre del cliente
       let nombreCliente = 'Cliente';
       try {
         const cliente = await sheets.buscarCliente(from);
@@ -85,28 +112,27 @@ class AsesorService {
         }
       } catch (e) {}
 
-      // Verificar si ya tiene conversación activa o listening
-      const estadoActual = await this.verificarEstado(from, sheets);
+      // Verificar si ya existe conversación
+      const conversacionExistente = await this.obtenerConversacionExistente(from, sheets);
       
-      if (estadoActual === 'ACTIVA') {
-        // Ya está en modo asesor
-        console.log(`👤 Usuario ${from} ya tiene conversación ACTIVA`);
-        return {
-          success: true,
-          exists: true,
-          mensaje: `✅ *Reconectado con Asesoría*\n\nTu conversación continúa activa.\n\nEscribe tus consultas y un asesor te responderá pronto.\n\n_Escribe "menu" para volver al menú principal._`
-        };
-      }
-
       let conversacionId;
-      
-      if (estadoActual === 'LISTENING') {
-        // Actualizar LISTENING -> ACTIVA
-        conversacionId = await this.obtenerConversacionId(from, sheets);
-        await this.cambiarEstado(conversacionId, 'ACTIVA', sheets);
-        console.log(`🔄 Conversación ${conversacionId} cambiada de LISTENING a ACTIVA`);
+      let yaEstabActiva = false;
+
+      if (conversacionExistente) {
+        conversacionId = conversacionExistente.id;
+        
+        if (conversacionExistente.estado === 'ACTIVA') {
+          // Ya está activa, no hacer nada
+          yaEstabActiva = true;
+          console.log(`👤 [ASESOR] Usuario ${cleanFrom} ya tiene conversación ACTIVA: ${conversacionId}`);
+        } else {
+          // Cambiar estado a ACTIVA
+          await sheets.updateCell(`Conversaciones_Asesor!E${conversacionExistente.rowIndex}`, 'ACTIVA');
+          await sheets.updateCell(`Conversaciones_Asesor!F${conversacionExistente.rowIndex}`, timestamp);
+          console.log(`🔄 [ASESOR] Conversación ${conversacionId} cambiada de ${conversacionExistente.estado} a ACTIVA`);
+        }
       } else {
-        // Crear nueva conversación
+        // Crear nueva conversación (primera vez del cliente)
         conversacionId = `CONV-${Date.now()}`;
         
         await sheets.appendRow('Conversaciones_Asesor', [
@@ -116,13 +142,13 @@ class AsesorService {
           cleanFrom,
           'ACTIVA',
           timestamp,
-          1,  // Veces_Atendida
-          ''  // Ultima_Cierre
+          1,
+          ''
         ]);
         
-        console.log(`✅ Conversación creada: ${conversacionId}`);
+        console.log(`✅ [ASESOR] Nueva conversación creada: ${conversacionId}`);
 
-        // Guardar resumen de contexto como primer mensaje
+        // Guardar resumen de contexto
         await this.guardarMensaje(conversacionId, from, 
           await this.generarResumenContexto(from, context),
           'SISTEMA', sheets
@@ -136,15 +162,19 @@ class AsesorService {
         cliente: nombreCliente
       });
 
+      const mensaje = yaEstabActiva
+        ? `✅ *Reconectado con Asesoría*\n\nTu conversación continúa activa.\n\nEscribe tus consultas y te responderemos pronto.\n\n_Escribe "menu" para volver al menú._`
+        : `✅ *Conectado con Asesoría*\n\n¡Hola ${nombreCliente}!\n\nEstás conectado con el equipo de *${negocio.nombre}*.\n\nEscribe tu consulta y te responderemos pronto.\n\n_Escribe "menu" para volver al menú._`;
+
       return {
         success: true,
         conversacionId,
-        exists: false,
-        mensaje: `✅ *Conectado con Asesoría*\n\n¡Hola ${nombreCliente}!\n\nEstás conectado con nuestro equipo de *${negocio.nombre}*.\n\nEscribe tu consulta y te responderemos pronto.\n\n_Escribe "menu" para volver al menú._`
+        exists: yaEstabActiva,
+        mensaje
       };
 
     } catch (error) {
-      console.error('❌ Error activando modo asesor:', error.message);
+      console.error('❌ [ASESOR] Error activando modo asesor:', error.message);
       return {
         success: false,
         mensaje: 'Error conectando con asesor. Intenta más tarde.'
@@ -157,31 +187,26 @@ class AsesorService {
    */
   async desactivarModoAsesor(from, sheets) {
     try {
-      const conversacionId = await this.obtenerConversacionId(from, sheets);
+      const conversacion = await this.obtenerConversacionExistente(from, sheets);
       
-      if (conversacionId) {
-        // Cambiar a LISTENING (no CERRADA, para mantener historial accesible)
-        await this.cambiarEstado(conversacionId, 'LISTENING', sheets);
-        console.log(`🔄 Conversación ${conversacionId} cerrada (ahora LISTENING)`);
+      if (conversacion && conversacion.estado === 'ACTIVA') {
+        const timestamp = new Date().toISOString();
+        await sheets.updateCell(`Conversaciones_Asesor!E${conversacion.rowIndex}`, 'LISTENING');
+        await sheets.updateCell(`Conversaciones_Asesor!F${conversacion.rowIndex}`, timestamp);
+        await sheets.updateCell(`Conversaciones_Asesor!H${conversacion.rowIndex}`, timestamp);
+        console.log(`🔄 [ASESOR] Conversación ${conversacion.id} cerrada (ahora LISTENING)`);
       }
 
-      // Limpiar memoria
       this.conversacionesActivas.delete(from);
-
       return { success: true };
     } catch (error) {
-      console.error('❌ Error desactivando modo asesor:', error.message);
+      console.error('❌ [ASESOR] Error desactivando:', error.message);
       return { success: false };
     }
   }
 
   /**
    * Guardar mensaje en hoja Mensajes
-   * @param {string} conversacionId - ID de la conversación
-   * @param {string} from - Número de WhatsApp
-   * @param {string} mensaje - Contenido del mensaje
-   * @param {string} tipo - CLIENTE, BOT, ASESOR, SISTEMA
-   * @param {SheetsService} sheets - Instancia de SheetsService
    */
   async guardarMensaje(conversacionId, from, mensaje, tipo, sheets) {
     try {
@@ -198,8 +223,11 @@ class AsesorService {
         cleanFrom
       ]);
 
-      // Actualizar última actividad de la conversación
-      await this.actualizarUltimaActividad(conversacionId, sheets);
+      // Actualizar última actividad
+      const conversacion = await this.obtenerConversacionExistente(from, sheets);
+      if (conversacion) {
+        await sheets.updateCell(`Conversaciones_Asesor!F${conversacion.rowIndex}`, timestamp);
+      }
 
       return { success: true, messageId: msgId };
     } catch (error) {
@@ -209,18 +237,22 @@ class AsesorService {
   }
 
   /**
-   * Guardar mensaje automáticamente (para tracking)
-   * Crea conversación LISTENING si no existe
+   * Guardar mensaje automático (para tracking)
+   * IMPORTANTE: Reutiliza conversación existente, solo crea si no existe ninguna
    */
   async guardarMensajeAuto(from, mensaje, tipo, sheets, nombreCliente = 'Cliente') {
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
       
-      // Obtener o crear conversación LISTENING
-      let conversacionId = await this.obtenerConversacionId(from, sheets);
+      // Buscar conversación existente (cualquier estado)
+      let conversacionExistente = await this.obtenerConversacionExistente(from, sheets);
+      let conversacionId;
       
-      if (!conversacionId) {
-        // Crear conversación LISTENING
+      if (conversacionExistente) {
+        // Reutilizar conversación existente
+        conversacionId = conversacionExistente.id;
+      } else {
+        // Crear nueva conversación LISTENING (primera vez)
         conversacionId = `CONV-${Date.now()}`;
         const timestamp = new Date().toISOString();
         
@@ -231,11 +263,11 @@ class AsesorService {
           cleanFrom,
           'LISTENING',
           timestamp,
-          0,  // Veces_Atendida
-          ''  // Ultima_Cierre
+          0,
+          ''
         ]);
         
-        console.log(`📝 Conversación LISTENING creada: ${conversacionId}`);
+        console.log(`📝 [ASESOR] Conversación LISTENING creada: ${conversacionId}`);
       }
 
       // Guardar mensaje
@@ -247,82 +279,15 @@ class AsesorService {
   }
 
   /**
-   * Obtener ID de conversación activa o listening
+   * Obtener ID de conversación (compatibilidad)
    */
   async obtenerConversacionId(from, sheets) {
-    try {
-      const cleanFrom = this.limpiarWhatsapp(from);
-      
-      const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
-      if (!rows || rows.length <= 1) return null;
-
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const whatsappRow = this.limpiarWhatsapp(row[3] || '');
-        const estado = row[4] || '';
-
-        if (whatsappRow === cleanFrom && (estado === 'ACTIVA' || estado === 'LISTENING')) {
-          return row[0]; // ID de conversación
-        }
-      }
-
-      return null;
-    } catch (error) {
-      return null;
-    }
+    const conv = await this.obtenerConversacionExistente(from, sheets);
+    return conv ? conv.id : null;
   }
 
   /**
-   * Cambiar estado de conversación
-   */
-  async cambiarEstado(conversacionId, nuevoEstado, sheets) {
-    try {
-      const timestamp = new Date().toISOString();
-      const rows = await sheets.getRows('Conversaciones_Asesor!A:H');
-      
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === conversacionId) {
-          // Actualizar Estado (E) y Ultima_Act (F)
-          await sheets.updateCell(`Conversaciones_Asesor!E${i + 1}`, nuevoEstado);
-          await sheets.updateCell(`Conversaciones_Asesor!F${i + 1}`, timestamp);
-          
-          // Si es cierre, actualizar Ultima_Cierre (H)
-          if (nuevoEstado === 'LISTENING' || nuevoEstado === 'CERRADA') {
-            await sheets.updateCell(`Conversaciones_Asesor!H${i + 1}`, timestamp);
-          }
-          
-          return { success: true };
-        }
-      }
-      
-      return { success: false };
-    } catch (error) {
-      console.log('⚠️ Error cambiando estado:', error.message);
-      return { success: false };
-    }
-  }
-
-  /**
-   * Actualizar última actividad de conversación
-   */
-  async actualizarUltimaActividad(conversacionId, sheets) {
-    try {
-      const timestamp = new Date().toISOString();
-      const rows = await sheets.getRows('Conversaciones_Asesor!A:F');
-      
-      for (let i = 1; i < rows.length; i++) {
-        if (rows[i][0] === conversacionId) {
-          await sheets.updateCell(`Conversaciones_Asesor!F${i + 1}`, timestamp);
-          break;
-        }
-      }
-    } catch (error) {
-      // Silencioso
-    }
-  }
-
-  /**
-   * Generar resumen de contexto del cliente para el asesor
+   * Generar resumen de contexto del cliente
    */
   async generarResumenContexto(from, context) {
     const { sheets, negocio } = context;
@@ -337,7 +302,6 @@ class AsesorService {
     lineas.push('═══════════════════════════════════════');
     lineas.push('');
 
-    // Datos del cliente
     try {
       const cliente = await sheets.buscarCliente(from);
       if (cliente) {
@@ -345,7 +309,6 @@ class AsesorService {
         if (cliente.contacto) lineas.push(`Contacto: ${cliente.contacto}`);
         if (cliente.telefono) lineas.push(`Teléfono: ${cliente.telefono}`);
         if (cliente.direccion) lineas.push(`Dirección: ${cliente.direccion}`);
-        if (cliente.totalPedidos) lineas.push(`Total pedidos: ${cliente.totalPedidos}`);
       } else {
         lineas.push(`Cliente nuevo - WhatsApp: ${cleanFrom}`);
       }
@@ -353,14 +316,13 @@ class AsesorService {
       lineas.push(`WhatsApp: ${cleanFrom}`);
     }
 
-    // Pedidos recientes
     lineas.push('');
     lineas.push('PEDIDOS RECIENTES:');
     try {
       const pedidos = await sheets.getPedidosByWhatsapp(from);
       if (pedidos && pedidos.length > 0) {
         pedidos.slice(-3).reverse().forEach((p, i) => {
-          lineas.push(`${i + 1}. ${p.fecha || 'N/A'} - ${p.productos || 'N/A'} - S/${p.total || 0} - ${p.estado || 'N/A'}`);
+          lineas.push(`${i + 1}. ${p.fecha || 'N/A'} - S/${p.total || 0} - ${p.estado || 'N/A'}`);
         });
       } else {
         lineas.push('Sin pedidos registrados');
