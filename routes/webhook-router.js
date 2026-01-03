@@ -12,7 +12,7 @@
  * 
  * HANDLERS:
  * - UNIFICADO: Handler principal (por defecto para todos)
- * - CUSTOM: Si existe /handlers/{negocioId}, lo usa
+ * - CUSTOM: Si existe /handlers/{negocioId} con handle válido, lo usa
  * - ESTANDAR: Fallback legacy (handlers/estandar)
  */
 
@@ -72,13 +72,17 @@ async function initializeHandlers() {
   const negocios = negociosService.getAll();
   
   for (const negocio of negocios) {
-    // Solo cargar custom si tiene flujo CUSTOM y NO es el handler unificado
     if (negocio.flujo === 'CUSTOM') {
       try {
-        customHandlers[negocio.id] = require(`../handlers/${negocio.id}`);
-        console.log(`✅ Handler custom cargado: ${negocio.id}`);
+        const handler = require(`../handlers/${negocio.id}`);
+        // Solo cargar si tiene función handle válida
+        if (handler && typeof handler.handle === 'function') {
+          customHandlers[negocio.id] = handler;
+          console.log(`✅ Handler custom cargado: ${negocio.id}`);
+        } else {
+          console.log(`ℹ️ ${negocio.id} handler deshabilitado, usará unificado`);
+        }
       } catch (error) {
-        // Si no existe handler custom, usará el unificado
         console.log(`ℹ️ ${negocio.id} usará handler unificado (no tiene custom)`);
       }
     }
@@ -90,23 +94,24 @@ async function initializeHandlers() {
 
 /**
  * Obtener el handler correcto para un negocio
- * Prioridad: Custom > Unificado > Estándar
+ * Prioridad: Custom válido > Unificado > Estándar
  */
 function getHandler(negocio) {
-  // 1. Si tiene handler custom específico, usarlo
-  if (customHandlers[negocio.id]) {
+  // 1. Si tiene handler custom específico con handle válido, usarlo
+  const customHandler = customHandlers[negocio.id];
+  if (customHandler && typeof customHandler.handle === 'function') {
     console.log(`   🔧 Usando handler CUSTOM: ${negocio.id}`);
-    return customHandlers[negocio.id];
+    return customHandler;
   }
   
   // 2. Handler unificado (principal)
-  if (unificadoHandler) {
+  if (unificadoHandler && typeof unificadoHandler.handle === 'function') {
     console.log(`   🔧 Usando handler UNIFICADO`);
     return unificadoHandler;
   }
   
   // 3. Fallback al estándar legacy
-  if (estandarHandler) {
+  if (estandarHandler && typeof estandarHandler.handle === 'function') {
     console.log(`   🔧 Usando handler ESTÁNDAR (fallback)`);
     return estandarHandler;
   }
