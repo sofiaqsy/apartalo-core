@@ -1,14 +1,13 @@
 /**
- * APARTALO CORE - Handler Unificado v2.2
+ * APARTALO CORE - Handler Unificado v2.3
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
  * CARACTERISTICAS:
  * - Flujo conversacional con IA (no menus rigidos)
- * - Contexto dinamico por negocio (productos, reglas, tono)
+ * - Precios personalizados por cliente (PreciosClientes)
  * - Extraccion automatica de datos del pedido
  * - Asesor humano integrado
- * - Configurable por negocio
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -41,7 +40,6 @@ async function handle(from, message, context) {
   console.log('   From: ' + from);
   console.log('   Mensaje: "' + mensajeLimpio + '"');
   console.log('   Estado: ' + state.step);
-  console.log('   IA: ' + (cfg.usarIA ? 'SI' : 'NO'));
   console.log('------------------------------------\n');
 
   // ============================================
@@ -125,7 +123,6 @@ function extraerNombreProducto(productosStr) {
   if (!productosStr) return 'Pedido';
   
   try {
-    // Si es JSON
     if (productosStr.startsWith('[') || productosStr.startsWith('{')) {
       const productos = JSON.parse(productosStr);
       if (Array.isArray(productos) && productos.length > 0) {
@@ -135,7 +132,6 @@ function extraerNombreProducto(productosStr) {
         return nombre + ' x' + cantidad;
       }
     }
-    // Si es texto plano
     return productosStr.substring(0, 30);
   } catch (e) {
     return productosStr.substring(0, 30) || 'Pedido';
@@ -167,7 +163,6 @@ async function mostrarMenuPrincipal(from, context, cfg) {
   let mensaje = '';
   let botones = [];
 
-  // Usuario nuevo sin pedidos
   if (!cliente && pedidosActivos.length === 0) {
     mensaje = saludo + '\n\nBienvenido a ' + negocio.nombre + '\n\nQue deseas hacer?';
     
@@ -176,7 +171,6 @@ async function mostrarMenuPrincipal(from, context, cfg) {
       { id: 'contactar', title: 'Contactar' }
     ];
 
-  // Usuario con pedidos activos
   } else if (pedidosActivos.length > 0) {
     mensaje = saludo + ' Tienes ' + pedidosActivos.length + ' pedido(s) activo(s):\n\n';
     
@@ -194,7 +188,6 @@ async function mostrarMenuPrincipal(from, context, cfg) {
       { id: 'contactar', title: 'Contactar' }
     ];
 
-  // Usuario registrado sin pedidos activos
   } else {
     const nombreCliente = cliente?.nombre?.split(' ')[0] || cliente?.empresa || '';
     mensaje = saludo + (nombreCliente ? ' ' + nombreCliente : '') + '\n\n' +
@@ -215,24 +208,20 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
   const { asesorService, whatsapp, hasFeature, stateManager, negocio, sheets } = context;
   const opcion = (interactiveData?.id || text || '').toLowerCase();
 
-  // Nuevo pedido
   if (opcion.includes('pedir') || opcion === 'pedir' || opcion.includes('catalogo')) {
     return await iniciarPedidoConversacional(from, context, cfg);
   }
 
-  // Ver pedidos
   if (opcion.includes('pedido') || opcion === 'ver_pedidos') {
     return await mostrarPedidosActivos(from, context, cfg);
   }
 
-  // Enviar voucher
   if (opcion === 'enviar_voucher') {
     await whatsapp.sendMessage(from, 'Envia una foto de tu comprobante de pago.');
     stateManager.setStep(from, negocio.id, 'esperando_voucher');
     return;
   }
 
-  // Contactar
   if (opcion.includes('contactar') || opcion === 'contactar') {
     if (hasFeature('asesorHumano') && asesorService) {
       const resultado = await asesorService.activarModoAsesor(from, context);
@@ -248,7 +237,6 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
     }
   }
 
-  // Opcion no reconocida - mostrar menu
   return await mostrarMenuPrincipal(from, context, cfg);
 }
 
@@ -259,19 +247,16 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
 async function iniciarPedidoConversacional(from, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  // Cargar datos del cliente si existe
   let cliente = null;
   try {
     cliente = await sheets.buscarCliente(from);
   } catch (e) {}
 
-  // Mensaje inicial invitando a conversar
   const mensajeInicial = 'Con gusto te ayudo.\n\n' +
-    'Cuentame, que producto te interesa? Puedes preguntarme por opciones disponibles, precios, o decirme directamente lo que necesitas.';
+    'Cuentame, que producto te interesa? Puedes preguntarme por opciones disponibles o decirme directamente lo que necesitas.';
 
   await whatsapp.sendMessage(from, mensajeInicial);
 
-  // Inicializar estado para conversacion
   stateManager.setState(from, negocio.id, {
     step: 'pedido_conversacional',
     data: {
@@ -286,12 +271,10 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
 
-  // Obtener historial y datos previos
   const historial = state.data?.historial || [];
   const datosCliente = state.data?.datosCliente || null;
   let datosAcumulados = state.data?.datosExtraidos || {};
 
-  // Procesar con IA
   const resultado = await aiOrderService.procesarMensajePedido(
     mensaje,
     context,
@@ -304,7 +287,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return;
   }
 
-  // Actualizar datos acumulados con los nuevos extraidos
   if (resultado.datosExtraidos) {
     datosAcumulados = {
       ...datosAcumulados,
@@ -312,13 +294,10 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     };
   }
 
-  // Actualizar historial
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
-  // Verificar si el pedido esta completo
   if (resultado.pedidoCompleto && datosAcumulados.producto_codigo && datosAcumulados.cantidad) {
-    // Guardar datos y pasar a confirmacion
     stateManager.updateData(from, negocio.id, {
       historial,
       datosExtraidos: datosAcumulados
@@ -327,7 +306,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return await confirmarPedidoIA(from, context, cfg, datosAcumulados);
   }
 
-  // Continuar conversacion
   stateManager.updateData(from, negocio.id, {
     historial,
     datosExtraidos: datosAcumulados
@@ -339,11 +317,13 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  // Buscar producto
+  // Obtener productos con precios personalizados del cliente
   let productos = [];
   try {
+    productos = await sheets.getProductosConPrecios(from);
+  } catch (e) {
     productos = await sheets.getProductos('ACTIVO');
-  } catch (e) {}
+  }
 
   const producto = productos.find(p => 
     p.codigo === datos.producto_codigo || 
@@ -358,7 +338,8 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   }
 
   const cantidad = parseFloat(datos.cantidad) || cfg.minimoCompra;
-  const total = cantidad * producto.precio;
+  const precioUnitario = producto.precio; // Ya viene con precio especial si existe
+  const total = cantidad * precioUnitario;
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
   // Guardar datos para confirmacion
@@ -366,18 +347,24 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     productoSeleccionado: producto,
     cantidad,
     total,
-    precioFinal: producto.precio,
+    precioFinal: precioUnitario,
     nombreCliente: datos.nombre_cliente,
     direccion: datos.direccion,
     telefono: datos.telefono
   });
 
-  const mensaje = 'RESUMEN DE TU PEDIDO\n\n' +
+  let mensaje = 'RESUMEN DE TU PEDIDO\n\n' +
     'Producto: ' + producto.nombre + '\n' +
     'Cantidad: ' + cantidad + ' ' + unidadTexto + '\n' +
-    'Precio unitario: S/' + producto.precio + '\n' +
-    'Total: S/' + total.toFixed(2) + '\n\n' +
-    'Entrega:\n' +
+    'Precio unitario: S/' + precioUnitario + '\n' +
+    'Total: S/' + total.toFixed(2) + '\n';
+
+  // Indicar si tiene precio especial
+  if (producto.tieneDescuento) {
+    mensaje += '(Precio especial aplicado)\n';
+  }
+
+  mensaje += '\nEntrega:\n' +
     (datos.nombre_cliente ? 'Nombre: ' + datos.nombre_cliente + '\n' : '') +
     (datos.direccion ? 'Direccion: ' + datos.direccion + '\n' : '') +
     (datos.telefono ? 'Telefono: ' + datos.telefono + '\n' : '') +
@@ -411,7 +398,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  // Obtener datos del estado
   const { productoSeleccionado, cantidad, total, precioFinal, nombreCliente, direccion, telefono } = state.data || {};
 
   if (!productoSeleccionado) {
@@ -420,9 +406,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  // Verificar datos faltantes
   if (!nombreCliente || !direccion) {
-    // Pedir datos faltantes
     await whatsapp.sendMessage(from, 
       'Para completar el pedido, necesito algunos datos.\n\n' +
       'Por favor indicame tu nombre completo, direccion de entrega (incluye distrito) y un telefono de contacto.'
@@ -431,7 +415,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  // Crear pedido
   const pedidoId = generateId(cfg.prefijoPedido);
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
@@ -440,7 +423,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
 
   try {
-    // Guardar cliente
     await sheets.upsertCliente({
       whatsapp: from,
       nombre: nombreCliente,
@@ -448,7 +430,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       direccion: direccion
     });
 
-    // Crear pedido
     await sheets.crearPedido({
       id: pedidoId,
       whatsapp: from,
@@ -468,7 +449,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     console.error('Error creando pedido:', e.message);
   }
 
-  // Mensaje de confirmacion segun flujo de pago
   if (cfg.flujoPago === 'contacto') {
     const mensaje = 'PEDIDO CONFIRMADO\n\n' +
       'Codigo: ' + pedidoId + '\n' +
@@ -591,19 +571,16 @@ async function mostrarPedidosActivos(from, context, cfg) {
   mensaje += '------------------------\n\n';
   
   activos.forEach(p => {
-    // Nombre del producto
     const nombreProd = extraerNombreProducto(p.productos);
     mensaje += nombreProd + '\n';
     mensaje += 'Codigo: ' + p.id + '\n';
     mensaje += 'Estado: ' + p.estado + '\n';
     mensaje += 'Total: S/' + p.total + '\n';
     
-    // Direccion de entrega
     if (p.direccion) {
       mensaje += 'Entrega: ' + p.direccion + '\n';
     }
     
-    // Cliente
     if (p.cliente) {
       mensaje += 'Cliente: ' + p.cliente + '\n';
     }
