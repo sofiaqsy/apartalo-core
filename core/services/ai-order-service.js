@@ -2,8 +2,7 @@
  * APARTALO CORE - AI Order Service
  * 
  * Servicio de IA conversacional para toma de pedidos.
- * Usa el contexto del negocio (productos, reglas, tono) para
- * mantener una conversacion natural y extraer datos del pedido.
+ * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
  * CARACTERISTICAS:
  * - Carga prompt dinamico desde Configuracion del negocio
@@ -12,32 +11,27 @@
  * - Mantiene historial de conversacion
  */
 
-const Anthropic = require('@anthropic-ai/sdk');
+const axios = require('axios');
 
 class AIOrderService {
   constructor() {
-    this.client = null;
+    this.apiKey = null;
     this.initialized = false;
+    this.baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   }
 
   initialize() {
     if (this.initialized) return true;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      console.log('AIOrderService: ANTHROPIC_API_KEY no configurada');
+    this.apiKey = process.env.GROQ_API_KEY;
+    if (!this.apiKey) {
+      console.log('AIOrderService: GROQ_API_KEY no configurada');
       return false;
     }
 
-    try {
-      this.client = new Anthropic({ apiKey });
-      this.initialized = true;
-      console.log('AIOrderService inicializado');
-      return true;
-    } catch (error) {
-      console.error('Error inicializando AIOrderService:', error.message);
-      return false;
-    }
+    this.initialized = true;
+    console.log('AIOrderService inicializado con GROQ');
+    return true;
   }
 
   /**
@@ -65,17 +59,22 @@ class AIOrderService {
     const systemPrompt = this.construirSystemPrompt(negocio, configuracion, productos, datosCliente);
 
     // Construir mensajes
-    const messages = this.construirMensajes(historial, mensaje);
+    const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
-      const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+      const response = await axios.post(this.baseUrl, {
+        model: 'llama-3.3-70b-versatile',
+        messages: messages,
         max_tokens: 1024,
-        system: systemPrompt,
-        messages: messages
+        temperature: 0.7
+      }, {
+        headers: {
+          'Authorization': 'Bearer ' + this.apiKey,
+          'Content-Type': 'application/json'
+        }
       });
 
-      const respuestaTexto = response.content[0].text;
+      const respuestaTexto = response.data.choices[0].message.content;
       
       // Extraer JSON estructurado si existe
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
@@ -91,7 +90,7 @@ class AIOrderService {
       };
 
     } catch (error) {
-      console.error('Error en AI:', error.message);
+      console.error('Error en AI:', error.response?.data || error.message);
       return {
         respuesta: 'Ocurrio un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
@@ -145,11 +144,11 @@ class AIOrderService {
    */
   construirSystemPrompt(negocio, config, productos, datosCliente) {
     const productosTexto = productos.map(p => 
-      `- ${p.nombre} (${p.codigo}): S/${p.precio} ${p.descripcion ? '- ' + p.descripcion : ''}`
+      '- ' + p.nombre + ' (' + p.codigo + '): S/' + p.precio + (p.descripcion ? ' - ' + p.descripcion : '')
     ).join('\n');
 
     const clienteTexto = datosCliente 
-      ? `\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ${datosCliente.nombre || 'No registrado'}\n- Direccion: ${datosCliente.direccion || 'No registrada'}\n- Telefono: ${datosCliente.telefono || 'No registrado'}`
+      ? '\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ' + (datosCliente.nombre || 'No registrado') + '\n- Direccion: ' + (datosCliente.direccion || 'No registrada') + '\n- Telefono: ' + (datosCliente.telefono || 'No registrado')
       : '\nCLIENTE NUEVO: No tenemos datos registrados.';
 
     return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos de manera conversacional y natural.
@@ -172,12 +171,13 @@ ${clienteTexto}
 
 INSTRUCCIONES:
 1. Responde de manera natural y conversacional, como un vendedor humano
-2. No uses emojis
+2. NO uses emojis
 3. Guia al cliente para obtener: producto, cantidad, direccion de entrega, nombre y telefono
 4. Si el cliente pregunta por productos, describe las opciones disponibles
 5. Si el cliente indica un producto, confirma y pregunta la cantidad
 6. Si ya tienes producto y cantidad, solicita datos de entrega (si no los tienes)
 7. Cuando tengas TODOS los datos, confirma el pedido completo
+8. Respuestas cortas y directas, maximo 3-4 lineas
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON con los datos extraidos:
 \`\`\`json
@@ -200,8 +200,10 @@ El JSON debe reflejar TODOS los datos que tienes hasta el momento (de mensajes a
   /**
    * Construir array de mensajes para la API
    */
-  construirMensajes(historial, mensajeActual) {
-    const messages = [];
+  construirMensajes(systemPrompt, historial, mensajeActual) {
+    const messages = [
+      { role: 'system', content: systemPrompt }
+    ];
 
     // Agregar historial
     for (const msg of historial) {
