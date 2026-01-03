@@ -2,14 +2,15 @@
  * APARTALO CORE - Handler Custom: BIZ-002 (Finca Rosal)
  * 
  * Flujo personalizado para Finca Rosal:
- * - Asesor humano
- * - Precios VIP por cliente
+ * - Asesor humano (usa servicio común asesorService)
  * - Café gratis (muestra)
  * - Pedido mínimo 5kg
+ * 
+ * NOTA: El modo asesor se verifica en webhook-router ANTES de llegar aquí.
+ * Si estado es ACTIVA, este handler NO se ejecuta.
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
-const config = require('../../config');
 
 // Triggers para café gratis
 const TRIGGERS_CAFE_GRATIS = [
@@ -25,7 +26,7 @@ const TRIGGERS_CAFE_GRATIS = [
  * Manejar mensaje entrante
  */
 async function handle(from, message, context) {
-  const { whatsapp, sheets, stateManager, negocio, hasFeature } = context;
+  const { whatsapp, sheets, stateManager, negocio, hasFeature, asesorService } = context;
   const { text, type, interactiveData } = message;
 
   const state = stateManager.getState(from, negocio.id);
@@ -37,29 +38,7 @@ async function handle(from, message, context) {
   console.log(`   From: ${from}`);
   console.log(`   Mensaje: "${mensajeLimpio}"`);
   console.log(`   Estado: ${state.step}`);
-  console.log(`   Features: ${negocio.features.join(', ')}`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-  // ============================================
-  // MODO ASESOR - Tiene prioridad absoluta
-  // ============================================
-  if (hasFeature('asesorHumano')) {
-    const estadoAsesor = await verificarModoAsesor(from, context);
-    
-    if (estadoAsesor === 'ACTIVA') {
-      // Modo asesor activo - solo guardar mensaje, no responder
-      await guardarMensajeAsesor(from, mensajeLimpio, 'CLIENTE', context);
-      
-      // Verificar si quiere salir
-      if (mensajeLimpio.toLowerCase() === 'menu' || mensajeLimpio.toLowerCase() === 'salir') {
-        await cerrarConversacionAsesor(from, context);
-        return await mostrarMenuPrincipal(from, context);
-      }
-      
-      console.log('👤 Mensaje guardado para asesor - BOT NO RESPONDE');
-      return; // No responder, asesor responderá
-    }
-  }
 
   // ============================================
   // COMANDOS GLOBALES
@@ -77,20 +56,25 @@ async function handle(from, message, context) {
       return await procesarCafeGratis(from, context);
     }
 
-    // Continuar flujo de café gratis si está en proceso
     if (state.step && state.step.startsWith('cafe_gratis_')) {
       return await continuarFlujoCafeGratis(from, mensajeLimpio, context);
     }
   }
 
   // ============================================
-  // CONTACTAR FINCA / ASESOR
+  // CONTACTAR FINCA / ASESOR (usa servicio común)
   // ============================================
   if (mensajeLimpio.toLowerCase().includes('contactar') || 
       mensajeLimpio.toLowerCase().includes('asesor') ||
       mensajeLimpio.toLowerCase() === 'finca') {
-    if (hasFeature('asesorHumano')) {
-      return await activarModoAsesor(from, context);
+    if (hasFeature('asesorHumano') && asesorService) {
+      const resultado = await asesorService.activarModoAsesor(from, context);
+      if (resultado.success) {
+        await whatsapp.sendMessage(from, resultado.mensaje);
+      } else {
+        await whatsapp.sendMessage(from, resultado.mensaje || 'Error conectando con asesor.');
+      }
+      return;
     }
   }
 
@@ -135,32 +119,27 @@ async function handle(from, message, context) {
 // ============================================
 
 async function mostrarMenuPrincipal(from, context) {
-  const { whatsapp, sheets, stateManager, negocio, hasFeature } = context;
+  const { whatsapp, sheets, stateManager, negocio } = context;
 
   let cliente = null;
   let pedidosActivos = [];
   
   try {
     cliente = await sheets.buscarCliente(from);
-  } catch (e) {
-    console.log('⚠️ Error buscando cliente:', e.message);
-  }
+  } catch (e) {}
   
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
     pedidosActivos = (pedidos || []).filter(p => 
       !['ENTREGADO', 'CANCELADO', 'Completado'].includes(p.estado)
     );
-  } catch (e) {
-    console.log('⚠️ Error obteniendo pedidos:', e.message);
-  }
+  } catch (e) {}
 
   const saludo = getGreeting();
   let mensaje = '';
   let botones = [];
 
   if (!cliente && pedidosActivos.length === 0) {
-    // Cliente nuevo
     mensaje = `${saludo}! 👋\n\nBienvenido a *Finca Rosal*\n\n` +
       `Ofrecemos café orgánico premium de Villa Rica directamente a tu cafetería.\n\n` +
       `¿Qué deseas hacer?`;
@@ -171,7 +150,6 @@ async function mostrarMenuPrincipal(from, context) {
     ];
 
   } else if (pedidosActivos.length > 0) {
-    // Con pedidos activos
     mensaje = `${saludo}! Tienes ${pedidosActivos.length} pedido(s) activo(s):\n\n`;
     pedidosActivos.slice(0, 2).forEach(p => {
       mensaje += `• *${p.id}* - ${p.estado}\n`;
@@ -185,7 +163,6 @@ async function mostrarMenuPrincipal(from, context) {
     ];
 
   } else {
-    // Cliente recurrente
     const nombreCliente = cliente?.contacto || cliente?.empresa || '';
     mensaje = `${saludo}${nombreCliente ? ` ${nombreCliente}` : ''}! 👋\n\n` +
       `Bienvenido de vuelta a *Finca Rosal*\n\n` +
@@ -203,7 +180,7 @@ async function mostrarMenuPrincipal(from, context) {
 }
 
 async function manejarMenu(from, text, interactiveData, context) {
-  const { stateManager, negocio } = context;
+  const { asesorService, whatsapp } = context;
   const opcion = (interactiveData?.id || text || '').toLowerCase();
 
   if (opcion.includes('pedir') || opcion === 'pedir') {
@@ -219,7 +196,14 @@ async function manejarMenu(from, text, interactiveData, context) {
   }
 
   if (opcion.includes('contactar') || opcion === 'contactar') {
-    return await activarModoAsesor(from, context);
+    // Usar servicio común de asesor
+    if (asesorService) {
+      const resultado = await asesorService.activarModoAsesor(from, context);
+      if (resultado.success) {
+        await whatsapp.sendMessage(from, resultado.mensaje);
+      }
+      return;
+    }
   }
 
   return await mostrarMenuPrincipal(from, context);
@@ -230,15 +214,12 @@ async function manejarMenu(from, text, interactiveData, context) {
 // ============================================
 
 async function mostrarCatalogo(from, context) {
-  const { whatsapp, sheets, stateManager, negocio, hasFeature } = context;
+  const { whatsapp, sheets, stateManager, negocio } = context;
 
-  // Obtener productos
   let productos = [];
   try {
     productos = await sheets.getProductos('ACTIVO');
-  } catch (e) {
-    console.log('⚠️ Error obteniendo productos:', e.message);
-  }
+  } catch (e) {}
   
   if (!productos || productos.length === 0) {
     await whatsapp.sendMessage(from, 'No hay productos disponibles en este momento.');
@@ -282,12 +263,11 @@ async function manejarSeleccionProducto(from, text, context) {
   }
 
   const producto = productos[numero - 1];
-  const precioFinal = producto.precio;
 
   let mensaje = `✅ Has seleccionado:\n\n`;
   mensaje += `*${producto.nombre}*\n`;
   if (producto.descripcion) mensaje += `${producto.descripcion}\n`;
-  mensaje += `\nPrecio: S/${precioFinal}/kg\n\n`;
+  mensaje += `\nPrecio: S/${producto.precio}/kg\n\n`;
   mensaje += `*¿Cuántos kilos necesitas?*\n`;
   mensaje += `_Pedido mínimo: 5kg_`;
 
@@ -295,7 +275,7 @@ async function manejarSeleccionProducto(from, text, context) {
 
   stateManager.updateData(from, negocio.id, { 
     productoSeleccionado: producto,
-    precioFinal 
+    precioFinal: producto.precio
   });
   stateManager.setStep(from, negocio.id, 'cantidad');
 }
@@ -310,7 +290,7 @@ async function manejarCantidad(from, text, context) {
   }
 
   const cantidad = parseFloat(text);
-  const minimo = context.config?.deliveryMin || 5;
+  const minimo = 5;
 
   if (isNaN(cantidad) || cantidad < minimo) {
     await whatsapp.sendMessage(from, `El pedido mínimo es de *${minimo}kg*. Por favor, ingresa una cantidad mayor.`);
@@ -355,19 +335,15 @@ async function manejarConfirmacion(from, text, context) {
     return;
   }
 
-  // Verificar cliente existente
   let cliente = null;
   try {
     cliente = await sheets.buscarCliente(from);
-  } catch (e) {
-    console.log('⚠️ Error buscando cliente:', e.message);
-  }
+  } catch (e) {}
 
   if (cliente?.empresa && cliente?.direccion) {
     return await crearPedidoDirecto(from, context, cliente);
   }
 
-  // Solicitar datos
   await whatsapp.sendMessage(from,
     `*DATOS DEL CLIENTE*\n\n` +
     `Por favor, ingresa el *nombre de tu empresa o negocio*:`
@@ -377,7 +353,6 @@ async function manejarConfirmacion(from, text, context) {
 
 async function manejarDatosEmpresa(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
-
   stateManager.updateData(from, negocio.id, { empresa: text });
   
   await whatsapp.sendMessage(from, 
@@ -390,7 +365,6 @@ async function manejarDatosEmpresa(from, text, context) {
 
 async function manejarDatosDireccion(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
-
   stateManager.updateData(from, negocio.id, { direccion: text });
   
   await whatsapp.sendMessage(from, 
@@ -402,7 +376,6 @@ async function manejarDatosDireccion(from, text, context) {
 
 async function manejarDatosContacto(from, text, context) {
   const { whatsapp, stateManager, negocio } = context;
-
   stateManager.updateData(from, negocio.id, { contacto: text });
   
   await whatsapp.sendMessage(from, 
@@ -424,14 +397,10 @@ async function manejarDatosTelefono(from, text, context) {
     empresa: state.data.empresa
   };
 
-  // Guardar cliente
   try {
     await sheets.upsertCliente(datosCliente);
-  } catch (e) {
-    console.log('⚠️ Error guardando cliente:', e.message);
-  }
+  } catch (e) {}
 
-  // Crear pedido
   return await crearPedidoDirecto(from, context, datosCliente);
 }
 
@@ -462,141 +431,18 @@ async function crearPedidoDirecto(from, context, cliente) {
       total,
       estado: 'En preparación'
     });
-  } catch (e) {
-    console.log('⚠️ Error creando pedido:', e.message);
-  }
+  } catch (e) {}
 
   const mensaje = `✅ *¡Pedido recibido!*\n\n` +
     `☕ *${productoSeleccionado.nombre}*\n` +
     `${cantidad}kg - S/${total.toFixed(2)}\n\n` +
     `Tu código de pedido es *${pedidoId}* y será entregado en:\n` +
     `*${cliente.direccion}*\n\n` +
-    `En las próximas horas te contactaremos para coordinar el pago y confirmar tu entrega.\n\n` +
+    `En las próximas horas te contactaremos para coordinar el pago.\n\n` +
     `¡Gracias por tu confianza! ☕`;
 
   await whatsapp.sendMessage(from, mensaje);
   stateManager.resetState(from, negocio.id);
-}
-
-// ============================================
-// MODO ASESOR
-// ============================================
-
-async function verificarModoAsesor(from, context) {
-  const { sheets } = context;
-  
-  try {
-    const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
-    const cleanFrom = from.replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
-    
-    for (let i = 1; i < rows.length; i++) {
-      const whatsappRow = (rows[i][3] || '').replace(/[^0-9]/g, '');
-      const estado = rows[i][4] || '';
-      
-      if (whatsappRow === cleanFrom && estado === 'ACTIVA') {
-        return 'ACTIVA';
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    console.log('⚠️ Error verificando modo asesor:', error.message);
-    return null;
-  }
-}
-
-async function activarModoAsesor(from, context) {
-  const { whatsapp, sheets, negocio } = context;
-
-  try {
-    let cliente = null;
-    try {
-      cliente = await sheets.buscarCliente(from);
-    } catch (e) {}
-    
-    const cleanFrom = from.replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
-    const timestamp = new Date().toISOString();
-    const convId = `CONV-${Date.now()}`;
-
-    await sheets.appendRow('Conversaciones_Asesor', [
-      convId,
-      timestamp,
-      cliente?.empresa || cliente?.nombre || 'Cliente',
-      cleanFrom,
-      'ACTIVA',
-      timestamp
-    ]);
-
-    await whatsapp.sendMessage(from,
-      `👤 *CONECTANDO CON FINCA ROSAL*\n\n` +
-      `Un momento, te estamos conectando con un asesor.\n\n` +
-      `Mientras tanto, puedes escribir tu consulta y te responderemos a la brevedad.\n\n` +
-      `_Escribe "menu" para volver al menú principal_`
-    );
-
-    console.log(`✅ Modo asesor activado para ${from}`);
-  } catch (error) {
-    console.error('Error activando modo asesor:', error.message);
-    await whatsapp.sendMessage(from, 'Error conectando con asesor. Intenta más tarde.');
-  }
-}
-
-async function guardarMensajeAsesor(from, mensaje, tipo, context) {
-  const { sheets } = context;
-  
-  try {
-    const cleanFrom = from.replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
-    const timestamp = new Date().toISOString();
-    const msgId = `MSG-${Date.now()}`;
-
-    const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
-    let convId = null;
-    
-    for (let i = 1; i < rows.length; i++) {
-      const whatsappRow = (rows[i][3] || '').replace(/[^0-9]/g, '');
-      const estado = rows[i][4] || '';
-      
-      if (whatsappRow === cleanFrom && estado === 'ACTIVA') {
-        convId = rows[i][0];
-        break;
-      }
-    }
-
-    if (convId) {
-      await sheets.appendRow('Mensajes', [
-        msgId,
-        convId,
-        timestamp,
-        tipo,
-        mensaje,
-        cleanFrom
-      ]);
-    }
-  } catch (error) {
-    console.log('⚠️ Error guardando mensaje asesor:', error.message);
-  }
-}
-
-async function cerrarConversacionAsesor(from, context) {
-  const { sheets } = context;
-  
-  try {
-    const cleanFrom = from.replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
-    const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
-    
-    for (let i = 1; i < rows.length; i++) {
-      const whatsappRow = (rows[i][3] || '').replace(/[^0-9]/g, '');
-      const estado = rows[i][4] || '';
-      
-      if (whatsappRow === cleanFrom && estado === 'ACTIVA') {
-        await sheets.updateCell(`Conversaciones_Asesor!E${i + 1}`, 'CERRADA');
-        console.log(`✅ Conversación cerrada para ${from}`);
-        break;
-      }
-    }
-  } catch (error) {
-    console.log('⚠️ Error cerrando conversación:', error.message);
-  }
 }
 
 // ============================================
@@ -660,9 +506,7 @@ async function continuarFlujoCafeGratis(from, text, context) {
           estado: 'Pendiente envío',
           observaciones: 'MUESTRA GRATIS'
         });
-      } catch (e) {
-        console.log('⚠️ Error creando pedido muestra:', e.message);
-      }
+      } catch (e) {}
 
       await whatsapp.sendMessage(from,
         `✅ *¡MUESTRA SOLICITADA!*\n\n` +
@@ -683,15 +527,13 @@ async function continuarFlujoCafeGratis(from, text, context) {
 // ============================================
 
 async function mostrarPedidosActivos(from, context) {
-  const { whatsapp, sheets, negocio } = context;
+  const { whatsapp, sheets } = context;
 
   let activos = [];
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
     activos = (pedidos || []).filter(p => !['ENTREGADO', 'CANCELADO', 'Completado'].includes(p.estado));
-  } catch (e) {
-    console.log('⚠️ Error obteniendo pedidos:', e.message);
-  }
+  } catch (e) {}
 
   if (activos.length === 0) {
     await whatsapp.sendMessage(from, 'No tienes pedidos activos.');
@@ -699,21 +541,18 @@ async function mostrarPedidosActivos(from, context) {
   }
 
   let mensaje = `*📋 TUS PEDIDOS ACTIVOS*\n\n`;
-
   activos.forEach(p => {
     mensaje += `*${p.id}*\n`;
     mensaje += `   Estado: ${p.estado}\n`;
-    mensaje += `   Total: S/${p.total}\n`;
-    mensaje += `   Fecha: ${p.fecha}\n\n`;
+    mensaje += `   Total: S/${p.total}\n\n`;
   });
 
   await whatsapp.sendMessage(from, mensaje);
 }
 
 async function mostrarHistorialPedidos(from, context) {
-  const { whatsapp, sheets, negocio } = context;
-
-  await whatsapp.sendMessage(from, 'Función de repetir pedido próximamente. Mientras tanto, aquí está nuestro catálogo:');
+  const { whatsapp } = context;
+  await whatsapp.sendMessage(from, 'Función de repetir pedido próximamente. Aquí está nuestro catálogo:');
   return await mostrarCatalogo(from, context);
 }
 
