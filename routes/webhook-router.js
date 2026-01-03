@@ -5,7 +5,10 @@
  * - Negocios con número PROPIO: webhook específico
  * - Negocios con número COMPARTIDO: identifica por contexto
  * 
- * NUEVO: Guarda relación usuario-negocio en Sheets para persistencia
+ * FEATURES:
+ * - Guarda relación usuario-negocio en Sheets para persistencia
+ * - Registra TODOS los mensajes (cliente y bot) para historial
+ * - Soporta modo asesor (bloquea bot cuando asesor está activo)
  */
 
 const express = require('express');
@@ -16,6 +19,8 @@ const stateManager = require('../core/services/state-manager');
 const usuariosNegociosService = require('../core/services/usuarios-negocios-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
+const asesorService = require('../core/services/asesor-service');
+const mensajeLogger = require('../core/services/mensaje-logger');
 
 // Handlers
 let estandarHandler = null;
@@ -197,12 +202,52 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
   console.log(`\n📱 Mensaje de ${from} para ${negocio.nombre}`);
 
   const context = await createContext(negocio, useSharedCredentials);
-  await context.whatsapp.markAsRead(messageId);
-
+  
   const { text, mediaId, type, interactiveData } = extractMessageContent(message);
 
   console.log(`   Tipo: ${type}`);
   console.log(`   Texto: ${text}`);
+
+  // ============================================
+  // REGISTRAR MENSAJE DEL CLIENTE (TRACKING)
+  // ============================================
+  try {
+    await mensajeLogger.logMensajeCliente(from, text || `[${type}]`, context.sheets);
+  } catch (e) {
+    console.log('⚠️ Error logging mensaje:', e.message);
+  }
+
+  // ============================================
+  // VERIFICAR MODO ASESOR
+  // ============================================
+  const modoAsesorActivo = await asesorService.debeBloquerBot(from, context.sheets);
+  
+  if (modoAsesorActivo) {
+    console.log('👤 MODO ASESOR ACTIVO - Bot NO responde');
+    
+    // Verificar si quiere salir del modo asesor
+    const textLower = (text || '').toLowerCase().trim();
+    if (textLower === 'menu' || textLower === 'menú' || textLower === 'salir') {
+      await asesorService.desactivarModoAsesor(from, context.sheets);
+      await context.whatsapp.sendMessage(from, 
+        '👋 Has salido del modo de asesoría.\n\nVolviendo al menú principal...'
+      );
+      // Continuar al handler para mostrar menú
+      stateManager.resetState(from, negocio.id);
+    } else {
+      // Guardar mensaje para el asesor y NO responder
+      const conversacionId = await asesorService.obtenerConversacionId(from, context.sheets);
+      if (conversacionId) {
+        await asesorService.guardarMensaje(conversacionId, from, text, 'CLIENTE', context.sheets);
+      }
+      // Marcar como leído pero NO responder
+      await context.whatsapp.markAsRead(messageId);
+      return; // ← STOP - Bot no responde
+    }
+  }
+
+  // Marcar como leído
+  await context.whatsapp.markAsRead(messageId);
 
   // Guardar negocio activo en memoria Y en Sheets
   stateManager.setActiveBusiness(from, negocio.id);
@@ -247,11 +292,23 @@ async function createContext(negocio, useSharedCredentials = false) {
   const sheets = new SheetsService(negocio.spreadsheetId);
   await sheets.initialize();
 
+  // Wrapper para registrar mensajes del bot
+  const originalSendMessage = whatsapp.sendMessage.bind(whatsapp);
+  whatsapp.sendMessage = async (to, message) => {
+    const result = await originalSendMessage(to, message);
+    // Registrar mensaje del bot
+    try {
+      await mensajeLogger.logMensajeBot(to, message, sheets);
+    } catch (e) {}
+    return result;
+  };
+
   return {
     negocio,
     whatsapp,
     sheets,
     stateManager,
+    asesorService, // ← Exponer servicio de asesor a los handlers
     hasFeature: (feature) => negocio.features.includes(feature),
     config: negocio.configExtra || {}
   };
