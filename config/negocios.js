@@ -5,6 +5,11 @@
  * - Carga desde Google Sheets (Master)
  * - Cache en memoria
  * - Validación de credenciales
+ * 
+ * FLUJOS DISPONIBLES:
+ * - UNIFICADO: Handler unificado configurable (nuevo, recomendado)
+ * - CUSTOM: Handler específico en /handlers/{negocioId}
+ * - ESTANDAR: Handler legacy con IA
  */
 
 const config = require('./index');
@@ -74,7 +79,7 @@ class NegociosService {
 
         if (negocio && negocio.estado === 'ACTIVO') {
           this.negocios.set(negocio.id, negocio);
-          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.whatsapp.tipo}`);
+          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo}`);
         }
       }
     } catch (error) {
@@ -113,7 +118,7 @@ class NegociosService {
       },
 
       spreadsheetId: row[5],
-      flujo: row[8] || 'ESTANDAR',
+      flujo: row[8] || 'UNIFICADO',  // Default cambiado a UNIFICADO
       features: this.parseFeatures(row[9]),
       estado: row[11] || 'ACTIVO',
       configExtra: this.parseJSON(row[12])
@@ -146,7 +151,7 @@ class NegociosService {
   loadFromLocal() {
     console.log('📦 Cargando negocios desde configuración local...');
     
-    // Negocio de ejemplo: Finca Rosal
+    // Negocio: Finca Rosal (B2B - café)
     if (process.env.FINCA_ROSAL_SPREADSHEET_ID) {
       this.negocios.set('BIZ-002', {
         id: 'BIZ-002',
@@ -159,18 +164,22 @@ class NegociosService {
           prefijo: 'ROSAL'
         },
         spreadsheetId: process.env.FINCA_ROSAL_SPREADSHEET_ID,
-        flujo: 'CUSTOM',
-        features: ['asesorHumano', 'preciosVIP', 'cafeGratis'],
+        flujo: 'UNIFICADO',  // Ahora usa handler unificado
+        features: ['asesorHumano', 'preciosVIP', 'cafeGratis', 'muestras'],
         estado: 'ACTIVO',
         configExtra: {
-          deliveryMin: 5,
-          productoMuestraId: 'CAT-001'
+          // Configuración específica para café B2B
+          unidad: 'kg',
+          minimoCompra: 5,
+          flujoPago: 'contacto',  // No usa voucher, contactan después
+          mostrarFotos: true,
+          prefijoPedido: 'CAF'
         }
       });
-      console.log('   ✅ Finca Rosal (BIZ-002) - LOCAL');
+      console.log('   ✅ Finca Rosal (BIZ-002) - UNIFICADO [kg, min:5, pago:contacto]');
     }
 
-    // Negocio demo compartido
+    // Negocio demo: Tienda genérica (B2C - productos)
     this.negocios.set('demo-tienda', {
       id: 'demo-tienda',
       nombre: 'Demo Tienda',
@@ -182,11 +191,19 @@ class NegociosService {
         prefijo: 'DEMO'
       },
       spreadsheetId: process.env.DEMO_SPREADSHEET_ID || config.google.masterSpreadsheetId,
-      flujo: 'ESTANDAR',
+      flujo: 'UNIFICADO',
       features: ['liveCommerce', 'catalogoWeb'],
       estado: 'ACTIVO',
-      configExtra: {}
+      configExtra: {
+        // Configuración estándar B2C
+        unidad: 'unidad',
+        minimoCompra: 1,
+        flujoPago: 'voucher',  // Pide voucher
+        mostrarFotos: true,
+        prefijoPedido: 'PED'
+      }
     });
+    console.log('   ✅ Demo Tienda (demo-tienda) - UNIFICADO [unidad, min:1, pago:voucher]');
   }
 
   // ============================================
