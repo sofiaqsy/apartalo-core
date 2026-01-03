@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.0
+ * APARTALO CORE - Handler Unificado v2.1
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -9,12 +9,6 @@
  * - Extraccion automatica de datos del pedido
  * - Asesor humano integrado
  * - Configurable por negocio
- * 
- * CONFIGURACION (negocio.configExtra):
- * - unidad: 'kg' | 'unidad' (default: 'unidad')
- * - minimoCompra: numero (default: 1)
- * - flujoPago: 'voucher' | 'contacto' (default: 'voucher')
- * - usarIA: boolean (default: true)
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -53,7 +47,7 @@ async function handle(from, message, context) {
   // ============================================
   // COMANDOS GLOBALES
   // ============================================
-  if (mensajeNormalizado === 'menu' || mensajeNormalizado === 'menu' || mensajeNormalizado === 'inicio') {
+  if (mensajeNormalizado === 'menu' || mensajeNormalizado === 'inicio') {
     stateManager.resetState(from, negocio.id);
     return await mostrarMenuPrincipal(from, context, cfg);
   }
@@ -125,6 +119,30 @@ async function handle(from, message, context) {
 }
 
 // ============================================
+// UTILIDAD: Extraer nombre de producto de JSON
+// ============================================
+function extraerNombreProducto(productosStr) {
+  if (!productosStr) return 'Pedido';
+  
+  try {
+    // Si es JSON
+    if (productosStr.startsWith('[') || productosStr.startsWith('{')) {
+      const productos = JSON.parse(productosStr);
+      if (Array.isArray(productos) && productos.length > 0) {
+        const p = productos[0];
+        const nombre = p.nombre || p.name || 'Producto';
+        const cantidad = p.cantidad || p.qty || 1;
+        return nombre + ' x' + cantidad;
+      }
+    }
+    // Si es texto plano
+    return productosStr.substring(0, 30);
+  } catch (e) {
+    return productosStr.substring(0, 30) || 'Pedido';
+  }
+}
+
+// ============================================
 // MENU PRINCIPAL
 // ============================================
 
@@ -161,10 +179,14 @@ async function mostrarMenuPrincipal(from, context, cfg) {
   // Usuario con pedidos activos
   } else if (pedidosActivos.length > 0) {
     mensaje = saludo + ' Tienes ' + pedidosActivos.length + ' pedido(s) activo(s):\n\n';
+    
     pedidosActivos.slice(0, 2).forEach(p => {
-      mensaje += '- ' + p.id + ' - ' + p.estado + '\n';
+      const nombreProd = extraerNombreProducto(p.productos);
+      mensaje += '- ' + nombreProd + '\n';
+      mensaje += '  Estado: ' + p.estado + '\n\n';
     });
-    mensaje += '\nQue deseas hacer?';
+    
+    mensaje += 'Que deseas hacer?';
 
     botones = [
       { id: 'ver_pedidos', title: 'Ver pedidos' },
@@ -538,7 +560,7 @@ async function manejarVoucher(from, message, context, cfg) {
 }
 
 // ============================================
-// VER PEDIDOS
+// VER PEDIDOS - DETALLE COMPLETO
 // ============================================
 
 async function mostrarPedidosActivos(from, context, cfg) {
@@ -565,12 +587,28 @@ async function mostrarPedidosActivos(from, context, cfg) {
     return;
   }
 
-  let mensaje = 'TUS PEDIDOS ACTIVOS\n\n';
+  let mensaje = 'TUS PEDIDOS ACTIVOS\n';
+  mensaje += '------------------------\n\n';
   
   activos.forEach(p => {
-    mensaje += p.id + '\n';
-    mensaje += '   Estado: ' + p.estado + '\n';
-    mensaje += '   Total: S/' + p.total + '\n\n';
+    // Nombre del producto
+    const nombreProd = extraerNombreProducto(p.productos);
+    mensaje += nombreProd + '\n';
+    mensaje += 'Codigo: ' + p.id + '\n';
+    mensaje += 'Estado: ' + p.estado + '\n';
+    mensaje += 'Total: S/' + p.total + '\n';
+    
+    // Direccion de entrega
+    if (p.direccion) {
+      mensaje += 'Entrega: ' + p.direccion + '\n';
+    }
+    
+    // Cliente
+    if (p.cliente) {
+      mensaje += 'Cliente: ' + p.cliente + '\n';
+    }
+    
+    mensaje += '\n';
   });
 
   let botones = [];
