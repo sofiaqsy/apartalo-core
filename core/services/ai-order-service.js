@@ -1,14 +1,13 @@
 /**
- * APARTALO CORE - AI Order Service v2
+ * APARTALO CORE - AI Order Service v3
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
- * CARACTERISTICAS:
- * - Carga prompt dinamico desde Configuracion del negocio
- * - Incluye productos actuales del Inventario con formato claro
- * - Extrae datos estructurados (producto, cantidad, datos cliente)
- * - Mantiene historial de conversacion
+ * IMPORTANTE: Los precios NO se incluyen en el prompt.
+ * Los precios se calculan en el handler usando:
+ * 1. PreciosClientes (precios especiales)
+ * 2. Inventario (precio de lista)
  */
 
 const axios = require('axios');
@@ -55,7 +54,7 @@ class AIOrderService {
       this.cargarProductos(sheets)
     ]);
 
-    // Construir prompt del sistema
+    // Construir prompt del sistema (SIN PRECIOS)
     const systemPrompt = this.construirSystemPrompt(negocio, configuracion, productos, datosCliente);
 
     // Construir mensajes
@@ -121,7 +120,7 @@ class AIOrderService {
   }
 
   /**
-   * Cargar productos del inventario
+   * Cargar productos del inventario (sin precios para el prompt)
    */
   async cargarProductos(sheets) {
     try {
@@ -129,9 +128,7 @@ class AIOrderService {
       return productos.map(p => ({
         codigo: p.codigo,
         nombre: p.nombre,
-        descripcion: p.descripcion || '',
-        precio: p.precio,
-        stock: p.disponible || p.stock
+        descripcion: p.descripcion || ''
       }));
     } catch (error) {
       console.log('Error cargando productos:', error.message);
@@ -141,58 +138,49 @@ class AIOrderService {
 
   /**
    * Construir prompt del sistema con contexto del negocio
+   * NOTA: NO incluimos precios aqui - se calculan en el handler
    */
   construirSystemPrompt(negocio, config, productos, datosCliente) {
-    // Formato de productos mas claro y estructurado
+    // Lista de productos SIN precios
     const productosTexto = productos.map(p => 
-      'CODIGO: ' + p.codigo + '\n' +
-      '  Nombre: ' + p.nombre + '\n' +
-      '  Precio: S/' + p.precio + '\n' +
-      (p.descripcion ? '  Descripcion: ' + p.descripcion + '\n' : '')
+      '- ' + p.codigo + ': ' + p.nombre + (p.descripcion ? ' (' + p.descripcion + ')' : '')
     ).join('\n');
 
     const clienteTexto = datosCliente 
       ? '\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ' + (datosCliente.nombre || 'No registrado') + '\n- Direccion: ' + (datosCliente.direccion || 'No registrada') + '\n- Telefono: ' + (datosCliente.telefono || 'No registrado')
       : '\nCLIENTE NUEVO: No tenemos datos registrados.';
 
-    return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos.
+    return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos de forma conversacional.
 
 SOBRE EL NEGOCIO:
 ${config.prompt_negocio || 'Somos un negocio dedicado a ofrecer productos de calidad.'}
 
-REGLAS DE VENTA IMPORTANTES:
-${config.reglas_venta || 'Consultar disponibilidad y precios.'}
+REGLAS DE VENTA:
+${config.reglas_venta || 'Consultar disponibilidad.'}
 
 INFORMACION ADICIONAL:
 ${config.info_adicional || ''}
 
-CATALOGO DE PRODUCTOS (USA ESTOS CODIGOS Y PRECIOS EXACTOS):
+CATALOGO DE PRODUCTOS DISPONIBLES:
 ${productosTexto || 'Consultar catalogo'}
 ${clienteTexto}
 
-INSTRUCCIONES CRITICAS:
-1. SIEMPRE usa el CODIGO exacto del producto del catalogo
-2. SIEMPRE usa el PRECIO exacto del catalogo para calcular totales
-3. Responde de manera natural y conversacional
-4. NO uses emojis
-5. Si el cliente pide "cafe en grano" o "cafe por kilo" sin especificar, pregunta cual producto del catalogo desea
-6. Guia al cliente: producto -> cantidad -> datos de entrega
+INSTRUCCIONES:
+1. Responde de manera natural y conversacional
+2. NO uses emojis
+3. NO menciones precios especificos - el sistema los calcula automaticamente
+4. Guia al cliente para obtener: producto (codigo), cantidad, datos de entrega
+5. Si el cliente pregunta por productos, describe las opciones del catalogo
+6. Si el cliente pide un producto, identifica el CODIGO correcto del catalogo
 7. Respuestas cortas, maximo 3-4 lineas
-
-CALCULO DE TOTALES:
-- Busca el producto en el catalogo
-- Multiplica: precio_unitario x cantidad = total
-- Ejemplo: Si CAF-001 cuesta S/70 y piden 8kg, total = 70 x 8 = S/560
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
 {
   "intent": "consulta|pedido|otro",
-  "producto_codigo": "CODIGO_EXACTO_DEL_CATALOGO o null",
-  "producto_nombre": "nombre exacto o null", 
+  "producto_codigo": "CODIGO_DEL_CATALOGO o null",
+  "producto_nombre": "nombre del producto o null", 
   "cantidad": numero o null,
-  "precio_unitario": numero o null,
-  "total_calculado": numero o null,
   "nombre_cliente": "nombre o null",
   "direccion": "direccion o null",
   "telefono": "telefono o null",
@@ -200,6 +188,12 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
   "datos_faltantes": ["lista", "de", "datos", "faltantes"]
 }
 \`\`\`
+
+REGLAS PARA IDENTIFICAR PRODUCTOS:
+- Si piden "cafe en grano" o "cafe por kilo" o "blend", usar CAF-001
+- Si piden "cafe molido 250g" o "bolsa molido", usar CAF-002  
+- Si piden "cafe en grano 250g" o "bolsa grano", usar CAF-003
+- Siempre usar el CODIGO exacto del catalogo
 
 El JSON debe tener los datos acumulados de toda la conversacion.`;
   }
