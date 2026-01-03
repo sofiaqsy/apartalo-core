@@ -3,20 +3,12 @@
  * 
  * Servicio unificado para Google Sheets
  * Cada negocio tiene su propio spreadsheet
- * 
- * USO:
- *   const sheets = new SheetsService(negocio.spreadsheetId);
- *   await sheets.initialize();
- *   const pedidos = await sheets.getPedidos();
  */
 
 const { google } = require('googleapis');
 const config = require('../../config');
 
 class SheetsService {
-  /**
-   * @param {string} spreadsheetId - ID del spreadsheet del negocio
-   */
   constructor(spreadsheetId) {
     this.spreadsheetId = spreadsheetId;
     this.sheets = null;
@@ -24,9 +16,6 @@ class SheetsService {
     this.initialized = false;
   }
 
-  /**
-   * Inicializar conexión con Google Sheets
-   */
   async initialize() {
     try {
       if (!config.google.serviceAccountKey) {
@@ -56,41 +45,25 @@ class SheetsService {
   // UTILIDADES DE CONVERSIÓN
   // ============================================
 
-  /**
-   * Parsear número decimal desde string (soporta coma y punto)
-   * Google Sheets en configuración regional Perú usa coma como decimal
-   */
   parseDecimal(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return value;
-    
-    // Convertir a string y reemplazar coma por punto
     const str = String(value).trim().replace(',', '.');
     const num = parseFloat(str);
     return isNaN(num) ? 0 : num;
   }
 
-  /**
-   * Parsear entero desde string
-   */
   parseInt(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return Math.floor(value);
-    
     const str = String(value).trim().replace(',', '.');
     const num = parseInt(str, 10);
     return isNaN(num) ? 0 : num;
   }
 
-  /**
-   * Formatear valor para Google Sheets
-   * Asegura que los números se envíen correctamente con decimales
-   */
   formatValueForSheets(value) {
     if (value === null || value === undefined) return '';
-    if (typeof value === 'number') {
-      return value;
-    }
+    if (typeof value === 'number') return value;
     return value;
   }
 
@@ -100,13 +73,23 @@ class SheetsService {
 
   /**
    * Obtener filas de un rango
+   * @param {string} range - Rango (ej: 'Clientes!A:I')
+   * @returns {Array} - Filas
    */
-  async getRows(spreadsheetId, range) {
-    if (!this.initialized) return [];
+  async getRows(range) {
+    if (!this.initialized) {
+      console.log('⚠️ SheetsService no inicializado');
+      return [];
+    }
+
+    if (!range) {
+      console.error('❌ Error: range es requerido en getRows()');
+      return [];
+    }
 
     try {
       const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: spreadsheetId || this.spreadsheetId,
+        spreadsheetId: this.spreadsheetId,
         range
       });
       return response.data.values || [];
@@ -118,16 +101,13 @@ class SheetsService {
 
   /**
    * Agregar fila al final de una hoja
-   * IMPORTANTE: Usa rango A1 para asegurar que siempre empiece desde columna A
    */
   async appendRow(sheetName, values) {
     if (!this.initialized) return false;
 
     try {
-      // Formatear todos los valores
       const formattedValues = values.map(v => this.formatValueForSheets(v));
       
-      // Usar rango A1 notation específico para forzar inserción desde columna A
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
         range: `${sheetName}!A1`,
@@ -193,12 +173,8 @@ class SheetsService {
   // CLIENTES
   // ============================================
 
-  /**
-   * Buscar cliente por WhatsApp
-   * Estructura esperada: ID, WhatsApp, Nombre, Telefono, Direccion, FechaRegistro, UltimaCompra, Departamento, Ciudad
-   */
   async buscarCliente(whatsapp) {
-    const rows = await this.getRows(this.spreadsheetId, 'Clientes!A:I');
+    const rows = await this.getRows('Clientes!A:I');
     if (rows.length <= 1) return null;
 
     const numeroLimpio = this.cleanPhone(whatsapp);
@@ -218,6 +194,9 @@ class SheetsService {
           ultimaCompra: row[6] || '',
           departamento: row[7] || '',
           ciudad: row[8] || '',
+          // Alias para compatibilidad con handler BIZ-002
+          empresa: row[2] || '',
+          contacto: row[2] || '',
           rowIndex: i + 1
         };
       }
@@ -226,14 +205,10 @@ class SheetsService {
     return null;
   }
 
-  /**
-   * Crear o actualizar cliente
-   */
   async upsertCliente(datosCliente) {
     const clienteExistente = await this.buscarCliente(datosCliente.whatsapp);
 
     if (clienteExistente) {
-      // Actualizar última compra
       await this.updateCell(
         `Clientes!G${clienteExistente.rowIndex}`,
         new Date().toLocaleDateString('es-PE')
@@ -241,12 +216,11 @@ class SheetsService {
       return { ...clienteExistente, updated: true };
     }
 
-    // Crear nuevo
     const nuevoId = `CLI-${Date.now().toString().slice(-6)}`;
     const valores = [
       nuevoId,
       this.cleanPhone(datosCliente.whatsapp),
-      datosCliente.nombre || '',
+      datosCliente.nombre || datosCliente.empresa || '',
       datosCliente.telefono || '',
       datosCliente.direccion || '',
       new Date().toLocaleDateString('es-PE'),
@@ -263,11 +237,8 @@ class SheetsService {
   // PEDIDOS
   // ============================================
 
-  /**
-   * Obtener pedidos de un cliente por WhatsApp
-   */
   async getPedidosByWhatsapp(whatsapp) {
-    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:S');
+    const rows = await this.getRows('Pedidos!A:S');
     if (rows.length <= 1) return [];
 
     const numeroLimpio = this.cleanPhone(whatsapp);
@@ -275,7 +246,7 @@ class SheetsService {
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const pedidoWhatsapp = this.cleanPhone(row[3] || ''); // Columna D = WhatsApp
+      const pedidoWhatsapp = this.cleanPhone(row[3] || '');
 
       if (pedidoWhatsapp === numeroLimpio) {
         pedidos.push(this.parsePedidoRow(row, i + 1));
@@ -285,11 +256,8 @@ class SheetsService {
     return pedidos;
   }
 
-  /**
-   * Obtener pedido por ID
-   */
   async getPedidoById(pedidoId) {
-    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:S');
+    const rows = await this.getRows('Pedidos!A:S');
     
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
@@ -300,45 +268,38 @@ class SheetsService {
     return null;
   }
 
-  /**
-   * Crear pedido
-   * Estructura: A-S (19 columnas)
-   */
   async crearPedido(datosPedido) {
     const pedidoId = datosPedido.id || `PED-${Date.now().toString().slice(-6)}`;
     const ahora = new Date();
 
     const valores = [
-      pedidoId,                                    // A: ID
-      ahora.toLocaleDateString('es-PE'),           // B: Fecha
-      ahora.toLocaleTimeString('es-PE'),           // C: Hora
-      this.cleanPhone(datosPedido.whatsapp),       // D: WhatsApp
-      datosPedido.cliente || '',                   // E: Cliente
-      datosPedido.telefono || '',                  // F: Teléfono
-      datosPedido.direccion || '',                 // G: Dirección
-      datosPedido.productos || '',                 // H: Productos (JSON o texto)
-      this.parseDecimal(datosPedido.total),        // I: Total (asegurar número)
-      datosPedido.estado || config.orderStates.PENDING_PAYMENT, // J: Estado
-      '',                                          // K: VoucherURLs
-      datosPedido.observaciones || '',             // L: Observaciones
-      datosPedido.departamento || '',              // M: Departamento
-      datosPedido.ciudad || '',                    // N: Ciudad
-      datosPedido.tipoEnvio || '',                 // O: TipoEnvio
-      datosPedido.metodoEnvio || '',               // P: MetodoEnvio
-      datosPedido.detalleEnvio || '',              // Q: DetalleEnvio
-      this.parseDecimal(datosPedido.costoEnvio),   // R: CostoEnvio (asegurar número)
-      datosPedido.origen || 'APP'                  // S: Origen
+      pedidoId,
+      ahora.toLocaleDateString('es-PE'),
+      ahora.toLocaleTimeString('es-PE'),
+      this.cleanPhone(datosPedido.whatsapp),
+      datosPedido.cliente || '',
+      datosPedido.telefono || '',
+      datosPedido.direccion || '',
+      datosPedido.productos || '',
+      this.parseDecimal(datosPedido.total),
+      datosPedido.estado || config.orderStates.PENDING_PAYMENT,
+      '',
+      datosPedido.observaciones || '',
+      datosPedido.departamento || '',
+      datosPedido.ciudad || '',
+      datosPedido.tipoEnvio || '',
+      datosPedido.metodoEnvio || '',
+      datosPedido.detalleEnvio || '',
+      this.parseDecimal(datosPedido.costoEnvio),
+      datosPedido.origen || 'APP'
     ];
 
     const success = await this.appendRow('Pedidos', valores);
     return success ? { id: pedidoId, ...datosPedido } : null;
   }
 
-  /**
-   * Actualizar estado de pedido
-   */
   async updateEstadoPedido(pedidoId, nuevoEstado) {
-    const rows = await this.getRows(this.spreadsheetId, 'Pedidos!A:J');
+    const rows = await this.getRows('Pedidos!A:J');
     
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
@@ -349,11 +310,6 @@ class SheetsService {
     return false;
   }
 
-  /**
-   * Parsear fila de pedido a objeto
-   * Estructura: A-S (19 columnas)
-   * NOTA: Usa parseDecimal para manejar coma como separador decimal
-   */
   parsePedidoRow(row, rowIndex) {
     return {
       id: row[0] || '',
@@ -383,13 +339,8 @@ class SheetsService {
   // INVENTARIO / PRODUCTOS
   // ============================================
 
-  /**
-   * Obtener productos activos
-   * Estructura: Codigo, Nombre, Descripcion, Precio, Stock, StockReservado, ImagenUrl, Estado, Categoria
-   * NOTA: Usa parseDecimal para manejar coma como separador decimal (formato regional Perú)
-   */
   async getProductos(estado = null) {
-    const rows = await this.getRows(this.spreadsheetId, 'Inventario!A:I');
+    const rows = await this.getRows('Inventario!A:I');
     if (rows.length <= 1) return [];
 
     const productos = [];
@@ -398,7 +349,6 @@ class SheetsService {
       const row = rows[i];
       const productoEstado = row[7] || 'ACTIVO';
       
-      // Ignorar productos eliminados
       if (productoEstado === 'ELIMINADO') continue;
 
       if (!estado || productoEstado === estado) {
@@ -409,7 +359,7 @@ class SheetsService {
           codigo: row[0] || '',
           nombre: row[1] || '',
           descripcion: row[2] || '',
-          precio: this.parseDecimal(row[3]),  // Soporta coma y punto
+          precio: this.parseDecimal(row[3]),
           stock: stock,
           stockReservado: stockReservado,
           imagenUrl: row[6] || '',
@@ -424,9 +374,6 @@ class SheetsService {
     return productos;
   }
 
-  /**
-   * Reservar stock de producto
-   */
   async reservarStock(codigo, cantidad) {
     const productos = await this.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
@@ -445,9 +392,6 @@ class SheetsService {
     return { success: true, nuevoReservado };
   }
 
-  /**
-   * Liberar stock reservado
-   */
   async liberarStock(codigo, cantidad) {
     const productos = await this.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
@@ -464,53 +408,46 @@ class SheetsService {
   // CONFIGURACIÓN DEL NEGOCIO
   // ============================================
 
-  /**
-   * Obtener configuración (key-value)
-   */
   async getConfiguracion() {
-    const rows = await this.getRows(this.spreadsheetId, 'Configuracion!A:B');
-    const config = {};
+    const rows = await this.getRows('Configuracion!A:B');
+    const configObj = {};
 
     for (let i = 1; i < rows.length; i++) {
       const key = rows[i][0];
       const value = rows[i][1];
-      if (key) config[key] = value;
+      if (key) configObj[key] = value;
     }
 
-    return config;
+    return configObj;
   }
 
-  /**
-   * Obtener métodos de pago activos
-   */
   async getMetodosPago() {
-    const config = await this.getConfiguracion();
+    const configObj = await this.getConfiguracion();
     const metodos = [];
 
-    if (config.yape_activo === 'true') {
+    if (configObj.yape_activo === 'true') {
       metodos.push({
         tipo: 'yape',
-        numero: config.yape_numero,
-        titular: config.yape_titular
+        numero: configObj.yape_numero,
+        titular: configObj.yape_titular
       });
     }
 
-    if (config.plin_activo === 'true') {
+    if (configObj.plin_activo === 'true') {
       metodos.push({
         tipo: 'plin',
-        numero: config.plin_numero,
-        titular: config.plin_titular
+        numero: configObj.plin_numero,
+        titular: configObj.plin_titular
       });
     }
 
-    // BCP, Interbank, BBVA, Scotiabank...
     ['bcp', 'interbank', 'bbva', 'scotiabank'].forEach(banco => {
-      if (config[`${banco}_activo`] === 'true') {
+      if (configObj[`${banco}_activo`] === 'true') {
         metodos.push({
           tipo: banco,
-          cuenta: config[`${banco}_cuenta`],
-          cci: config[`${banco}_cci`],
-          titular: config[`${banco}_titular`]
+          cuenta: configObj[`${banco}_cuenta`],
+          cci: configObj[`${banco}_cci`],
+          titular: configObj[`${banco}_titular`]
         });
       }
     });
