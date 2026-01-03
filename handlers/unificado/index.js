@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.1
+ * APARTALO CORE - Handler Unificado v2.2
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -627,17 +627,17 @@ async function mostrarPedidosActivos(from, context, cfg) {
 }
 
 // ============================================
-// MUESTRAS GRATIS (Feature)
+// MUESTRAS GRATIS (Feature) - 500g
 // ============================================
 
 async function procesarMuestraGratis(from, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
 
   await whatsapp.sendMessage(from,
-    'MUESTRA GRATIS\n\n' +
-    'Gracias por tu interes.\n\n' +
+    'MUESTRA GRATIS DE CAFE 500g\n\n' +
+    'Gracias por tu interes en nuestro cafe.\n\n' +
     'Para solicitar tu muestra, necesitamos algunos datos.\n\n' +
-    'Cual es el nombre de tu negocio?'
+    'Cual es el nombre de tu cafeteria o negocio?'
   );
 
   stateManager.setState(from, negocio.id, {
@@ -682,19 +682,19 @@ async function continuarFlujoMuestra(from, text, context, cfg) {
           cliente: data.empresa,
           telefono: data.telefono,
           direccion: data.direccion,
-          productos: 'Muestra gratis',
+          productos: 'Muestra Cafe 500g',
           total: 0,
           estado: 'Pendiente envio',
-          observaciones: 'MUESTRA GRATIS'
+          observaciones: 'MUESTRA GRATIS 500g'
         });
       } catch (e) {}
 
       await whatsapp.sendMessage(from,
         'MUESTRA SOLICITADA\n\n' +
         'Tu codigo es ' + pedidoId + '\n\n' +
-        'Enviaremos tu muestra a:\n' + data.direccion + '\n\n' +
+        'Enviaremos tu muestra de 500g a:\n' + data.direccion + '\n\n' +
         'Te contactaremos para coordinar la entrega.\n\n' +
-        'Gracias por tu interes.'
+        'Gracias por tu interes en Finca Rosal.'
       );
 
       stateManager.resetState(from, negocio.id);
