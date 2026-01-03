@@ -30,9 +30,10 @@ const customHandlers = {};
 const PREFIJOS_NEGOCIOS = {
   'PLANTAS': 'plantas-vivero',
   'VIVERO': 'plantas-vivero',
-  'ROSAL': 'tienda-rosal',
-  'TIENDA': 'tienda-rosal',
-  'CAFE': 'tienda-rosal'
+  'ROSAL': 'BIZ-002',
+  'TIENDA': 'BIZ-002',
+  'CAFE': 'BIZ-002',
+  'FINCA': 'BIZ-002'
 };
 
 // Negocio por defecto cuando no se identifica
@@ -41,7 +42,10 @@ const DEFAULT_BUSINESS_ID = 'BIZ-002';
 /**
  * Inicializar handlers
  */
-function initializeHandlers() {
+async function initializeHandlers() {
+  // Primero cargar negocios
+  await negociosService.initialize();
+  
   // Handler estándar (ApartaLo)
   try {
     estandarHandler = require('../handlers/estandar');
@@ -158,7 +162,14 @@ router.post('/', async (req, res) => {
     // 2. Intentar identificar negocio
     let negocio = await identificarNegocio(from, message);
 
-    // 3. Procesar mensaje con el negocio identificado (usar credenciales compartidas)
+    // 3. Verificar que se identificó un negocio
+    if (!negocio) {
+      console.log('❌ No se pudo identificar negocio, enviando selector...');
+      await mostrarSelectorNegocios(from);
+      return res.sendStatus(200);
+    }
+
+    // 4. Procesar mensaje con el negocio identificado
     await processWebhook(body, negocio, true);
     res.sendStatus(200);
   } catch (error) {
@@ -198,6 +209,12 @@ async function processWebhook(body, negocio, useSharedCredentials = false) {
 async function processMessage(message, negocio, useSharedCredentials = false) {
   const from = message.from;
   const messageId = message.id;
+
+  // Validación extra de seguridad
+  if (!negocio || !negocio.nombre) {
+    console.error('❌ Error: negocio es null o inválido');
+    return;
+  }
 
   console.log(`\n📱 Mensaje de ${from} para ${negocio.nombre}`);
 
@@ -271,19 +288,15 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
 
 /**
  * Crear contexto para el handler
- * @param {Object} negocio - Datos del negocio
- * @param {boolean} useSharedCredentials - Si true, usa credenciales del número compartido
  */
 async function createContext(negocio, useSharedCredentials = false) {
   // Determinar qué credenciales de WhatsApp usar
   let whatsappConfig;
   
   if (useSharedCredentials || negocio.whatsapp?.tipo === 'COMPARTIDO') {
-    // Usar credenciales del número compartido (de variables de entorno)
     whatsappConfig = config.whatsappShared;
     console.log(`   📞 Usando WhatsApp COMPARTIDO (${config.whatsappShared.phoneId})`);
   } else {
-    // Usar credenciales propias del negocio
     whatsappConfig = negocio.whatsapp;
     console.log(`   📞 Usando WhatsApp PROPIO (${negocio.whatsapp?.phoneId})`);
   }
@@ -296,7 +309,6 @@ async function createContext(negocio, useSharedCredentials = false) {
   const originalSendMessage = whatsapp.sendMessage.bind(whatsapp);
   whatsapp.sendMessage = async (to, message) => {
     const result = await originalSendMessage(to, message);
-    // Registrar mensaje del bot
     try {
       await mensajeLogger.logMensajeBot(to, message, sheets);
     } catch (e) {}
@@ -308,7 +320,7 @@ async function createContext(negocio, useSharedCredentials = false) {
     whatsapp,
     sheets,
     stateManager,
-    asesorService, // ← Exponer servicio de asesor a los handlers
+    asesorService,
     hasFeature: (feature) => negocio.features.includes(feature),
     config: negocio.configExtra || {}
   };
@@ -359,13 +371,6 @@ function extractMessageContent(message) {
 
 /**
  * Identificar negocio del usuario
- * Orden de prioridad:
- * 1. Selección de botón (select_xxx)
- * 2. Prefijo en mensaje (PLANTAS, ROSAL, etc.)
- * 3. Negocio guardado en Sheets (persistente)
- * 4. Negocio en memoria (stateManager)
- * 5. Si solo hay 1 negocio compartido, usar ese
- * 6. NUEVO: Negocio por defecto (BIZ-002 - Finca Rosal)
  */
 async function identificarNegocio(from, message) {
   const text = message.text?.body || message.interactive?.button_reply?.id || '';
@@ -377,7 +382,6 @@ async function identificarNegocio(from, message) {
     const negocio = negociosService.getById(businessId);
     if (negocio) {
       console.log(`   → Selección por botón: ${businessId}`);
-      // Guardar vinculación
       await usuariosNegociosService.vincularUsuario(from, businessId);
       return negocio;
     }
@@ -389,7 +393,6 @@ async function identificarNegocio(from, message) {
       const negocio = negociosService.getById(negocioId);
       if (negocio) {
         console.log(`   → Prefijo detectado: ${prefijo} -> ${negocioId}`);
-        // Guardar vinculación
         await usuariosNegociosService.vincularUsuario(from, negocioId);
         return negocio;
       }
@@ -423,16 +426,14 @@ async function identificarNegocio(from, message) {
     return negocios[0];
   }
 
-  // 6. NUEVO: Negocio por defecto (BIZ-002 - Finca Rosal)
+  // 6. Negocio por defecto (BIZ-002 - Finca Rosal)
   const negocioPorDefecto = negociosService.getById(DEFAULT_BUSINESS_ID);
   if (negocioPorDefecto) {
     console.log(`   → Asignando negocio por defecto: ${negocioPorDefecto.nombre} (${DEFAULT_BUSINESS_ID})`);
-    // Guardar vinculación para próximas veces
     await usuariosNegociosService.vincularUsuario(from, DEFAULT_BUSINESS_ID);
     return negocioPorDefecto;
   }
 
-  // No se pudo identificar
   console.log(`   → No se identificó negocio`);
   return null;
 }
