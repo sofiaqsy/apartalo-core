@@ -8,6 +8,7 @@
  */
 
 const config = require('./index');
+const { google } = require('googleapis');
 
 class NegociosService {
   constructor() {
@@ -16,17 +17,15 @@ class NegociosService {
   }
 
   /**
-   * Inicializar servicio cargando negocios desde Sheets o config local
+   * Inicializar servicio cargando negocios desde Sheets
    */
-  async initialize(sheetsService) {
+  async initialize() {
     try {
       console.log('📊 Cargando negocios...');
 
-      if (sheetsService && config.google.masterSpreadsheetId) {
-        // Cargar desde Google Sheets Master
-        await this.loadFromSheets(sheetsService);
+      if (config.google.serviceAccountKey && config.google.masterSpreadsheetId) {
+        await this.loadFromSheets();
       } else {
-        // Cargar desde config local (desarrollo)
         this.loadFromLocal();
       }
 
@@ -36,6 +35,8 @@ class NegociosService {
       return true;
     } catch (error) {
       console.error('❌ Error cargando negocios:', error.message);
+      // Cargar local como fallback
+      this.loadFromLocal();
       return false;
     }
   }
@@ -43,26 +44,42 @@ class NegociosService {
   /**
    * Cargar negocios desde Google Sheets Master
    */
-  async loadFromSheets(sheetsService) {
-    const rows = await sheetsService.getRows(
-      config.google.masterSpreadsheetId,
-      'Negocios!A:M'
-    );
+  async loadFromSheets() {
+    try {
+      const credentials = JSON.parse(config.google.serviceAccountKey);
 
-    if (!rows || rows.length <= 1) {
-      console.log('⚠️ No hay negocios en el Master Spreadsheet');
-      return;
-    }
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+      });
 
-    // Procesar cada fila (saltar header)
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const negocio = this.parseNegocioRow(row);
+      const sheets = google.sheets({ version: 'v4', auth });
 
-      if (negocio && negocio.estado === 'ACTIVO') {
-        this.negocios.set(negocio.id, negocio);
-        console.log(`   ✅ ${negocio.nombre} (${negocio.whatsapp.tipo})`);
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: config.google.masterSpreadsheetId,
+        range: 'Negocios!A:M'
+      });
+
+      const rows = response.data.values || [];
+
+      if (rows.length <= 1) {
+        console.log('⚠️ No hay negocios en el Master Spreadsheet');
+        return;
       }
+
+      // Procesar cada fila (saltar header)
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const negocio = this.parseNegocioRow(row);
+
+        if (negocio && negocio.estado === 'ACTIVO') {
+          this.negocios.set(negocio.id, negocio);
+          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.whatsapp.tipo}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error leyendo negocios desde Sheets:', error.message);
+      throw error;
     }
   }
 
@@ -124,19 +141,21 @@ class NegociosService {
   }
 
   /**
-   * Cargar negocios desde configuración local (desarrollo)
+   * Cargar negocios desde configuración local (desarrollo/fallback)
    */
   loadFromLocal() {
+    console.log('📦 Cargando negocios desde configuración local...');
+    
     // Negocio de ejemplo: Finca Rosal
     if (process.env.FINCA_ROSAL_SPREADSHEET_ID) {
-      this.negocios.set('finca-rosal', {
-        id: 'finca-rosal',
+      this.negocios.set('BIZ-002', {
+        id: 'BIZ-002',
         nombre: 'Finca Rosal',
         whatsapp: {
-          tipo: 'PROPIO',
-          phoneId: process.env.FINCA_ROSAL_WHATSAPP_PHONE_ID,
-          token: process.env.FINCA_ROSAL_WHATSAPP_TOKEN,
-          webhookPath: '/webhook/finca-rosal',
+          tipo: 'COMPARTIDO',
+          phoneId: config.whatsappShared.phoneId,
+          token: config.whatsappShared.token,
+          webhookPath: '/webhook/BIZ-002',
           prefijo: 'ROSAL'
         },
         spreadsheetId: process.env.FINCA_ROSAL_SPREADSHEET_ID,
@@ -148,6 +167,7 @@ class NegociosService {
           productoMuestraId: 'CAT-001'
         }
       });
+      console.log('   ✅ Finca Rosal (BIZ-002) - LOCAL');
     }
 
     // Negocio demo compartido
@@ -173,16 +193,10 @@ class NegociosService {
   // GETTERS
   // ============================================
 
-  /**
-   * Obtener negocio por ID
-   */
   getById(id) {
     return this.negocios.get(id) || null;
   }
 
-  /**
-   * Obtener negocio por PhoneId de WhatsApp
-   */
   getByPhoneId(phoneId) {
     for (const negocio of this.negocios.values()) {
       if (negocio.whatsapp.phoneId === phoneId) {
@@ -192,9 +206,6 @@ class NegociosService {
     return null;
   }
 
-  /**
-   * Obtener negocio por webhook path
-   */
   getByWebhookPath(path) {
     for (const negocio of this.negocios.values()) {
       if (negocio.whatsapp.webhookPath === path) {
@@ -204,41 +215,26 @@ class NegociosService {
     return null;
   }
 
-  /**
-   * Obtener todos los negocios activos
-   */
   getAll() {
     return Array.from(this.negocios.values());
   }
 
-  /**
-   * Obtener negocios que usan número compartido
-   */
   getSharedNegocios() {
     return this.getAll().filter(n => n.whatsapp.tipo === 'COMPARTIDO');
   }
 
-  /**
-   * Obtener negocios con número propio
-   */
   getOwnedNegocios() {
     return this.getAll().filter(n => n.whatsapp.tipo === 'PROPIO');
   }
 
-  /**
-   * Verificar si un negocio tiene una feature habilitada
-   */
   hasFeature(negocioId, feature) {
     const negocio = this.getById(negocioId);
     return negocio ? negocio.features.includes(feature) : false;
   }
 
-  /**
-   * Recargar negocios (útil para actualizar sin reiniciar)
-   */
-  async reload(sheetsService) {
+  async reload() {
     this.negocios.clear();
-    return await this.initialize(sheetsService);
+    return await this.initialize();
   }
 }
 
