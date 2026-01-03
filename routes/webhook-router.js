@@ -119,7 +119,6 @@ router.post('/:businessId', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Para webhook específico, usar credenciales propias del negocio
     await processWebhook(body, negocio, false);
     res.sendStatus(200);
   } catch (error) {
@@ -197,10 +196,9 @@ async function processWebhook(body, negocio, useSharedCredentials = false) {
         }
       }
 
+      // Solo log de status, no procesar
       if (value.statuses && value.statuses.length > 0) {
-        for (const status of value.statuses) {
-          console.log(`📊 Status: ${status.status} para ${status.id}`);
-        }
+        // Silencioso - no hacer nada con status updates
       }
     }
   }
@@ -226,16 +224,7 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
   console.log(`   Texto: ${text}`);
 
   // ============================================
-  // REGISTRAR MENSAJE DEL CLIENTE (TRACKING)
-  // ============================================
-  try {
-    await mensajeLogger.logMensajeCliente(from, text || `[${type}]`, context.sheets);
-  } catch (e) {
-    console.log('⚠️ Error logging mensaje:', e.message);
-  }
-
-  // ============================================
-  // VERIFICAR MODO ASESOR
+  // VERIFICAR MODO ASESOR PRIMERO
   // ============================================
   const modoAsesorActivo = await asesorService.debeBloquerBot(from, context.sheets);
   
@@ -245,25 +234,37 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
     // Verificar si quiere salir del modo asesor
     const textLower = (text || '').toLowerCase().trim();
     if (textLower === 'menu' || textLower === 'menú' || textLower === 'salir') {
+      // Salir del modo asesor
       await asesorService.desactivarModoAsesor(from, context.sheets);
       await context.whatsapp.sendMessage(from, 
         '👋 Has salido del modo de asesoría.\n\nVolviendo al menú principal...'
       );
-      // Continuar al handler para mostrar menú
+      // Marcar como leído (ahora sí, porque el bot responde)
+      await context.whatsapp.markAsRead(messageId);
+      // Resetear estado y continuar al handler
       stateManager.resetState(from, negocio.id);
     } else {
-      // Guardar mensaje para el asesor y NO responder
+      // Guardar mensaje para el asesor (solo aquí, no en mensajeLogger)
       const conversacionId = await asesorService.obtenerConversacionId(from, context.sheets);
       if (conversacionId) {
         await asesorService.guardarMensaje(conversacionId, from, text, 'CLIENTE', context.sheets);
       }
-      // Marcar como leído pero NO responder
-      await context.whatsapp.markAsRead(messageId);
-      return; // ← STOP - Bot no responde
+      // NO marcar como leído (queda en gris para el cliente)
+      // NO responder
+      return;
+    }
+  } else {
+    // ============================================
+    // MODO NORMAL - REGISTRAR MENSAJE DEL CLIENTE
+    // ============================================
+    try {
+      await mensajeLogger.logMensajeCliente(from, text || `[${type}]`, context.sheets);
+    } catch (e) {
+      console.log('⚠️ Error logging mensaje:', e.message);
     }
   }
 
-  // Marcar como leído
+  // Marcar como leído (solo en modo normal o al salir de asesor)
   await context.whatsapp.markAsRead(messageId);
 
   // Guardar negocio activo en memoria Y en Sheets
@@ -290,7 +291,6 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
  * Crear contexto para el handler
  */
 async function createContext(negocio, useSharedCredentials = false) {
-  // Determinar qué credenciales de WhatsApp usar
   let whatsappConfig;
   
   if (useSharedCredentials || negocio.whatsapp?.tipo === 'COMPARTIDO') {
@@ -387,7 +387,7 @@ async function identificarNegocio(from, message) {
     }
   }
 
-  // 2. Prefijo en mensaje (para links directos)
+  // 2. Prefijo en mensaje
   for (const [prefijo, negocioId] of Object.entries(PREFIJOS_NEGOCIOS)) {
     if (textUpper === prefijo || textUpper.startsWith(prefijo + ' ')) {
       const negocio = negociosService.getById(negocioId);
@@ -409,7 +409,7 @@ async function identificarNegocio(from, message) {
     }
   }
 
-  // 4. Buscar en memoria (stateManager)
+  // 4. Buscar en memoria
   const activeBusinessId = stateManager.getActiveBusiness(from);
   if (activeBusinessId) {
     const negocio = negociosService.getById(activeBusinessId);
@@ -419,17 +419,17 @@ async function identificarNegocio(from, message) {
     }
   }
 
-  // 5. Si solo hay 1 negocio compartido, usar ese
+  // 5. Si solo hay 1 negocio compartido
   const negocios = negociosService.getSharedNegocios();
   if (negocios.length === 1) {
     console.log(`   → Único negocio compartido: ${negocios[0].id}`);
     return negocios[0];
   }
 
-  // 6. Negocio por defecto (BIZ-002 - Finca Rosal)
+  // 6. Negocio por defecto
   const negocioPorDefecto = negociosService.getById(DEFAULT_BUSINESS_ID);
   if (negocioPorDefecto) {
-    console.log(`   → Asignando negocio por defecto: ${negocioPorDefecto.nombre} (${DEFAULT_BUSINESS_ID})`);
+    console.log(`   → Asignando negocio por defecto: ${negocioPorDefecto.nombre}`);
     await usuariosNegociosService.vincularUsuario(from, DEFAULT_BUSINESS_ID);
     return negocioPorDefecto;
   }
