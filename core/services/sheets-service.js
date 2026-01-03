@@ -19,7 +19,7 @@ class SheetsService {
   async initialize() {
     try {
       if (!config.google.serviceAccountKey) {
-        console.log('⚠️ Google Sheets no configurado');
+        console.log('Google Sheets no configurado');
         return false;
       }
 
@@ -33,16 +33,16 @@ class SheetsService {
       this.sheets = google.sheets({ version: 'v4', auth: this.auth });
       this.initialized = true;
 
-      console.log(`✅ SheetsService inicializado para ${this.spreadsheetId}`);
+      console.log('SheetsService inicializado para ' + this.spreadsheetId);
       return true;
     } catch (error) {
-      console.error('❌ Error inicializando Sheets:', error.message);
+      console.error('Error inicializando Sheets:', error.message);
       return false;
     }
   }
 
   // ============================================
-  // UTILIDADES DE CONVERSIÓN
+  // UTILIDADES DE CONVERSION
   // ============================================
 
   parseDecimal(value) {
@@ -68,22 +68,17 @@ class SheetsService {
   }
 
   // ============================================
-  // OPERACIONES GENÉRICAS
+  // OPERACIONES GENERICAS
   // ============================================
 
-  /**
-   * Obtener filas de un rango
-   * @param {string} range - Rango (ej: 'Clientes!A:I')
-   * @returns {Array} - Filas
-   */
   async getRows(range) {
     if (!this.initialized) {
-      console.log('⚠️ SheetsService no inicializado');
+      console.log('SheetsService no inicializado');
       return [];
     }
 
     if (!range) {
-      console.error('❌ Error: range es requerido en getRows()');
+      console.error('Error: range es requerido en getRows()');
       return [];
     }
 
@@ -94,14 +89,11 @@ class SheetsService {
       });
       return response.data.values || [];
     } catch (error) {
-      console.error(`❌ Error leyendo ${range}:`, error.message);
+      console.error('Error leyendo ' + range + ':', error.message);
       return [];
     }
   }
 
-  /**
-   * Agregar fila al final de una hoja
-   */
   async appendRow(sheetName, values) {
     if (!this.initialized) return false;
 
@@ -110,22 +102,19 @@ class SheetsService {
       
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
-        range: `${sheetName}!A1`,
+        range: sheetName + '!A1',
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         resource: { values: [formattedValues] }
       });
-      console.log(`✅ Fila agregada a ${sheetName} con ${values.length} columnas`);
+      console.log('Fila agregada a ' + sheetName + ' con ' + values.length + ' columnas');
       return true;
     } catch (error) {
-      console.error(`❌ Error agregando fila a ${sheetName}:`, error.message);
+      console.error('Error agregando fila a ' + sheetName + ':', error.message);
       return false;
     }
   }
 
-  /**
-   * Actualizar celda específica
-   */
   async updateCell(range, value) {
     if (!this.initialized) return false;
 
@@ -140,14 +129,11 @@ class SheetsService {
       });
       return true;
     } catch (error) {
-      console.error(`❌ Error actualizando ${range}:`, error.message);
+      console.error('Error actualizando ' + range + ':', error.message);
       return false;
     }
   }
 
-  /**
-   * Actualizar múltiples celdas
-   */
   async batchUpdate(updates) {
     if (!this.initialized) return false;
 
@@ -164,7 +150,7 @@ class SheetsService {
       });
       return true;
     } catch (error) {
-      console.error('❌ Error en batch update:', error.message);
+      console.error('Error en batch update:', error.message);
       return false;
     }
   }
@@ -194,7 +180,6 @@ class SheetsService {
           ultimaCompra: row[6] || '',
           departamento: row[7] || '',
           ciudad: row[8] || '',
-          // Alias para compatibilidad con handler BIZ-002
           empresa: row[2] || '',
           contacto: row[2] || '',
           rowIndex: i + 1
@@ -210,13 +195,13 @@ class SheetsService {
 
     if (clienteExistente) {
       await this.updateCell(
-        `Clientes!G${clienteExistente.rowIndex}`,
+        'Clientes!G' + clienteExistente.rowIndex,
         new Date().toLocaleDateString('es-PE')
       );
       return { ...clienteExistente, updated: true };
     }
 
-    const nuevoId = `CLI-${Date.now().toString().slice(-6)}`;
+    const nuevoId = 'CLI-' + Date.now().toString().slice(-6);
     const valores = [
       nuevoId,
       this.cleanPhone(datosCliente.whatsapp),
@@ -231,6 +216,86 @@ class SheetsService {
 
     await this.appendRow('Clientes', valores);
     return { id: nuevoId, ...datosCliente, created: true };
+  }
+
+  // ============================================
+  // PRECIOS CLIENTES (precios especiales)
+  // ============================================
+
+  /**
+   * Obtener precio especial para un cliente
+   * Hoja PreciosClientes: whatsapp | codigo_producto | precio_especial
+   */
+  async getPreciosCliente(whatsapp) {
+    try {
+      const rows = await this.getRows('PreciosClientes!A:C');
+      if (rows.length <= 1) return {};
+
+      const numeroLimpio = this.cleanPhone(whatsapp);
+      const precios = {};
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const clienteWhatsapp = this.cleanPhone(row[0] || '');
+        
+        if (clienteWhatsapp === numeroLimpio) {
+          const codigoProducto = row[1] || '';
+          const precioEspecial = this.parseDecimal(row[2]);
+          if (codigoProducto && precioEspecial > 0) {
+            precios[codigoProducto] = precioEspecial;
+          }
+        }
+      }
+
+      return precios;
+    } catch (error) {
+      console.log('Error obteniendo precios cliente:', error.message);
+      return {};
+    }
+  }
+
+  /**
+   * Obtener precio de un producto para un cliente especifico
+   * Primero busca en PreciosClientes, si no existe usa precio de Inventario
+   */
+  async getPrecioProducto(whatsapp, codigoProducto) {
+    // Buscar precio especial del cliente
+    const preciosCliente = await this.getPreciosCliente(whatsapp);
+    
+    if (preciosCliente[codigoProducto]) {
+      return {
+        precio: preciosCliente[codigoProducto],
+        tipo: 'especial'
+      };
+    }
+
+    // Si no hay precio especial, usar precio de inventario
+    const productos = await this.getProductos('ACTIVO');
+    const producto = productos.find(p => p.codigo === codigoProducto);
+    
+    if (producto) {
+      return {
+        precio: producto.precio,
+        tipo: 'lista'
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Obtener productos con precios personalizados para un cliente
+   */
+  async getProductosConPrecios(whatsapp) {
+    const productos = await this.getProductos('ACTIVO');
+    const preciosCliente = await this.getPreciosCliente(whatsapp);
+
+    return productos.map(p => ({
+      ...p,
+      precioOriginal: p.precio,
+      precio: preciosCliente[p.codigo] || p.precio,
+      tieneDescuento: !!preciosCliente[p.codigo]
+    }));
   }
 
   // ============================================
@@ -269,7 +334,7 @@ class SheetsService {
   }
 
   async crearPedido(datosPedido) {
-    const pedidoId = datosPedido.id || `PED-${Date.now().toString().slice(-6)}`;
+    const pedidoId = datosPedido.id || 'PED-' + Date.now().toString().slice(-6);
     const ahora = new Date();
 
     const valores = [
@@ -303,7 +368,7 @@ class SheetsService {
     
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
-        return await this.updateCell(`Pedidos!J${i + 1}`, nuevoEstado);
+        return await this.updateCell('Pedidos!J' + (i + 1), nuevoEstado);
       }
     }
 
@@ -387,7 +452,7 @@ class SheetsService {
     }
 
     const nuevoReservado = producto.stockReservado + cantidad;
-    await this.updateCell(`Inventario!F${producto.rowIndex}`, nuevoReservado);
+    await this.updateCell('Inventario!F' + producto.rowIndex, nuevoReservado);
 
     return { success: true, nuevoReservado };
   }
@@ -399,13 +464,13 @@ class SheetsService {
     if (!producto) return { success: false };
 
     const nuevoReservado = Math.max(0, producto.stockReservado - cantidad);
-    await this.updateCell(`Inventario!F${producto.rowIndex}`, nuevoReservado);
+    await this.updateCell('Inventario!F' + producto.rowIndex, nuevoReservado);
 
     return { success: true, nuevoReservado };
   }
 
   // ============================================
-  // CONFIGURACIÓN DEL NEGOCIO
+  // CONFIGURACION DEL NEGOCIO
   // ============================================
 
   async getConfiguracion() {
@@ -425,7 +490,7 @@ class SheetsService {
     const configObj = await this.getConfiguracion();
     const metodos = [];
 
-    if (configObj.yape_activo === 'true') {
+    if (configObj.yape_activo === 'SI') {
       metodos.push({
         tipo: 'yape',
         numero: configObj.yape_numero,
@@ -433,7 +498,7 @@ class SheetsService {
       });
     }
 
-    if (configObj.plin_activo === 'true') {
+    if (configObj.plin_activo === 'SI') {
       metodos.push({
         tipo: 'plin',
         numero: configObj.plin_numero,
@@ -442,12 +507,12 @@ class SheetsService {
     }
 
     ['bcp', 'interbank', 'bbva', 'scotiabank'].forEach(banco => {
-      if (configObj[`${banco}_activo`] === 'true') {
+      if (configObj[banco + '_activo'] === 'SI') {
         metodos.push({
           tipo: banco,
-          cuenta: configObj[`${banco}_cuenta`],
-          cci: configObj[`${banco}_cci`],
-          titular: configObj[`${banco}_titular`]
+          cuenta: configObj[banco + '_cuenta'],
+          cci: configObj[banco + '_cci'],
+          titular: configObj[banco + '_titular']
         });
       }
     });
