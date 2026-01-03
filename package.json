@@ -1,7 +1,7 @@
 {
   "name": "apartalo-core",
   "version": "1.0.0",
-  "description": "Plataforma multi-tenant para comercio por WhatsApp - Soporta numeros propios y compartidos",
+  "description": "Plataforma multi-tenant para comercio por WhatsApp",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
@@ -18,7 +18,6 @@
   "author": "Keyla Cusi - RosalCafe",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.52.0",
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
