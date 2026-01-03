@@ -1,10 +1,10 @@
 /**
- * APARTALO CORE - Handler Unificado v1.0
+ * APARTALO CORE - Handler Unificado v1.1
  * 
  * Handler que combina lo mejor de BIZ-002 (flujo maduro) con mejoras del estándar.
  * 
  * CARACTERÍSTICAS:
- * - Flujo simple y directo (basado en BIZ-002)
+ * - Flujo simple y directo con BOTONES (basado en BIZ-002)
  * - IA como apoyo (no dependencia)
  * - Configurable por negocio (unidad, mínimo, pago, etc.)
  * - Asesor humano integrado
@@ -108,7 +108,7 @@ async function handle(from, message, context) {
       return await manejarMenu(from, text, interactiveData, context, cfg);
 
     case 'seleccion_producto':
-      return await manejarSeleccionProducto(from, text, context, cfg);
+      return await manejarSeleccionProducto(from, text, interactiveData, context, cfg);
 
     case 'cantidad':
       return await manejarCantidad(from, text, context, cfg);
@@ -242,7 +242,7 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
 }
 
 // ============================================
-// CATÁLOGO
+// CATÁLOGO (con botones - máx 3 productos)
 // ============================================
 
 async function mostrarCatalogo(from, context, cfg) {
@@ -261,22 +261,21 @@ async function mostrarCatalogo(from, context, cfg) {
     return await mostrarMenuPrincipal(from, context, cfg);
   }
 
-  let mensaje = `📦 *CATÁLOGO ${negocio.nombre.toUpperCase()}*\n\n`;
-
-  productos.forEach((p, i) => {
-    mensaje += `*${i + 1}.* ${p.nombre}\n`;
-    mensaje += `   S/${p.precio}${cfg.unidad === 'kg' ? '/kg' : ''}\n`;
-    if (p.descripcion) mensaje += `   _${p.descripcion}_\n`;
-    mensaje += '\n';
-  });
-
+  // Mensaje simple
+  let mensaje = `☕ *${negocio.nombre.toUpperCase()}*\n\n`;
+  mensaje += `Selecciona el producto que deseas:`;
+  
   if (cfg.minimoCompra > 1) {
-    mensaje += `📦 Pedido mínimo: ${cfg.minimoCompra}${cfg.unidad === 'kg' ? 'kg' : ' unidades'}\n\n`;
+    mensaje += `\n\n_Pedido mínimo: ${cfg.minimoCompra}${cfg.unidad === 'kg' ? 'kg' : ' unidades'}_`;
   }
 
-  mensaje += `Escribe el *número* del producto que deseas:`;
+  // Crear botones con los primeros 3 productos
+  const botones = productos.slice(0, 3).map(p => ({
+    id: `prod_${p.codigo}`,
+    title: `${p.nombre.substring(0, 17)}${p.nombre.length > 17 ? '...' : ''}`
+  }));
 
-  await whatsapp.sendMessage(from, mensaje);
+  await whatsapp.sendButtonMessage(from, mensaje, botones);
 
   stateManager.setState(from, negocio.id, {
     step: 'seleccion_producto',
@@ -284,7 +283,7 @@ async function mostrarCatalogo(from, context, cfg) {
   });
 }
 
-async function manejarSeleccionProducto(from, text, context, cfg) {
+async function manejarSeleccionProducto(from, text, interactiveData, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
   const { productos } = state.data || {};
@@ -293,23 +292,34 @@ async function manejarSeleccionProducto(from, text, context, cfg) {
     return await mostrarCatalogo(from, context, cfg);
   }
 
-  const numero = parseInt(text);
-
-  if (isNaN(numero) || numero < 1 || numero > productos.length) {
-    await whatsapp.sendMessage(from, `Por favor, ingresa un número del 1 al ${productos.length}.`);
-    return;
+  // Detectar selección por botón (prod_CODIGO) o interactiveData
+  let producto = null;
+  const textoLimpio = (interactiveData?.id || text || '').trim();
+  
+  if (textoLimpio.startsWith('prod_')) {
+    const codigo = textoLimpio.replace('prod_', '');
+    producto = productos.find(p => p.codigo === codigo);
+  } else {
+    // También permitir selección por número (fallback)
+    const numero = parseInt(textoLimpio);
+    if (!isNaN(numero) && numero >= 1 && numero <= productos.length) {
+      producto = productos[numero - 1];
+    }
   }
 
-  const producto = productos[numero - 1];
+  if (!producto) {
+    await whatsapp.sendMessage(from, 'Por favor, selecciona un producto usando los botones.');
+    return await mostrarCatalogo(from, context, cfg);
+  }
 
-  // Mostrar producto con foto si está disponible
-  let mensaje = `✅ Has seleccionado:\n\n*${producto.nombre}*\n`;
+  // Mostrar producto seleccionado
+  let mensaje = `✅ *${producto.nombre}*\n`;
   if (producto.descripcion) mensaje += `${producto.descripcion}\n`;
   mensaje += `\nPrecio: S/${producto.precio}${cfg.unidad === 'kg' ? '/kg' : ''}\n\n`;
   mensaje += `*¿Cuánto${cfg.unidad === 'kg' ? 's kilos' : 'as unidades'} necesitas?*`;
   
   if (cfg.minimoCompra > 1) {
-    mensaje += `\n_Pedido mínimo: ${cfg.minimoCompra}${cfg.unidad === 'kg' ? 'kg' : ' unidades'}_`;
+    mensaje += `\n_Mínimo: ${cfg.minimoCompra}${cfg.unidad === 'kg' ? 'kg' : ''}_`;
   }
 
   // Enviar foto si está disponible y configurado
