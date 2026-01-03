@@ -30,6 +30,9 @@ const PREFIJOS_NEGOCIOS = {
   'CAFE': 'tienda-rosal'
 };
 
+// Negocio por defecto cuando no se identifica
+const DEFAULT_BUSINESS_ID = 'BIZ-002';
+
 /**
  * Inicializar handlers
  */
@@ -148,12 +151,6 @@ router.post('/', async (req, res) => {
 
     // 2. Intentar identificar negocio
     let negocio = await identificarNegocio(from, message);
-
-    if (!negocio) {
-      // No hay negocio vinculado, mostrar selector
-      await mostrarSelectorNegocios(from);
-      return res.sendStatus(200);
-    }
 
     // 3. Procesar mensaje con el negocio identificado
     await processWebhook(body, negocio);
@@ -292,6 +289,7 @@ function extractMessageContent(message) {
  * 3. Negocio guardado en Sheets (persistente)
  * 4. Negocio en memoria (stateManager)
  * 5. Si solo hay 1 negocio compartido, usar ese
+ * 6. NUEVO: Negocio por defecto (BIZ-002 - Finca Rosal)
  */
 async function identificarNegocio(from, message) {
   const text = message.text?.body || message.interactive?.button_reply?.id || '';
@@ -347,6 +345,15 @@ async function identificarNegocio(from, message) {
   if (negocios.length === 1) {
     console.log(`   → Único negocio compartido: ${negocios[0].id}`);
     return negocios[0];
+  }
+
+  // 6. NUEVO: Negocio por defecto (BIZ-002 - Finca Rosal)
+  const negocioPorDefecto = negociosService.getById(DEFAULT_BUSINESS_ID);
+  if (negocioPorDefecto) {
+    console.log(`   → Asignando negocio por defecto: ${negocioPorDefecto.nombre} (${DEFAULT_BUSINESS_ID})`);
+    // Guardar vinculación para próximas veces
+    await usuariosNegociosService.vincularUsuario(from, DEFAULT_BUSINESS_ID);
+    return negocioPorDefecto;
   }
 
   // No se pudo identificar
