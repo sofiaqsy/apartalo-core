@@ -28,6 +28,7 @@ const apiRouter = require('./routes/api-router');
 const uploadRouter = require('./routes/upload-router');
 const clientesRouter = require('./routes/clientes-router');
 const pedidosRouter = require('./routes/pedidos-router');
+const botConversationsRouter = require('./routes/bot-conversations-router');
 
 // Inicializar Express
 const app = express();
@@ -76,7 +77,8 @@ app.get('/', (req, res) => {
       api: '/api',
       clientes: '/api/clientes/:businessId',
       pedidos: '/api/pedidos/:businessId',
-      upload: '/api/upload/:businessId'
+      upload: '/api/upload/:businessId',
+      bot: '/api/bot'
     }
   });
 });
@@ -100,6 +102,9 @@ app.use('/api/clientes', clientesRouter);
 
 // API específica para pedidos (con creación desde app)
 app.use('/api/pedidos', pedidosRouter);
+
+// API para conversaciones del bot WhatsApp
+app.use('/api/bot', botConversationsRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
@@ -221,6 +226,7 @@ async function initialize() {
 ║   📤 Upload: /api/upload/:businessId                     ║
 ║   👥 Clientes: /api/clientes/:businessId                 ║
 ║   📦 Pedidos: /api/pedidos/:businessId                   ║
+║   🤖 Bot: /api/bot                                       ║
 ║   ❤️ Health: /health                                     ║
 ║                                                          ║
 ║   📦 Negocios: ${negocios.length.toString().padEnd(40)}║
