@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.7
+ * APARTALO CORE - Handler Unificado v2.8
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -7,7 +7,7 @@
  * - Flujo conversacional con IA (no menus rigidos)
  * - Precios personalizados por cliente (PreciosClientes)
  * - Reutiliza datos del cliente registrado (direccion, telefono)
- * - Envio de imagen solo al identificar producto (no en resumen)
+ * - Formato de productos compatible con apartalo-app
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -134,12 +134,31 @@ function mergeDatasSinNull(acumulado, nuevo) {
 }
 
 // ============================================
-// UTILIDAD: Extraer nombre de producto de JSON
+// UTILIDAD: Formatear productos para Sheets
+// Formato: "6x Cafe 250g - S/90.00" (legible y parseable)
+// ============================================
+function formatearProductosParaSheets(productos) {
+  if (!Array.isArray(productos)) {
+    productos = [productos];
+  }
+  
+  return productos.map(p => {
+    const cantidad = p.cantidad || 1;
+    const nombre = p.nombre || 'Producto';
+    const subtotal = (p.precio || 0) * cantidad;
+    return cantidad + 'x ' + nombre + ' - S/' + subtotal.toFixed(2);
+  }).join(', ');
+}
+
+// ============================================
+// UTILIDAD: Extraer nombre de producto de cualquier formato
+// Soporta JSON y texto plano
 // ============================================
 function extraerNombreProducto(productosStr) {
   if (!productosStr) return 'Pedido';
   
   try {
+    // Intentar parsear como JSON
     if (productosStr.startsWith('[') || productosStr.startsWith('{')) {
       const productos = JSON.parse(productosStr);
       if (Array.isArray(productos) && productos.length > 0) {
@@ -149,6 +168,13 @@ function extraerNombreProducto(productosStr) {
         return nombre + ' x' + cantidad;
       }
     }
+    
+    // Si es texto plano tipo "3x Cafe - S/45.00"
+    const match = productosStr.match(/^(\d+)x\s+(.+?)\s+-/);
+    if (match) {
+      return match[2] + ' x' + match[1];
+    }
+    
     return productosStr.substring(0, 30);
   } catch (e) {
     return productosStr.substring(0, 30) || 'Pedido';
@@ -288,7 +314,7 @@ async function iniciarPedidoConversacional(from, context, cfg) {
     data: {
       historial: [],
       datosCliente: cliente,
-      datosExtraidos: datosIniciales,  // Pre-cargar datos del cliente
+      datosExtraidos: datosIniciales,
       ultimoProductoMostrado: null
     }
   });
@@ -422,8 +448,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     telefono: datos.telefono
   });
 
-  // NO enviar imagen en el resumen (ya se mostro antes)
-
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n' +
     'Producto: ' + producto.nombre + '\n' +
     'Cantidad: ' + cantidad + ' ' + unidadTexto + '\n' +
@@ -493,6 +517,15 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     ? 'En preparacion' 
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
 
+  // Formato de productos compatible con apartalo-app
+  // Formato: "6x Cafe 250g - S/90.00"
+  const productosTexto = formatearProductosParaSheets([{
+    codigo: productoSeleccionado.codigo,
+    nombre: productoSeleccionado.nombre,
+    cantidad,
+    precio: precioFinal
+  }]);
+
   try {
     // Actualizar o crear cliente con los datos del pedido
     await sheets.upsertCliente({
@@ -508,14 +541,10 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       cliente: nombreCliente,
       telefono: telefono || '',
       direccion: direccion,
-      productos: JSON.stringify([{
-        codigo: productoSeleccionado.codigo,
-        nombre: productoSeleccionado.nombre,
-        cantidad,
-        precio: precioFinal
-      }]),
+      productos: productosTexto,  // Formato legible: "6x Cafe - S/90.00"
       total,
-      estado: estadoInicial
+      estado: estadoInicial,
+      observaciones: 'WhatsApp Bot'  // Identificar origen
     });
   } catch (e) {
     console.error('Error creando pedido:', e.message);
@@ -731,10 +760,10 @@ async function continuarFlujoMuestra(from, text, context, cfg) {
           cliente: data.empresa,
           telefono: data.telefono,
           direccion: data.direccion,
-          productos: 'Muestra Cafe 500g',
+          productos: '1x Muestra Cafe 500g - S/0.00',  // Formato compatible
           total: 0,
           estado: 'Pendiente envio',
-          observaciones: 'MUESTRA GRATIS 500g'
+          observaciones: 'MUESTRA GRATIS 500g - WhatsApp Bot'
         });
       } catch (e) {}
 
