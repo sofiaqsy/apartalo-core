@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.8
+ * APARTALO CORE - Handler Unificado v2.9
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -8,6 +8,7 @@
  * - Precios personalizados por cliente (PreciosClientes)
  * - Reutiliza datos del cliente registrado (direccion, telefono)
  * - Formato de productos compatible con apartalo-app
+ * - Estados unificados con config.orderStates
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -198,7 +199,7 @@ async function mostrarMenuPrincipal(from, context, cfg) {
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
     pedidosActivos = (pedidos || []).filter(p => 
-      !['ENTREGADO', 'CANCELADO', 'Completado'].includes(p.estado)
+      !['ENTREGADO', 'CANCELADO'].includes(p.estado)
     );
   } catch (e) {}
 
@@ -513,8 +514,9 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   const pedidoId = generateId(cfg.prefijoPedido);
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
+  // ESTADOS UNIFICADOS - usar config.orderStates
   const estadoInicial = cfg.flujoPago === 'contacto' 
-    ? 'En preparacion' 
+    ? config.orderStates?.IN_PREPARATION || 'EN_PREPARACION'
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
 
   // Formato de productos compatible con apartalo-app
@@ -653,7 +655,7 @@ async function mostrarPedidosActivos(from, context, cfg) {
   } catch (e) {}
 
   const activos = (pedidos || []).filter(p => 
-    !['ENTREGADO', 'CANCELADO', 'Completado'].includes(p.estado)
+    !['ENTREGADO', 'CANCELADO'].includes(p.estado)
   );
 
   if (activos.length === 0) {
@@ -753,6 +755,9 @@ async function continuarFlujoMuestra(from, text, context, cfg) {
 
       const pedidoId = generateId('MUE');
       
+      // Estado para muestras: ENVIADO ya que se procesará manualmente
+      const estadoMuestra = config.orderStates?.SHIPPED || 'ENVIADO';
+      
       try {
         await sheets.crearPedido({
           id: pedidoId,
@@ -760,9 +765,9 @@ async function continuarFlujoMuestra(from, text, context, cfg) {
           cliente: data.empresa,
           telefono: data.telefono,
           direccion: data.direccion,
-          productos: '1x Muestra Cafe 500g - S/0.00',  // Formato compatible
+          productos: '1x Muestra Cafe 500g - S/0.00',
           total: 0,
-          estado: 'Pendiente envio',
+          estado: estadoMuestra,
           observaciones: 'MUESTRA GRATIS 500g - WhatsApp Bot'
         });
       } catch (e) {}
