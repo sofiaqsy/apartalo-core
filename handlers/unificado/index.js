@@ -1,13 +1,13 @@
 /**
- * APARTALO CORE - Handler Unificado v2.6
+ * APARTALO CORE - Handler Unificado v2.7
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
  * CARACTERISTICAS:
  * - Flujo conversacional con IA (no menus rigidos)
  * - Precios personalizados por cliente (PreciosClientes)
- * - Extraccion automatica de datos del pedido
- * - Envio de imagen del producto cuando se identifica
+ * - Reutiliza datos del cliente registrado (direccion, telefono)
+ * - Envio de imagen solo al identificar producto (no en resumen)
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -264,6 +264,7 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
 async function iniciarPedidoConversacional(from, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
+  // Buscar cliente existente para reutilizar sus datos
   let cliente = null;
   try {
     cliente = await sheets.buscarCliente(from);
@@ -274,13 +275,21 @@ async function iniciarPedidoConversacional(from, context, cfg) {
 
   await whatsapp.sendMessage(from, mensajeInicial);
 
+  // Inicializar con datos del cliente si existen
+  const datosIniciales = {};
+  if (cliente) {
+    if (cliente.nombre) datosIniciales.nombre_cliente = cliente.nombre;
+    if (cliente.direccion) datosIniciales.direccion = cliente.direccion;
+    if (cliente.telefono) datosIniciales.telefono = cliente.telefono;
+  }
+
   stateManager.setState(from, negocio.id, {
     step: 'pedido_conversacional',
     data: {
       historial: [],
       datosCliente: cliente,
-      datosExtraidos: {},
-      ultimoProductoMostrado: null  // Para no repetir imagen
+      datosExtraidos: datosIniciales,  // Pre-cargar datos del cliente
+      ultimoProductoMostrado: null
     }
   });
 }
@@ -323,7 +332,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   let productoParaMostrar = null;
 
   if (productoCodigoActual && productoCodigoActual !== ultimoProductoMostrado && cfg.mostrarFotos) {
-    // Buscar producto para obtener imagen
     try {
       const productos = await sheets.getProductosConPrecios(from);
       productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
@@ -414,14 +422,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     telefono: datos.telefono
   });
 
-  // Enviar imagen del producto en el resumen si tiene
-  if (cfg.mostrarFotos && producto.imagenUrl) {
-    try {
-      await whatsapp.sendImage(from, producto.imagenUrl, producto.nombre);
-    } catch (e) {
-      console.log('Error enviando imagen en confirmacion:', e.message);
-    }
-  }
+  // NO enviar imagen en el resumen (ya se mostro antes)
 
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n' +
     'Producto: ' + producto.nombre + '\n' +
@@ -475,6 +476,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
+  // Si faltan datos, pedirlos
   if (!nombreCliente || !direccion) {
     await whatsapp.sendMessage(from, 
       'Para completar el pedido, necesito algunos datos.\n\n' +
@@ -492,6 +494,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
 
   try {
+    // Actualizar o crear cliente con los datos del pedido
     await sheets.upsertCliente({
       whatsapp: from,
       nombre: nombreCliente,
