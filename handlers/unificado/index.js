@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.5
+ * APARTALO CORE - Handler Unificado v2.6
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -7,7 +7,7 @@
  * - Flujo conversacional con IA (no menus rigidos)
  * - Precios personalizados por cliente (PreciosClientes)
  * - Extraccion automatica de datos del pedido
- * - Acumulacion inteligente de datos (no sobrescribe con null)
+ * - Envio de imagen del producto cuando se identifica
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -125,7 +125,6 @@ function mergeDatasSinNull(acumulado, nuevo) {
   const resultado = { ...acumulado };
   
   for (const key in nuevo) {
-    // Solo sobrescribir si el nuevo valor NO es null/undefined/empty
     if (nuevo[key] !== null && nuevo[key] !== undefined && nuevo[key] !== '') {
       resultado[key] = nuevo[key];
     }
@@ -280,7 +279,8 @@ async function iniciarPedidoConversacional(from, context, cfg) {
     data: {
       historial: [],
       datosCliente: cliente,
-      datosExtraidos: {}
+      datosExtraidos: {},
+      ultimoProductoMostrado: null  // Para no repetir imagen
     }
   });
 }
@@ -292,8 +292,9 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   const historial = state.data?.historial || [];
   const datosCliente = state.data?.datosCliente || null;
   let datosAcumulados = state.data?.datosExtraidos || {};
+  const ultimoProductoMostrado = state.data?.ultimoProductoMostrado || null;
 
-  // Llamar a IA con el whatsapp del cliente para obtener precios personalizados
+  // Llamar a IA
   const resultado = await aiOrderService.procesarMensajePedido(
     mensaje,
     context,
@@ -307,32 +308,58 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return;
   }
 
-  // IMPORTANTE: Merge inteligente - no sobrescribir datos con null
+  // Merge inteligente
   if (resultado.datosExtraidos) {
     datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
 
-  // Log para debug
   console.log('Datos acumulados:', JSON.stringify(datosAcumulados));
 
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
+  // Verificar si se identifico un producto nuevo
+  const productoCodigoActual = datosAcumulados.producto_codigo;
+  let productoParaMostrar = null;
+
+  if (productoCodigoActual && productoCodigoActual !== ultimoProductoMostrado && cfg.mostrarFotos) {
+    // Buscar producto para obtener imagen
+    try {
+      const productos = await sheets.getProductosConPrecios(from);
+      productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
+    } catch (e) {
+      console.log('Error buscando producto para imagen:', e.message);
+    }
+  }
+
   // Verificar si pedido completo
   if (resultado.pedidoCompleto && datosAcumulados.producto_codigo && datosAcumulados.cantidad) {
     stateManager.updateData(from, negocio.id, {
       historial,
-      datosExtraidos: datosAcumulados
+      datosExtraidos: datosAcumulados,
+      ultimoProductoMostrado: productoCodigoActual
     });
     
     return await confirmarPedidoIA(from, context, cfg, datosAcumulados);
   }
 
+  // Actualizar estado
   stateManager.updateData(from, negocio.id, {
     historial,
-    datosExtraidos: datosAcumulados
+    datosExtraidos: datosAcumulados,
+    ultimoProductoMostrado: productoCodigoActual
   });
 
+  // Enviar imagen del producto si hay una nueva identificacion
+  if (productoParaMostrar && productoParaMostrar.imagenUrl) {
+    try {
+      await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, productoParaMostrar.nombre);
+    } catch (e) {
+      console.log('Error enviando imagen:', e.message);
+    }
+  }
+
+  // Enviar respuesta de texto
   await whatsapp.sendMessage(from, resultado.respuesta);
 }
 
@@ -341,7 +368,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
 
   console.log('confirmarPedidoIA - datos recibidos:', JSON.stringify(datos));
 
-  // Obtener productos con precios personalizados del cliente
+  // Obtener productos con precios personalizados
   let productos = [];
   try {
     productos = await sheets.getProductosConPrecios(from);
@@ -349,7 +376,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     productos = await sheets.getProductos('ACTIVO');
   }
 
-  // Buscar producto por codigo o nombre
+  // Buscar producto
   let producto = null;
   
   if (datos.producto_codigo) {
@@ -364,7 +391,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
 
   if (!producto) {
     console.log('Producto no encontrado. Codigo:', datos.producto_codigo, 'Nombre:', datos.producto_nombre);
-    console.log('Productos disponibles:', productos.map(p => p.codigo).join(', '));
     
     await whatsapp.sendMessage(from, 
       'No pude identificar el producto. Podrias indicarme nuevamente cual deseas?'
@@ -377,7 +403,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   const total = cantidad * precioUnitario;
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
-  // Guardar datos para confirmacion
+  // Guardar datos
   stateManager.updateData(from, negocio.id, {
     productoSeleccionado: producto,
     cantidad,
@@ -387,6 +413,15 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     direccion: datos.direccion,
     telefono: datos.telefono
   });
+
+  // Enviar imagen del producto en el resumen si tiene
+  if (cfg.mostrarFotos && producto.imagenUrl) {
+    try {
+      await whatsapp.sendImage(from, producto.imagenUrl, producto.nombre);
+    } catch (e) {
+      console.log('Error enviando imagen en confirmacion:', e.message);
+    }
+  }
 
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n' +
     'Producto: ' + producto.nombre + '\n' +
@@ -574,7 +609,7 @@ async function manejarVoucher(from, message, context, cfg) {
 }
 
 // ============================================
-// VER PEDIDOS - DETALLE COMPLETO
+// VER PEDIDOS
 // ============================================
 
 async function mostrarPedidosActivos(from, context, cfg) {
