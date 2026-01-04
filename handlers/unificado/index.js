@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.3
+ * APARTALO CORE - Handler Unificado v2.4
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -275,11 +275,13 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   const datosCliente = state.data?.datosCliente || null;
   let datosAcumulados = state.data?.datosExtraidos || {};
 
+  // Llamar a IA con el whatsapp del cliente para obtener precios personalizados
   const resultado = await aiOrderService.procesarMensajePedido(
     mensaje,
     context,
     historial,
-    datosCliente
+    datosCliente,
+    from  // <-- Pasar whatsapp para precios personalizados
   );
 
   if (resultado.error) {
