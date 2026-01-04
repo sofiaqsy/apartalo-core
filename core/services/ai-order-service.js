@@ -1,13 +1,13 @@
 /**
- * APARTALO CORE - AI Order Service v3
+ * APARTALO CORE - AI Order Service v4
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
- * IMPORTANTE: Los precios NO se incluyen en el prompt.
- * Los precios se calculan en el handler usando:
- * 1. PreciosClientes (precios especiales)
- * 2. Inventario (precio de lista)
+ * CARACTERISTICAS:
+ * - Carga productos con precios personalizados por cliente
+ * - Precios vienen de PreciosClientes o Inventario
+ * - IA puede mencionar precios correctos en la conversacion
  */
 
 const axios = require('axios');
@@ -36,7 +36,7 @@ class AIOrderService {
   /**
    * Procesar mensaje del cliente en flujo de pedido
    */
-  async procesarMensajePedido(mensaje, context, historial = [], datosCliente = null) {
+  async procesarMensajePedido(mensaje, context, historial = [], datosCliente = null, whatsappFrom = null) {
     if (!this.initialized && !this.initialize()) {
       return {
         respuesta: 'El servicio no esta disponible en este momento.',
@@ -51,10 +51,10 @@ class AIOrderService {
     // Cargar contexto del negocio
     const [configuracion, productos] = await Promise.all([
       this.cargarConfiguracion(sheets),
-      this.cargarProductos(sheets)
+      this.cargarProductosConPrecios(sheets, whatsappFrom)
     ]);
 
-    // Construir prompt del sistema (SIN PRECIOS)
+    // Construir prompt del sistema con precios personalizados
     const systemPrompt = this.construirSystemPrompt(negocio, configuracion, productos, datosCliente);
 
     // Construir mensajes
@@ -120,16 +120,17 @@ class AIOrderService {
   }
 
   /**
-   * Cargar productos del inventario (sin precios para el prompt)
+   * Cargar productos CON precios personalizados para el cliente
    */
-  async cargarProductos(sheets) {
+  async cargarProductosConPrecios(sheets, whatsappFrom) {
     try {
-      const productos = await sheets.getProductos('ACTIVO');
-      return productos.map(p => ({
-        codigo: p.codigo,
-        nombre: p.nombre,
-        descripcion: p.descripcion || ''
-      }));
+      if (whatsappFrom) {
+        // Usar precios personalizados del cliente
+        return await sheets.getProductosConPrecios(whatsappFrom);
+      } else {
+        // Sin cliente, usar precios de lista
+        return await sheets.getProductos('ACTIVO');
+      }
     } catch (error) {
       console.log('Error cargando productos:', error.message);
       return [];
@@ -137,14 +138,20 @@ class AIOrderService {
   }
 
   /**
-   * Construir prompt del sistema con contexto del negocio
-   * NOTA: NO incluimos precios aqui - se calculan en el handler
+   * Construir prompt del sistema con precios personalizados
    */
   construirSystemPrompt(negocio, config, productos, datosCliente) {
-    // Lista de productos SIN precios
-    const productosTexto = productos.map(p => 
-      '- ' + p.codigo + ': ' + p.nombre + (p.descripcion ? ' (' + p.descripcion + ')' : '')
-    ).join('\n');
+    // Lista de productos CON precios
+    const productosTexto = productos.map(p => {
+      let linea = '- ' + p.codigo + ': ' + p.nombre + ' - S/' + p.precio;
+      if (p.descripcion) {
+        linea += ' (' + p.descripcion + ')';
+      }
+      if (p.tieneDescuento) {
+        linea += ' [PRECIO ESPECIAL]';
+      }
+      return linea;
+    }).join('\n');
 
     const clienteTexto = datosCliente 
       ? '\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ' + (datosCliente.nombre || 'No registrado') + '\n- Direccion: ' + (datosCliente.direccion || 'No registrada') + '\n- Telefono: ' + (datosCliente.telefono || 'No registrado')
@@ -161,18 +168,22 @@ ${config.reglas_venta || 'Consultar disponibilidad.'}
 INFORMACION ADICIONAL:
 ${config.info_adicional || ''}
 
-CATALOGO DE PRODUCTOS DISPONIBLES:
+CATALOGO DE PRODUCTOS CON PRECIOS PARA ESTE CLIENTE:
 ${productosTexto || 'Consultar catalogo'}
 ${clienteTexto}
 
 INSTRUCCIONES:
 1. Responde de manera natural y conversacional
 2. NO uses emojis
-3. NO menciones precios especificos - el sistema los calcula automaticamente
+3. USA los precios del catalogo de arriba para calcular totales
 4. Guia al cliente para obtener: producto (codigo), cantidad, datos de entrega
-5. Si el cliente pregunta por productos, describe las opciones del catalogo
-6. Si el cliente pide un producto, identifica el CODIGO correcto del catalogo
+5. Si el cliente pregunta por productos, menciona las opciones CON sus precios
+6. Si el cliente pide un producto, identifica el CODIGO correcto y calcula el total
 7. Respuestas cortas, maximo 3-4 lineas
+
+CALCULO DE TOTALES:
+- Usa el precio del catalogo x cantidad
+- Ejemplo: Si CAF-001 cuesta S/70 y piden 8kg, total = S/560
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
@@ -181,6 +192,8 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
   "producto_codigo": "CODIGO_DEL_CATALOGO o null",
   "producto_nombre": "nombre del producto o null", 
   "cantidad": numero o null,
+  "precio_unitario": numero o null,
+  "total_calculado": numero o null,
   "nombre_cliente": "nombre o null",
   "direccion": "direccion o null",
   "telefono": "telefono o null",
