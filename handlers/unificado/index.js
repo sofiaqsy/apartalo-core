@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.4
+ * APARTALO CORE - Handler Unificado v2.5
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -7,7 +7,7 @@
  * - Flujo conversacional con IA (no menus rigidos)
  * - Precios personalizados por cliente (PreciosClientes)
  * - Extraccion automatica de datos del pedido
- * - Asesor humano integrado
+ * - Acumulacion inteligente de datos (no sobrescribe con null)
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
@@ -114,6 +114,24 @@ async function handle(from, message, context) {
     default:
       return await mostrarMenuPrincipal(from, context, cfg);
   }
+}
+
+// ============================================
+// UTILIDAD: Merge inteligente (no sobrescribe con null)
+// ============================================
+function mergeDatasSinNull(acumulado, nuevo) {
+  if (!nuevo) return acumulado;
+  
+  const resultado = { ...acumulado };
+  
+  for (const key in nuevo) {
+    // Solo sobrescribir si el nuevo valor NO es null/undefined/empty
+    if (nuevo[key] !== null && nuevo[key] !== undefined && nuevo[key] !== '') {
+      resultado[key] = nuevo[key];
+    }
+  }
+  
+  return resultado;
 }
 
 // ============================================
@@ -281,7 +299,7 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     context,
     historial,
     datosCliente,
-    from  // <-- Pasar whatsapp para precios personalizados
+    from
   );
 
   if (resultado.error) {
@@ -289,16 +307,18 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return;
   }
 
+  // IMPORTANTE: Merge inteligente - no sobrescribir datos con null
   if (resultado.datosExtraidos) {
-    datosAcumulados = {
-      ...datosAcumulados,
-      ...resultado.datosExtraidos
-    };
+    datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
+
+  // Log para debug
+  console.log('Datos acumulados:', JSON.stringify(datosAcumulados));
 
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
+  // Verificar si pedido completo
   if (resultado.pedidoCompleto && datosAcumulados.producto_codigo && datosAcumulados.cantidad) {
     stateManager.updateData(from, negocio.id, {
       historial,
@@ -319,6 +339,8 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
+  console.log('confirmarPedidoIA - datos recibidos:', JSON.stringify(datos));
+
   // Obtener productos con precios personalizados del cliente
   let productos = [];
   try {
@@ -327,12 +349,23 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     productos = await sheets.getProductos('ACTIVO');
   }
 
-  const producto = productos.find(p => 
-    p.codigo === datos.producto_codigo || 
-    p.nombre.toLowerCase().includes((datos.producto_nombre || '').toLowerCase())
-  );
+  // Buscar producto por codigo o nombre
+  let producto = null;
+  
+  if (datos.producto_codigo) {
+    producto = productos.find(p => p.codigo === datos.producto_codigo);
+  }
+  
+  if (!producto && datos.producto_nombre) {
+    producto = productos.find(p => 
+      p.nombre.toLowerCase().includes(datos.producto_nombre.toLowerCase())
+    );
+  }
 
   if (!producto) {
+    console.log('Producto no encontrado. Codigo:', datos.producto_codigo, 'Nombre:', datos.producto_nombre);
+    console.log('Productos disponibles:', productos.map(p => p.codigo).join(', '));
+    
     await whatsapp.sendMessage(from, 
       'No pude identificar el producto. Podrias indicarme nuevamente cual deseas?'
     );
@@ -340,7 +373,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   }
 
   const cantidad = parseFloat(datos.cantidad) || cfg.minimoCompra;
-  const precioUnitario = producto.precio; // Ya viene con precio especial si existe
+  const precioUnitario = producto.precio;
   const total = cantidad * precioUnitario;
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
@@ -361,7 +394,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     'Precio unitario: S/' + precioUnitario + '\n' +
     'Total: S/' + total.toFixed(2) + '\n';
 
-  // Indicar si tiene precio especial
   if (producto.tieneDescuento) {
     mensaje += '(Precio especial aplicado)\n';
   }
