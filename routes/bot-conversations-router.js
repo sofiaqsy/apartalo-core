@@ -24,10 +24,24 @@ function cleanPhone(phone) {
   return (phone || '').replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
 }
 
+/**
+ * Obtener fecha/hora actual en zona horaria de Perú (UTC-5)
+ * Devuelve ISO string con la hora correcta de Perú
+ */
 function getPeruDateTime() {
+  // Crear fecha con timezone de Perú
   const now = new Date();
-  const peruTime = new Date(now.getTime() - (5 * 60 * 60 * 1000));
-  return peruTime.toISOString();
+  const peruDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Lima' }));
+  
+  // Formatear como ISO pero con la hora de Perú
+  const year = peruDate.getFullYear();
+  const month = String(peruDate.getMonth() + 1).padStart(2, '0');
+  const day = String(peruDate.getDate()).padStart(2, '0');
+  const hours = String(peruDate.getHours()).padStart(2, '0');
+  const minutes = String(peruDate.getMinutes()).padStart(2, '0');
+  const seconds = String(peruDate.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 async function getDatosUltimosMensajes(sheets, conversacionId, estado) {
