@@ -99,19 +99,21 @@ class NegociosService {
     if (!row[0]) return null;
 
     const whatsappTipo = row[2] || 'COMPARTIDO';
+    const phoneIdFromSheet = row[3] || '';
+    const tokenFromSheet = row[4] || '';
+
+    // IMPORTANTE: Si es PROPIO pero no tiene credenciales, usar las compartidas
+    // También usar compartidas si el tipo es COMPARTIDO
+    const useShared = whatsappTipo === 'COMPARTIDO' || !phoneIdFromSheet || !tokenFromSheet;
 
     return {
       id: row[0],
       nombre: row[1] || row[0],
 
       whatsapp: {
-        tipo: whatsappTipo,
-        phoneId: whatsappTipo === 'PROPIO'
-          ? row[3]
-          : config.whatsappShared.phoneId,
-        token: whatsappTipo === 'PROPIO'
-          ? row[4]
-          : config.whatsappShared.token,
+        tipo: useShared ? 'COMPARTIDO' : 'PROPIO',
+        phoneId: useShared ? config.whatsappShared.phoneId : phoneIdFromSheet,
+        token: useShared ? config.whatsappShared.token : tokenFromSheet,
         webhookPath: row[6] || `/webhook/${row[0]}`,
         admin: row[7] || null,
         prefijo: row[10] || row[0].substring(0, 4).toUpperCase()
