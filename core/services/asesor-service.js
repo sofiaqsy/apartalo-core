@@ -19,6 +19,24 @@ class AsesorService {
   }
 
   /**
+   * Obtener fecha/hora actual en zona horaria de Perú (UTC-5)
+   * Devuelve ISO string con la hora correcta de Perú
+   */
+  getPeruDateTime() {
+    const now = new Date();
+    const peruDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Lima' }));
+    
+    const year = peruDate.getFullYear();
+    const month = String(peruDate.getMonth() + 1).padStart(2, '0');
+    const day = String(peruDate.getDate()).padStart(2, '0');
+    const hours = String(peruDate.getHours()).padStart(2, '0');
+    const minutes = String(peruDate.getMinutes()).padStart(2, '0');
+    const seconds = String(peruDate.getSeconds()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  }
+
+  /**
    * Verificar estado de conversación del usuario
    * @returns {string|null} - 'ACTIVA', 'LISTENING', 'CERRADA' o null
    */
@@ -101,7 +119,7 @@ class AsesorService {
     
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
-      const timestamp = new Date().toISOString();
+      const timestamp = this.getPeruDateTime();
 
       // Buscar nombre del cliente
       let nombreCliente = 'Cliente';
@@ -190,7 +208,7 @@ class AsesorService {
       const conversacion = await this.obtenerConversacionExistente(from, sheets);
       
       if (conversacion && conversacion.estado === 'ACTIVA') {
-        const timestamp = new Date().toISOString();
+        const timestamp = this.getPeruDateTime();
         await sheets.updateCell(`Conversaciones_Asesor!E${conversacion.rowIndex}`, 'LISTENING');
         await sheets.updateCell(`Conversaciones_Asesor!F${conversacion.rowIndex}`, timestamp);
         await sheets.updateCell(`Conversaciones_Asesor!H${conversacion.rowIndex}`, timestamp);
@@ -211,7 +229,7 @@ class AsesorService {
   async guardarMensaje(conversacionId, from, mensaje, tipo, sheets) {
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
-      const timestamp = new Date().toISOString();
+      const timestamp = this.getPeruDateTime();
       const msgId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
       await sheets.appendRow('Mensajes', [
@@ -254,7 +272,7 @@ class AsesorService {
       } else {
         // Crear nueva conversación LISTENING (primera vez)
         conversacionId = `CONV-${Date.now()}`;
-        const timestamp = new Date().toISOString();
+        const timestamp = this.getPeruDateTime();
         
         await sheets.appendRow('Conversaciones_Asesor', [
           conversacionId,
