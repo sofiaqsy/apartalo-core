@@ -7,13 +7,9 @@
  * 
  * FEATURES:
  * - Guarda relación usuario-negocio en Sheets para persistencia
- * - Registra TODOS los mensajes (cliente y bot) para historial
+ * - Registra TODOS los mensajes (cliente y bot) en Sheets Y Firestore
  * - Soporta modo asesor (bloquea bot cuando asesor está activo)
- * 
- * HANDLERS:
- * - UNIFICADO: Handler principal (por defecto para todos)
- * - CUSTOM: Si existe /handlers/{negocioId} con handle válido, lo usa
- * - ESTANDAR: Fallback legacy (handlers/estandar)
+ * - Push notifications via FCM
  */
 
 const express = require('express');
@@ -26,6 +22,7 @@ const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
 const asesorService = require('../core/services/asesor-service');
 const mensajeLogger = require('../core/services/mensaje-logger');
+const firebaseService = require('../core/services/firebase-service');
 
 // Handlers
 let unificadoHandler = null;  // Handler principal
@@ -270,19 +267,51 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
   console.log(`   Tipo: ${type}`);
   console.log(`   Texto: ${text}`);
 
+  // Buscar nombre del cliente para Firestore
+  let nombreCliente = 'Cliente';
+  try {
+    const cliente = await context.sheets.buscarCliente(from);
+    if (cliente) {
+      nombreCliente = cliente.contacto || cliente.empresa || cliente.nombre || 'Cliente';
+    }
+  } catch (e) {}
+
   // ============================================
-  // VERIFICAR MODO ASESOR PRIMERO
+  // GUARDAR EN FIRESTORE (SIEMPRE)
+  // ============================================
+  try {
+    await firebaseService.guardarMensaje(negocio.id, from, {
+      texto: text || `[${type}]`,
+      origen: 'cliente',
+      tipo: type,
+      nombreCliente,
+      mediaUrl: mediaId ? `media:${mediaId}` : null
+    });
+    console.log(`   🔥 Mensaje guardado en Firestore`);
+  } catch (e) {
+    console.log(`   ⚠️ Error guardando en Firestore: ${e.message}`);
+  }
+
+  // ============================================
+  // VERIFICAR MODO ASESOR
   // ============================================
   const modoAsesorActivo = await asesorService.debeBloquerBot(from, context.sheets);
   
   if (modoAsesorActivo) {
     console.log('👤 MODO ASESOR ACTIVO - Bot NO responde');
     
+    // Enviar push notification al negocio
+    await firebaseService.notificarMensajeSoporte(negocio.id, {
+      whatsapp: from,
+      nombreCliente,
+      texto: text || `[${type}]`
+    });
+    
     // Verificar si quiere salir del modo asesor
     const textLower = (text || '').toLowerCase().trim();
     if (textLower === 'menu' || textLower === 'menú' || textLower === 'salir') {
       // Salir del modo asesor
-      await asesorService.desactivarModoAsesor(from, context.sheets);
+      await asesorService.desactivarModoAsesor(from, context.sheets, negocio.id);
       await context.whatsapp.sendMessage(from, 
         '👋 Has salido del modo de asesoría.\n\nVolviendo al menú principal...'
       );
@@ -291,10 +320,10 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
       // Resetear estado y continuar al handler
       stateManager.resetState(from, negocio.id);
     } else {
-      // Guardar mensaje para el asesor (solo aquí, no en mensajeLogger)
+      // Guardar mensaje para el asesor en Sheets también
       const conversacionId = await asesorService.obtenerConversacionId(from, context.sheets);
       if (conversacionId) {
-        await asesorService.guardarMensaje(conversacionId, from, text, 'CLIENTE', context.sheets);
+        await asesorService.guardarMensaje(conversacionId, from, text, 'CLIENTE', context.sheets, negocio.id);
       }
       // NO marcar como leído (queda en gris para el cliente)
       // NO responder
@@ -353,13 +382,25 @@ async function createContext(negocio, useSharedCredentials = false) {
   const sheets = new SheetsService(negocio.spreadsheetId);
   await sheets.initialize();
 
-  // Wrapper para registrar mensajes del bot
+  // Wrapper para registrar mensajes del bot en Sheets Y Firestore
   const originalSendMessage = whatsapp.sendMessage.bind(whatsapp);
   whatsapp.sendMessage = async (to, message) => {
     const result = await originalSendMessage(to, message);
+    
+    // Guardar en Sheets
     try {
       await mensajeLogger.logMensajeBot(to, message, sheets);
     } catch (e) {}
+    
+    // Guardar en Firestore
+    try {
+      await firebaseService.guardarMensaje(negocio.id, to, {
+        texto: message,
+        origen: 'bot',
+        tipo: 'text'
+      });
+    } catch (e) {}
+    
     return result;
   };
 
@@ -369,6 +410,7 @@ async function createContext(negocio, useSharedCredentials = false) {
     sheets,
     stateManager,
     asesorService,
+    firebaseService,
     hasFeature: (feature) => negocio.features.includes(feature),
     config: negocio.configExtra || {}
   };
