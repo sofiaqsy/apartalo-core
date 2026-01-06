@@ -20,6 +20,7 @@ const negociosService = require('./config/negocios');
 // Servicios core
 const SheetsService = require('./core/services/sheets-service');
 const DriveService = require('./core/services/drive-service');
+const firebaseService = require('./core/services/firebase-service');
 const stateManager = require('./core/services/state-manager');
 
 // Rutas
@@ -89,7 +90,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     negocios: negociosService.getAll().length,
-    states: stateManager.getStats()
+    states: stateManager.getStats(),
+    firebase: firebaseService.initialized
   });
 });
 
@@ -181,6 +183,10 @@ async function initialize() {
     console.log('   ⚠️ Google Drive:', e.message);
   }
 
+  // Firebase (Firestore + FCM)
+  const firebaseOk = await firebaseService.initialize();
+  console.log(`   ${firebaseOk ? '✅' : '⚠️'} Firebase (Firestore + FCM)`);
+
   // 2. Cargar negocios
   console.log('\n🏪 Cargando negocios...');
   
@@ -227,6 +233,7 @@ async function initialize() {
 ║   👥 Clientes: /api/clientes/:businessId                 ║
 ║   📦 Pedidos: /api/pedidos/:businessId                   ║
 ║   🤖 Bot: /api/bot                                       ║
+║   🔥 Firebase: ${firebaseOk ? 'ACTIVO' : 'NO CONFIGURADO'}                              ║
 ║   ❤️ Health: /health                                     ║
 ║                                                          ║
 ║   📦 Negocios: ${negocios.length.toString().padEnd(40)}║
