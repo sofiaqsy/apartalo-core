@@ -2,6 +2,7 @@
  * APARTALO CORE - Asesor Service
  * 
  * Servicio común para manejo de conversaciones con asesor humano.
+ * Guarda en Sheets Y Firestore para sincronización con la app.
  * 
  * REGLA IMPORTANTE: Solo 1 conversación por cliente (WhatsApp)
  * - Si ya existe una conversación (cualquier estado), se reutiliza
@@ -12,6 +13,8 @@
  * - ACTIVA: Asesor humano activo, bot NO responde
  * - CERRADA: Conversación finalizada (puede reactivarse)
  */
+
+const firebaseService = require('./firebase-service');
 
 class AsesorService {
   constructor() {
@@ -169,9 +172,19 @@ class AsesorService {
         // Guardar resumen de contexto
         await this.guardarMensaje(conversacionId, from, 
           await this.generarResumenContexto(from, context),
-          'SISTEMA', sheets
+          'SISTEMA', sheets, negocio.id
         );
       }
+
+      // Guardar en Firestore - cambiar modo a soporte
+      await firebaseService.cambiarModo(negocio.id, cleanFrom, 'soporte');
+
+      // Notificar al negocio
+      await firebaseService.notificarMensajeSoporte(negocio.id, {
+        whatsapp: cleanFrom,
+        nombreCliente,
+        texto: '🆘 Cliente solicitó hablar con asesor'
+      });
 
       // Guardar en memoria
       this.conversacionesActivas.set(from, {
@@ -203,8 +216,9 @@ class AsesorService {
   /**
    * Desactivar modo asesor (cuando cliente escribe "menu")
    */
-  async desactivarModoAsesor(from, sheets) {
+  async desactivarModoAsesor(from, sheets, negocioId = null) {
     try {
+      const cleanFrom = this.limpiarWhatsapp(from);
       const conversacion = await this.obtenerConversacionExistente(from, sheets);
       
       if (conversacion && conversacion.estado === 'ACTIVA') {
@@ -213,6 +227,11 @@ class AsesorService {
         await sheets.updateCell(`Conversaciones_Asesor!F${conversacion.rowIndex}`, timestamp);
         await sheets.updateCell(`Conversaciones_Asesor!H${conversacion.rowIndex}`, timestamp);
         console.log(`🔄 [ASESOR] Conversación ${conversacion.id} cerrada (ahora LISTENING)`);
+      }
+
+      // Cambiar modo en Firestore a bot
+      if (negocioId) {
+        await firebaseService.cambiarModo(negocioId, cleanFrom, 'bot');
       }
 
       this.conversacionesActivas.delete(from);
@@ -224,14 +243,15 @@ class AsesorService {
   }
 
   /**
-   * Guardar mensaje en hoja Mensajes
+   * Guardar mensaje en hoja Mensajes Y en Firestore
    */
-  async guardarMensaje(conversacionId, from, mensaje, tipo, sheets) {
+  async guardarMensaje(conversacionId, from, mensaje, tipo, sheets, negocioId = null) {
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
       const timestamp = this.getPeruDateTime();
       const msgId = `MSG-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
+      // Guardar en Sheets
       await sheets.appendRow('Mensajes', [
         msgId,
         conversacionId,
@@ -240,6 +260,16 @@ class AsesorService {
         mensaje,
         cleanFrom
       ]);
+
+      // Guardar en Firestore
+      if (negocioId) {
+        const origen = tipo === 'CLIENTE' ? 'cliente' : (tipo === 'ASESOR' ? 'negocio' : 'bot');
+        await firebaseService.guardarMensaje(negocioId, cleanFrom, {
+          texto: mensaje,
+          origen,
+          tipo: 'text'
+        });
+      }
 
       // Actualizar última actividad
       const conversacion = await this.obtenerConversacionExistente(from, sheets);
@@ -258,7 +288,7 @@ class AsesorService {
    * Guardar mensaje automático (para tracking)
    * IMPORTANTE: Reutiliza conversación existente, solo crea si no existe ninguna
    */
-  async guardarMensajeAuto(from, mensaje, tipo, sheets, nombreCliente = 'Cliente') {
+  async guardarMensajeAuto(from, mensaje, tipo, sheets, nombreCliente = 'Cliente', negocioId = null) {
     try {
       const cleanFrom = this.limpiarWhatsapp(from);
       
@@ -288,8 +318,8 @@ class AsesorService {
         console.log(`📝 [ASESOR] Conversación LISTENING creada: ${conversacionId}`);
       }
 
-      // Guardar mensaje
-      return await this.guardarMensaje(conversacionId, from, mensaje, tipo, sheets);
+      // Guardar mensaje en Sheets y Firestore
+      return await this.guardarMensaje(conversacionId, from, mensaje, tipo, sheets, negocioId);
     } catch (error) {
       console.log('⚠️ Error en guardarMensajeAuto:', error.message);
       return { success: false };
