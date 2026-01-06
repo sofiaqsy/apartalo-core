@@ -72,6 +72,19 @@ class FirebaseService {
   }
 
   /**
+   * Limpiar objeto de valores undefined
+   */
+  limpiarUndefined(obj) {
+    const limpio = {};
+    for (const key in obj) {
+      if (obj[key] !== undefined && obj[key] !== null) {
+        limpio[key] = obj[key];
+      }
+    }
+    return limpio;
+  }
+
+  /**
    * Crear o actualizar conversación
    */
   async actualizarConversacion(businessId, whatsapp, datos) {
@@ -81,21 +94,25 @@ class FirebaseService {
       const docRef = this.conversacionesRef(businessId).doc(whatsapp);
       const doc = await docRef.get();
 
+      // Limpiar datos de valores undefined
+      const datosLimpios = this.limpiarUndefined(datos);
+
       if (doc.exists) {
-        // Actualizar existente
-        await docRef.update({
-          ...datos,
+        // Actualizar existente - solo campos definidos
+        const updateData = {
+          ...datosLimpios,
           ultimoMensaje: admin.firestore.FieldValue.serverTimestamp()
-        });
+        };
+        await docRef.update(updateData);
       } else {
         // Crear nueva
         await docRef.set({
           whatsapp,
-          nombre: datos.nombre || whatsapp,
-          modo: datos.modo || 'bot',
-          ultimoTexto: datos.ultimoTexto || '',
+          nombre: datosLimpios.nombre || whatsapp,
+          modo: datosLimpios.modo || 'bot',
+          ultimoTexto: datosLimpios.ultimoTexto || '',
           ultimoMensaje: admin.firestore.FieldValue.serverTimestamp(),
-          noLeidos: datos.noLeidos || 0,
+          noLeidos: datosLimpios.noLeidos || 0,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
       }
@@ -114,9 +131,14 @@ class FirebaseService {
     if (!this.initialized) return;
 
     try {
-      await this.conversacionesRef(businessId).doc(whatsapp).update({
-        noLeidos: admin.firestore.FieldValue.increment(1)
-      });
+      const docRef = this.conversacionesRef(businessId).doc(whatsapp);
+      const doc = await docRef.get();
+      
+      if (doc.exists) {
+        await docRef.update({
+          noLeidos: admin.firestore.FieldValue.increment(1)
+        });
+      }
     } catch (error) {
       console.error('❌ Error incrementando no leídos:', error.message);
     }
@@ -129,7 +151,23 @@ class FirebaseService {
     if (!this.initialized) return false;
 
     try {
-      await this.conversacionesRef(businessId).doc(whatsapp).update({ modo });
+      const docRef = this.conversacionesRef(businessId).doc(whatsapp);
+      const doc = await docRef.get();
+      
+      if (doc.exists) {
+        await docRef.update({ modo });
+      } else {
+        // Crear conversación si no existe
+        await docRef.set({
+          whatsapp,
+          nombre: whatsapp,
+          modo: modo || 'bot',
+          ultimoTexto: '',
+          ultimoMensaje: admin.firestore.FieldValue.serverTimestamp(),
+          noLeidos: 0,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
       return true;
     } catch (error) {
       console.error('❌ Error cambiando modo:', error.message);
@@ -161,13 +199,21 @@ class FirebaseService {
         leido: mensaje.origen !== 'cliente'
       });
 
-      // Actualizar conversación
+      // Actualizar conversación - solo con valores definidos
       const esDelCliente = mensaje.origen === 'cliente';
-      await this.actualizarConversacion(businessId, whatsapp, {
-        nombre: mensaje.nombreCliente,
-        ultimoTexto: this.truncarTexto(mensaje.texto, 100),
-        modo: mensaje.modo
-      });
+      const datosConv = {
+        ultimoTexto: this.truncarTexto(mensaje.texto, 100)
+      };
+      
+      // Solo agregar si están definidos
+      if (mensaje.nombreCliente) {
+        datosConv.nombre = mensaje.nombreCliente;
+      }
+      if (mensaje.modo) {
+        datosConv.modo = mensaje.modo;
+      }
+      
+      await this.actualizarConversacion(businessId, whatsapp, datosConv);
 
       // Incrementar no leídos si es del cliente
       if (esDelCliente) {
@@ -357,7 +403,7 @@ class FirebaseService {
       body: this.truncarTexto(datos.texto, 100),
       data: {
         type: 'mensaje_soporte',
-        whatsapp: datos.whatsapp,
+        whatsapp: datos.whatsapp || '',
         nombreCliente: datos.nombreCliente || ''
       },
       badge: datos.noLeidos || 1
@@ -373,9 +419,9 @@ class FirebaseService {
       body: `${pedido.cliente} - S/ ${pedido.total.toFixed(2)}`,
       data: {
         type: 'nuevo_pedido',
-        pedidoId: pedido.id,
-        cliente: pedido.cliente,
-        total: pedido.total.toString()
+        pedidoId: pedido.id || '',
+        cliente: pedido.cliente || '',
+        total: pedido.total?.toString() || '0'
       }
     });
   }
@@ -389,7 +435,7 @@ class FirebaseService {
       body: `Pedido ${pedido.id} - Validar pago`,
       data: {
         type: 'voucher_recibido',
-        pedidoId: pedido.id
+        pedidoId: pedido.id || ''
       }
     });
   }
