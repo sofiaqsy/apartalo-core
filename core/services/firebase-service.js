@@ -180,7 +180,7 @@ class FirebaseService {
   // ============================================
 
   /**
-   * Guardar mensaje en Firestore (CON PREVENCIÓN DE DUPLICADOS)
+   * Guardar mensaje en Firestore (CON PREVENCIÓN DE DUPLICADOS - SIN ÍNDICE)
    */
   async guardarMensaje(businessId, whatsapp, mensaje) {
     if (!this.initialized) return null;
@@ -189,19 +189,27 @@ class FirebaseService {
       const texto = mensaje.texto || '';
       const origen = mensaje.origen || 'cliente';
 
-      // 🔥 PREVENCIÓN DE DUPLICADOS: Verificar si el mensaje ya existe
-      const hace10Seg = new Date(Date.now() - 10000); // Últimos 10 segundos
+      // 🔥 PREVENCIÓN DE DUPLICADOS - Query simple sin índice compuesto
+      // Solo filtramos por timestamp, luego verificamos en memoria
+      const hace10Seg = new Date(Date.now() - 10000);
       
-      const duplicadosQuery = await this.mensajesRef(businessId, whatsapp)
-        .where('texto', '==', texto)
-        .where('origen', '==', origen)
-        .where('timestamp', '>=', hace10Seg)
-        .limit(1)
-        .get();
+      try {
+        const mensajesRecientes = await this.mensajesRef(businessId, whatsapp)
+          .where('timestamp', '>=', hace10Seg)
+          .limit(20)
+          .get();
 
-      if (!duplicadosQuery.empty) {
-        console.log(`⚠️ Mensaje duplicado detectado en Firestore (${whatsapp}): "${texto.substring(0, 30)}..."`);
-        return duplicadosQuery.docs[0].id;
+        // Buscar duplicado en memoria
+        for (const doc of mensajesRecientes.docs) {
+          const data = doc.data();
+          if (data.texto === texto && data.origen === origen) {
+            console.log(`⚠️ Mensaje duplicado detectado (${whatsapp}): "${texto.substring(0, 30)}..."`);
+            return doc.id;
+          }
+        }
+      } catch (queryError) {
+        // Si falla la query, continuar sin verificar (mejor guardar que perder el mensaje)
+        console.log(`⚠️ No se pudo verificar duplicados: ${queryError.message}`);
       }
 
       // No es duplicado, guardar mensaje
