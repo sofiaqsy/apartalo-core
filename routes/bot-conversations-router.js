@@ -218,7 +218,7 @@ router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, r
 
 // ============================================
 // POST /bot/conversaciones/:businessId/:conversacionId/enviar
-// Enviar mensaje como asesor
+// Enviar mensaje como asesor (CON PREVENCIÓN DE DUPLICADOS)
 // ============================================
 
 router.post('/conversaciones/:businessId/:conversacionId/enviar', async (req, res) => {
@@ -256,28 +256,71 @@ router.post('/conversaciones/:businessId/:conversacionId/enviar', async (req, re
       return res.status(404).json({ error: 'Conversación no encontrada' });
     }
 
+    // 🔥 PREVENCIÓN DE DUPLICADOS: Verificar si el mensaje ya existe
+    const mensajesRows = await sheets.getRows('Mensajes!A:F');
+    const ahora = new Date();
+    const hace10Seg = new Date(ahora.getTime() - 10000); // Últimos 10 segundos
+    
+    // Buscar mensaje duplicado reciente
+    for (let i = mensajesRows.length - 1; i >= 1; i--) {
+      const row = mensajesRows[i];
+      const msgConvId = row[1];
+      const msgTimestamp = row[2];
+      const msgTipo = row[3];
+      const msgTexto = row[4];
+      
+      // Si es de esta conversación y es muy reciente
+      if (msgConvId === conversacionId && msgTipo === 'ASESOR') {
+        try {
+          const msgDate = new Date(msgTimestamp);
+          
+          // Si es de hace menos de 10 segundos y con el mismo texto
+          if (msgDate >= hace10Seg && msgTexto === mensaje) {
+            console.log(`⚠️ Mensaje duplicado detectado (${conversacionId}): "${mensaje.substring(0, 30)}..."`);
+            return res.json({ 
+              success: true, 
+              messageId: row[0],
+              to: conversacion.whatsapp,
+              duplicado: true,
+              mensaje: 'Mensaje ya enviado'
+            });
+          }
+        } catch (e) {
+          // Ignorar errores de parsing de fecha
+        }
+      }
+      
+      // Solo revisar los últimos 20 mensajes para optimizar
+      if (mensajesRows.length - i > 20) break;
+    }
+
     // Enviar por WhatsApp
     const whatsapp = new WhatsAppService(negocio.whatsapp);
     await whatsapp.sendMessage(conversacion.whatsapp, mensaje);
 
     // Guardar mensaje en Sheets
     const msgId = `MSG-${Date.now()}`;
+    const timestamp = getPeruDateTime();
+    
     await sheets.appendRow('Mensajes', [
       msgId,
       conversacionId,
-      getPeruDateTime(),
+      timestamp,
       'ASESOR',
       mensaje,
       asesor || 'Asesor'
     ]);
 
+    console.log(`✅ Mensaje enviado (${conversacionId}): "${mensaje.substring(0, 30)}..." [${msgId}]`);
+
     // Actualizar última actividad de la conversación
-    await sheets.updateCell(`Conversaciones_Asesor!F${convRowIndex}`, getPeruDateTime());
+    await sheets.updateCell(`Conversaciones_Asesor!F${convRowIndex}`, timestamp);
 
     res.json({ 
       success: true, 
       messageId: msgId,
-      to: conversacion.whatsapp 
+      to: conversacion.whatsapp,
+      timestamp
     });
   } catch (error) {
     console.error('Error enviando mensaje:', error);
