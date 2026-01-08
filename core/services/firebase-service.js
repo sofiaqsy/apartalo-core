@@ -180,29 +180,49 @@ class FirebaseService {
   // ============================================
 
   /**
-   * Guardar mensaje en Firestore
+   * Guardar mensaje en Firestore (CON PREVENCIÓN DE DUPLICADOS)
    */
   async guardarMensaje(businessId, whatsapp, mensaje) {
     if (!this.initialized) return null;
 
     try {
+      const texto = mensaje.texto || '';
+      const origen = mensaje.origen || 'cliente';
+
+      // 🔥 PREVENCIÓN DE DUPLICADOS: Verificar si el mensaje ya existe
+      const hace10Seg = new Date(Date.now() - 10000); // Últimos 10 segundos
+      
+      const duplicadosQuery = await this.mensajesRef(businessId, whatsapp)
+        .where('texto', '==', texto)
+        .where('origen', '==', origen)
+        .where('timestamp', '>=', hace10Seg)
+        .limit(1)
+        .get();
+
+      if (!duplicadosQuery.empty) {
+        console.log(`⚠️ Mensaje duplicado detectado en Firestore (${whatsapp}): "${texto.substring(0, 30)}..."`);
+        return duplicadosQuery.docs[0].id;
+      }
+
+      // No es duplicado, guardar mensaje
       const ahora = admin.firestore.FieldValue.serverTimestamp();
 
-      // Guardar mensaje
       const docRef = await this.mensajesRef(businessId, whatsapp).add({
-        texto: mensaje.texto || '',
-        origen: mensaje.origen || 'cliente', // 'cliente', 'negocio', 'bot'
+        texto: texto,
+        origen: origen, // 'cliente', 'negocio', 'bot'
         tipo: mensaje.tipo || 'text', // 'text', 'image', 'audio', 'document', 'location'
         mediaUrl: mensaje.mediaUrl || null,
         metadata: mensaje.metadata || null,
         timestamp: ahora,
-        leido: mensaje.origen !== 'cliente'
+        leido: origen !== 'cliente'
       });
 
+      console.log(`✅ Mensaje guardado en Firestore (${whatsapp}): "${texto.substring(0, 30)}..." [${docRef.id}]`);
+
       // Actualizar conversación - solo con valores definidos
-      const esDelCliente = mensaje.origen === 'cliente';
+      const esDelCliente = origen === 'cliente';
       const datosConv = {
-        ultimoTexto: this.truncarTexto(mensaje.texto, 100)
+        ultimoTexto: this.truncarTexto(texto, 100)
       };
       
       // Solo agregar si están definidos
