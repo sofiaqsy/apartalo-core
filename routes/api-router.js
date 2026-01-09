@@ -9,6 +9,7 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
+const firebaseService = require('../core/services/firebase-service');
 
 function parseDecimal(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -35,6 +36,112 @@ function getPeruDateTime() {
 function formatPeruDate() {
   return getPeruDateTime().fecha;
 }
+
+// ==================== PUSH NOTIFICATIONS ====================
+
+/**
+ * Registrar token FCM para push notifications
+ * POST /api/push-token/:businessId
+ */
+router.post('/push-token/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { token, platform, appVersion } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Campo requerido: token' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    // Inicializar Firebase si no está inicializado
+    await firebaseService.initialize();
+
+    const result = await firebaseService.guardarTokenPush(businessId, token, {
+      platform: platform || 'unknown',
+      appVersion: appVersion || '1.0.0'
+    });
+
+    if (result) {
+      console.log(`✅ Token FCM registrado para ${businessId}`);
+      res.status(201).json({ 
+        success: true, 
+        mensaje: 'Token registrado correctamente' 
+      });
+    } else {
+      res.status(500).json({ error: 'Error guardando token' });
+    }
+  } catch (error) {
+    console.error('❌ Error registrando token FCM:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Eliminar token FCM (al cerrar sesión)
+ * DELETE /api/push-token/:businessId
+ */
+router.delete('/push-token/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Campo requerido: token' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    await firebaseService.initialize();
+    const result = await firebaseService.eliminarTokenPush(businessId, token);
+
+    res.json({ 
+      success: result, 
+      mensaje: result ? 'Token eliminado' : 'Token no encontrado' 
+    });
+  } catch (error) {
+    console.error('❌ Error eliminando token FCM:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Enviar notificación de prueba
+ * POST /api/push-token/:businessId/test
+ */
+router.post('/push-token/:businessId/test', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { title, body } = req.body;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) {
+      return res.status(404).json({ error: 'Negocio no encontrado' });
+    }
+
+    await firebaseService.initialize();
+    const result = await firebaseService.enviarNotificacion(businessId, {
+      title: title || '🔔 Prueba de Notificación',
+      body: body || 'Esta es una notificación de prueba desde ApartaLo',
+      data: { type: 'test' }
+    });
+
+    res.json({ 
+      success: true, 
+      enviados: result.success,
+      fallidos: result.failure
+    });
+  } catch (error) {
+    console.error('❌ Error enviando notificación:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // MENSAJES
 router.post('/mensaje', async (req, res) => {
