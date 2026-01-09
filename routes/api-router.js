@@ -348,12 +348,32 @@ router.post('/pedidos/:businessId', async (req, res) => {
 
     await sheets.appendRow('Pedidos', valores);
 
+    // Notificar al cliente por WhatsApp
     if (notificarCliente && whatsapp !== '000000000') {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
         const mensaje = `✅ *Pedido Registrado*\n\n📦 Pedido: *${pedidoId}*\n💰 Total: *S/ ${totalNumero.toFixed(2)}*\n📝 Productos: ${productosStr}\n\n¡Gracias por tu compra!`;
         await whatsappService.sendMessage(whatsapp, mensaje);
-      } catch (e) { console.log('⚠️ Error notificando:', e.message); }
+      } catch (e) { console.log('⚠️ Error notificando al cliente:', e.message); }
+    }
+
+    // 🔔 Enviar push notification al negocio
+    try {
+      await firebaseService.initialize();
+      await firebaseService.enviarNotificacion(businessId, {
+        title: '🛒 Nuevo Pedido',
+        body: `${cliente || 'Cliente'} - S/ ${totalNumero.toFixed(2)}`,
+        data: {
+          type: 'nuevo_pedido',
+          pedidoId: pedidoId,
+          cliente: cliente || '',
+          total: totalNumero.toString(),
+          whatsapp: whatsapp
+        }
+      });
+      console.log(`🔔 Push notification enviada para pedido ${pedidoId}`);
+    } catch (e) {
+      console.log('⚠️ Error enviando push notification:', e.message);
     }
 
     console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal}`);
