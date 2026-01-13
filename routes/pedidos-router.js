@@ -9,6 +9,42 @@ const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 
+// ==================== HELPER PARA PARSEAR EVIDENCIAS ====================
+
+/**
+ * Parsea el campo de evidencias desde string JSON o formato antiguo
+ */
+function parseEvidencias(voucherUrlsRaw) {
+  if (!voucherUrlsRaw || voucherUrlsRaw.trim() === '') return [];
+  
+  try {
+    // Intentar parsear como JSON
+    const parsed = JSON.parse(voucherUrlsRaw);
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch (e) {
+    // Formato antiguo: URLs separadas por coma o salto de línea
+    const urls = voucherUrlsRaw.split(/[,\n]/).map(u => u.trim()).filter(u => u);
+    return urls.map((url, index) => ({
+      id: `ev_legacy_${index}`,
+      url,
+      tipo: 'WHATSAPP',
+      fecha: new Date().toISOString(),
+      descripcion: 'Evidencia migrada'
+    }));
+  }
+}
+
+/**
+ * Serializa las evidencias a JSON para guardar en la hoja
+ */
+function serializeEvidencias(evidencias) {
+  if (!evidencias || evidencias.length === 0) return '';
+  return JSON.stringify(evidencias);
+}
+
+// ==================== GET PEDIDOS ====================
+
 router.get('/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
@@ -31,7 +67,8 @@ router.get('/:businessId', async (req, res) => {
         id: row[0] || '', fecha: row[1] || '', hora: row[2] || '', whatsapp: row[3] || '',
         cliente: row[4] || '', telefono: row[5] || '', direccion: row[6] || '',
         productos: row[7] || '', total: parseFloat(row[8]) || 0, estado: row[9] || 'PENDIENTE',
-        voucherUrls: row[10] || '', observaciones: row[11] || '', tipoEnvio: row[12] || '',
+        evidencias: parseEvidencias(row[10]), // Ahora parseamos como evidencias
+        observaciones: row[11] || '', tipoEnvio: row[12] || '',
         empresaEnvio: row[13] || '', origen: row[14] || 'BOT', rowIndex: i + 1
       };
 
@@ -57,6 +94,8 @@ router.get('/:businessId', async (req, res) => {
   }
 });
 
+// ==================== GET PEDIDO BY ID ====================
+
 router.get('/:businessId/:pedidoId', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
@@ -74,7 +113,8 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
           id: rows[i][0], fecha: rows[i][1] || '', hora: rows[i][2] || '', whatsapp: rows[i][3] || '',
           cliente: rows[i][4] || '', telefono: rows[i][5] || '', direccion: rows[i][6] || '',
           productos: rows[i][7] || '', total: parseFloat(rows[i][8]) || 0, estado: rows[i][9] || 'PENDIENTE',
-          voucherUrls: rows[i][10] || '', observaciones: rows[i][11] || '', tipoEnvio: rows[i][12] || '',
+          evidencias: parseEvidencias(rows[i][10]), // Ahora parseamos como evidencias
+          observaciones: rows[i][11] || '', tipoEnvio: rows[i][12] || '',
           empresaEnvio: rows[i][13] || '', origen: rows[i][14] || 'BOT', rowIndex: i + 1
         });
       }
@@ -85,6 +125,145 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== EVIDENCIAS DE PAGO ====================
+
+/**
+ * POST /:businessId/:pedidoId/evidencias
+ * Agregar una evidencia de pago a un pedido
+ */
+router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
+  try {
+    const { businessId, pedidoId } = req.params;
+    const { url, tipo, fecha, descripcion } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'Campo requerido: url' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const rows = await sheets.getRows('Pedidos!A:K');
+
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === pedidoId) {
+        // Obtener evidencias actuales
+        const evidenciasActuales = parseEvidencias(rows[i][10]);
+        
+        // Crear nueva evidencia
+        const nuevaEvidencia = {
+          id: `ev_${Date.now()}`,
+          url,
+          tipo: tipo || 'APP',
+          fecha: fecha || new Date().toISOString(),
+          descripcion: descripcion || ''
+        };
+        
+        // Agregar a la lista
+        evidenciasActuales.push(nuevaEvidencia);
+        
+        // Guardar en la hoja
+        await sheets.updateCell(`Pedidos!K${i + 1}`, serializeEvidencias(evidenciasActuales));
+        
+        console.log(`✅ Evidencia agregada al pedido ${pedidoId}`);
+        
+        return res.json({
+          success: true,
+          evidencia: nuevaEvidencia,
+          totalEvidencias: evidenciasActuales.length
+        });
+      }
+    }
+
+    res.status(404).json({ error: 'Pedido no encontrado' });
+  } catch (error) {
+    console.error('❌ Error agregando evidencia:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /:businessId/:pedidoId/evidencias
+ * Obtener todas las evidencias de un pedido
+ */
+router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
+  try {
+    const { businessId, pedidoId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const rows = await sheets.getRows('Pedidos!A:K');
+
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === pedidoId) {
+        const evidencias = parseEvidencias(rows[i][10]);
+        return res.json({ evidencias });
+      }
+    }
+
+    res.status(404).json({ error: 'Pedido no encontrado' });
+  } catch (error) {
+    console.error('❌ Error obteniendo evidencias:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /:businessId/:pedidoId/evidencias/:evidenciaId
+ * Eliminar una evidencia específica
+ */
+router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res) => {
+  try {
+    const { businessId, pedidoId, evidenciaId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const rows = await sheets.getRows('Pedidos!A:K');
+
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === pedidoId) {
+        // Obtener evidencias actuales
+        let evidencias = parseEvidencias(rows[i][10]);
+        
+        // Filtrar la evidencia a eliminar
+        const evidenciasFiltradas = evidencias.filter(e => e.id !== evidenciaId);
+        
+        if (evidencias.length === evidenciasFiltradas.length) {
+          return res.status(404).json({ error: 'Evidencia no encontrada' });
+        }
+        
+        // Guardar en la hoja
+        await sheets.updateCell(`Pedidos!K${i + 1}`, serializeEvidencias(evidenciasFiltradas));
+        
+        console.log(`🗑️ Evidencia ${evidenciaId} eliminada del pedido ${pedidoId}`);
+        
+        return res.json({
+          success: true,
+          message: 'Evidencia eliminada'
+        });
+      }
+    }
+
+    res.status(404).json({ error: 'Pedido no encontrado' });
+  } catch (error) {
+    console.error('❌ Error eliminando evidencia:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== CREAR PEDIDO ====================
 
 router.post('/:businessId', async (req, res) => {
   try {
@@ -155,12 +334,14 @@ router.post('/:businessId', async (req, res) => {
       } catch (e) { console.error('⚠️ Error notificando cliente:', e.message); }
     }
 
-    res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha, hora, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', productos: productosTexto, total: totalFinal, estado: 'PENDIENTE', origen: 'APP' } });
+    res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha, hora, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', productos: productosTexto, total: totalFinal, estado: 'PENDIENTE', origen: 'APP', evidencias: [] } });
   } catch (error) {
     console.error('❌ Error creando pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== ACTUALIZAR PEDIDO ====================
 
 router.put('/:businessId/:pedidoId', async (req, res) => {
   try {
@@ -215,6 +396,8 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== ELIMINAR PEDIDO ====================
 
 router.delete('/:businessId/:pedidoId', async (req, res) => {
   try {
