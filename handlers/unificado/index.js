@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v3.3
+ * APARTALO CORE - Handler Unificado v3.4
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -19,6 +19,9 @@ const config = require('../../config');
 
 // Instancia del servicio de Drive para subir vouchers
 const driveService = new DriveService();
+
+// Estados finalizados - no mostrar como activos
+const ESTADOS_FINALIZADOS = ['ENTREGADO', 'CANCELADO', 'COMPLETADO'];
 
 /**
  * Manejar mensaje entrante
@@ -145,13 +148,11 @@ async function manejarImagenRecibida(from, mediaId, caption, context, cfg) {
 
   console.log('Imagen recibida de ' + from);
 
-  // Buscar pedidos activos del cliente (cualquier estado excepto ENTREGADO/CANCELADO)
+  // Buscar pedidos activos del cliente (excluir finalizados)
   let pedidosActivos = [];
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
-    pedidosActivos = pedidos.filter(p => 
-      !['ENTREGADO', 'CANCELADO'].includes(p.estado)
-    );
+    pedidosActivos = pedidos.filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
   } catch (e) {
     console.log('Error buscando pedidos:', e.message);
   }
@@ -415,9 +416,7 @@ async function mostrarMenuPrincipal(from, context, cfg) {
   
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
-    pedidosActivos = (pedidos || []).filter(p => 
-      !['ENTREGADO', 'CANCELADO'].includes(p.estado)
-    );
+    pedidosActivos = (pedidos || []).filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
   } catch (e) {}
 
   const saludo = getGreeting();
@@ -443,7 +442,7 @@ async function mostrarMenuPrincipal(from, context, cfg) {
     
     mensaje += 'Que deseas hacer?';
 
-    // Siempre mostrar opcion de enviar voucher si hay pedidos activos
+    // Mostrar opcion de enviar comprobante si hay pedidos activos
     botones = [
       { id: 'enviar_voucher', title: 'Enviar comprobante' },
       { id: 'ver_pedidos', title: 'Ver pedidos' },
@@ -451,12 +450,13 @@ async function mostrarMenuPrincipal(from, context, cfg) {
     ];
 
   } else {
+    // Cliente registrado pero sin pedidos activos - mostrar "Volver a pedir"
     const nombreCliente = cliente?.nombre?.split(' ')[0] || cliente?.empresa || '';
     mensaje = saludo + (nombreCliente ? ' ' + nombreCliente : '') + '\n\n' +
       'Bienvenido de vuelta a ' + negocio.nombre + '\n\nQue deseas hacer?';
 
     botones = [
-      { id: 'pedir', title: 'Nuevo pedido' },
+      { id: 'pedir', title: 'Volver a pedir' },
       { id: 'ver_pedidos', title: 'Mis pedidos' },
       { id: 'contactar', title: 'Contactar' }
     ];
@@ -470,7 +470,7 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
   const { asesorService, whatsapp, hasFeature, stateManager, negocio, sheets } = context;
   const opcion = (interactiveData?.id || text || '').toLowerCase();
 
-  if (opcion.includes('pedir') || opcion === 'pedir' || opcion.includes('catalogo')) {
+  if (opcion.includes('pedir') || opcion === 'pedir' || opcion.includes('catalogo') || opcion.includes('volver')) {
     return await iniciarPedidoConversacional(from, context, cfg);
   }
 
@@ -507,13 +507,11 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
 async function iniciarEnvioVoucher(from, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  // Buscar pedidos activos (cualquier estado excepto ENTREGADO/CANCELADO)
+  // Buscar pedidos activos (excluir finalizados)
   let pedidosActivos = [];
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
-    pedidosActivos = pedidos.filter(p => 
-      !['ENTREGADO', 'CANCELADO'].includes(p.estado)
-    );
+    pedidosActivos = pedidos.filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
   } catch (e) {}
 
   if (pedidosActivos.length === 0) {
@@ -965,9 +963,7 @@ async function mostrarPedidosActivos(from, context, cfg) {
     pedidos = await sheets.getPedidosByWhatsapp(from);
   } catch (e) {}
 
-  const activos = (pedidos || []).filter(p => 
-    !['ENTREGADO', 'CANCELADO'].includes(p.estado)
-  );
+  const activos = (pedidos || []).filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
 
   if (activos.length === 0) {
     await whatsapp.sendButtonMessage(from,
@@ -998,7 +994,7 @@ async function mostrarPedidosActivos(from, context, cfg) {
     mensaje += '\n';
   });
 
-  // Siempre mostrar opcion de enviar comprobante si hay pedidos activos
+  // Mostrar opcion de enviar comprobante si hay pedidos activos
   let botones = [
     { id: 'enviar_voucher', title: 'Enviar comprobante' },
     { id: 'pedir', title: 'Nuevo pedido' },
