@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v3.2
+ * APARTALO CORE - Handler Unificado v3.3
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -202,12 +202,15 @@ async function manejarImagenRecibida(from, mediaId, caption, context, cfg) {
       await firebaseService.notificarVoucherRecibido(negocio.id, pedidoActivo);
     }
 
-    // Confirmar al cliente
+    // Confirmar al cliente con detalle del pedido
+    const detalle = parsearDetallePedido(pedidoActivo);
+    
     await whatsapp.sendMessage(from,
       'COMPROBANTE RECIBIDO\n\n' +
-      'Pedido: ' + pedidoActivo.id + '\n' +
-      'Estado: ' + pedidoActivo.estado + '\n' +
-      'Total: S/' + (pedidoActivo.total || 0).toFixed(2) + '\n\n' +
+      detalle.producto + '\n' +
+      'Cantidad: ' + detalle.cantidad + '\n' +
+      'Precio unitario: S/' + detalle.precioUnitario.toFixed(2) + '\n' +
+      'Total: S/' + detalle.total.toFixed(2) + '\n\n' +
       'Tu comprobante ha sido guardado.\n\n' +
       'Gracias.'
     );
@@ -310,6 +313,62 @@ function formatearProductosParaSheets(productos) {
 }
 
 // ============================================
+// UTILIDAD: Parsear detalle completo de un pedido
+// Extrae: producto, cantidad, precioUnitario, total
+// ============================================
+function parsearDetallePedido(pedido) {
+  const resultado = {
+    producto: 'Producto',
+    cantidad: '1',
+    precioUnitario: 0,
+    total: parseFloat(pedido.total) || 0
+  };
+  
+  const productosStr = pedido.productos || '';
+  
+  try {
+    // Formato: "5x Cafe Blend de tipico, caturra, pache - S/350.00"
+    const match = productosStr.match(/^(\d+)x\s+(.+?)\s+-\s+S\/(\d+\.?\d*)/);
+    if (match) {
+      const cantidadNum = parseFloat(match[1]);
+      resultado.cantidad = match[1];
+      resultado.producto = match[2];
+      const subtotal = parseFloat(match[3]);
+      resultado.precioUnitario = cantidadNum > 0 ? subtotal / cantidadNum : subtotal;
+      resultado.total = subtotal;
+      return resultado;
+    }
+    
+    // Intentar parsear como JSON
+    if (productosStr.startsWith('[') || productosStr.startsWith('{')) {
+      const productos = JSON.parse(productosStr);
+      if (Array.isArray(productos) && productos.length > 0) {
+        const p = productos[0];
+        resultado.producto = p.nombre || p.name || 'Producto';
+        resultado.cantidad = String(p.cantidad || p.qty || 1);
+        resultado.precioUnitario = parseFloat(p.precio || p.price || 0);
+        resultado.total = resultado.precioUnitario * parseFloat(resultado.cantidad);
+        return resultado;
+      }
+    }
+    
+    // Si no se pudo parsear, usar el texto como nombre
+    resultado.producto = productosStr.substring(0, 50) || 'Pedido';
+    
+  } catch (e) {
+    resultado.producto = productosStr.substring(0, 50) || 'Pedido';
+  }
+  
+  // Calcular precio unitario si tenemos total y cantidad
+  const cantNum = parseFloat(resultado.cantidad) || 1;
+  if (resultado.precioUnitario === 0 && resultado.total > 0) {
+    resultado.precioUnitario = resultado.total / cantNum;
+  }
+  
+  return resultado;
+}
+
+// ============================================
 // UTILIDAD: Extraer nombre de producto de cualquier formato
 // Soporta JSON y texto plano
 // ============================================
@@ -377,8 +436,8 @@ async function mostrarMenuPrincipal(from, context, cfg) {
     mensaje = saludo + ' Tienes ' + pedidosActivos.length + ' pedido(s) activo(s):\n\n';
     
     pedidosActivos.slice(0, 2).forEach(p => {
-      const nombreProd = extraerNombreProducto(p.productos);
-      mensaje += '- ' + nombreProd + '\n';
+      const detalle = parsearDetallePedido(p);
+      mensaje += '- ' + detalle.producto + ' x' + detalle.cantidad + '\n';
       mensaje += '  Estado: ' + p.estado + '\n\n';
     });
     
@@ -469,11 +528,14 @@ async function iniciarEnvioVoucher(from, context, cfg) {
   // Si hay un solo pedido, ir directo
   if (pedidosActivos.length === 1) {
     const pedido = pedidosActivos[0];
+    const detalle = parsearDetallePedido(pedido);
+    
     await whatsapp.sendMessage(from, 
       'ENVIAR COMPROBANTE DE PAGO\n\n' +
-      'Pedido: ' + pedido.id + '\n' +
-      'Estado: ' + pedido.estado + '\n' +
-      'Total: S/' + (pedido.total || 0).toFixed(2) + '\n\n' +
+      detalle.producto + '\n' +
+      'Cantidad: ' + detalle.cantidad + '\n' +
+      'Precio unitario: S/' + detalle.precioUnitario.toFixed(2) + '\n' +
+      'Total a pagar: S/' + detalle.total.toFixed(2) + '\n\n' +
       'Envia una foto de tu voucher, captura de Yape/Plin o comprobante de transferencia.'
     );
     stateManager.updateData(from, negocio.id, { pedidoSeleccionado: pedido.id });
@@ -486,11 +548,10 @@ async function iniciarEnvioVoucher(from, context, cfg) {
   mensaje += 'Tienes ' + pedidosActivos.length + ' pedidos activos:\n\n';
   
   pedidosActivos.forEach((p, idx) => {
-    const nombreProd = extraerNombreProducto(p.productos);
-    mensaje += (idx + 1) + '. ' + p.id + '\n';
-    mensaje += '   ' + nombreProd + '\n';
-    mensaje += '   Estado: ' + p.estado + '\n';
-    mensaje += '   Total: S/' + (p.total || 0).toFixed(2) + '\n\n';
+    const detalle = parsearDetallePedido(p);
+    mensaje += (idx + 1) + '. ' + detalle.producto + '\n';
+    mensaje += '   Cantidad: ' + detalle.cantidad + '\n';
+    mensaje += '   Total: S/' + detalle.total.toFixed(2) + '\n\n';
   });
   
   mensaje += 'Responde con el numero del pedido (1, 2, etc.)';
@@ -525,12 +586,14 @@ async function manejarSeleccionPedidoVoucher(from, text, interactiveData, contex
   }
 
   const pedidoSeleccionado = pedidosActivos[numero - 1];
+  const detalle = parsearDetallePedido(pedidoSeleccionado);
   
   await whatsapp.sendMessage(from, 
     'ENVIAR COMPROBANTE DE PAGO\n\n' +
-    'Pedido: ' + pedidoSeleccionado.id + '\n' +
-    'Estado: ' + pedidoSeleccionado.estado + '\n' +
-    'Total: S/' + (pedidoSeleccionado.total || 0).toFixed(2) + '\n\n' +
+    detalle.producto + '\n' +
+    'Cantidad: ' + detalle.cantidad + '\n' +
+    'Precio unitario: S/' + detalle.precioUnitario.toFixed(2) + '\n' +
+    'Total a pagar: S/' + detalle.total.toFixed(2) + '\n\n' +
     'Envia una foto de tu voucher, captura de Yape/Plin o comprobante de transferencia.'
   );
   
@@ -921,18 +984,15 @@ async function mostrarPedidosActivos(from, context, cfg) {
   let mensaje = 'TUS PEDIDOS ACTIVOS\n\n';
   
   activos.forEach(p => {
-    const nombreProd = extraerNombreProducto(p.productos);
-    mensaje += nombreProd + '\n';
-    mensaje += 'Codigo: ' + p.id + '\n';
+    const detalle = parsearDetallePedido(p);
+    mensaje += detalle.producto + '\n';
+    mensaje += 'Cantidad: ' + detalle.cantidad + '\n';
+    mensaje += 'Precio unitario: S/' + detalle.precioUnitario.toFixed(2) + '\n';
+    mensaje += 'Total: S/' + detalle.total.toFixed(2) + '\n';
     mensaje += 'Estado: ' + p.estado + '\n';
-    mensaje += 'Total: S/' + p.total + '\n';
     
     if (p.direccion) {
       mensaje += 'Entrega: ' + p.direccion + '\n';
-    }
-    
-    if (p.cliente) {
-      mensaje += 'Cliente: ' + p.cliente + '\n';
     }
     
     mensaje += '\n';
