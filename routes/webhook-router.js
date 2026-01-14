@@ -9,6 +9,7 @@
  * - Guarda relación usuario-negocio en Sheets para persistencia
  * - Registra TODOS los mensajes (cliente y bot) en Sheets Y Firestore
  * - Soporta modo asesor (bloquea bot cuando asesor está activo)
+ * - Lee campo 'modo' de Firebase para decidir si bot responde
  * - Push notifications via FCM
  */
 
@@ -114,6 +115,32 @@ function getHandler(negocio) {
   }
   
   return null;
+}
+
+/**
+ * Obtener modo de conversación desde Firebase
+ * Retorna: 'bot', 'soporte', 'ayuda' o null
+ */
+async function getModoConversacion(businessId, whatsapp) {
+  if (!firebaseService.initialized) {
+    return 'bot'; // Por defecto, bot responde si Firebase no está inicializado
+  }
+
+  try {
+    const docRef = firebaseService.conversacionesRef(businessId).doc(whatsapp);
+    const doc = await docRef.get();
+    
+    if (doc.exists) {
+      const data = doc.data();
+      return data.modo || 'bot';
+    }
+    
+    // Si no existe la conversación, el bot debe responder
+    return 'bot';
+  } catch (error) {
+    console.log(`⚠️ Error obteniendo modo de Firebase: ${error.message}`);
+    return 'bot'; // Por defecto, bot responde si hay error
+  }
 }
 
 // ============================================
@@ -293,12 +320,16 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
   }
 
   // ============================================
-  // VERIFICAR MODO ASESOR
+  // VERIFICAR MODO DE CONVERSACIÓN (FIREBASE)
   // ============================================
-  const modoAsesorActivo = await asesorService.debeBloquerBot(from, context.sheets);
+  const modoConversacion = await getModoConversacion(negocio.id, from);
+  console.log(`   🎯 Modo conversación: ${modoConversacion}`);
   
-  if (modoAsesorActivo) {
-    console.log('👤 MODO ASESOR ACTIVO - Bot NO responde');
+  // Si el modo NO es 'bot', el bot NO debe responder automáticamente
+  const botDebeResponder = (modoConversacion === 'bot');
+  
+  if (!botDebeResponder) {
+    console.log(`👤 MODO ${modoConversacion.toUpperCase()} - Bot NO responde automáticamente`);
     
     // Enviar push notification al negocio
     await firebaseService.notificarMensajeSoporte(negocio.id, {
@@ -307,31 +338,34 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
       texto: text || `[${type}]`
     });
     
-    // Verificar si quiere salir del modo asesor
+    // Verificar si quiere salir del modo soporte/ayuda y volver a bot
     const textLower = (text || '').toLowerCase().trim();
-    if (textLower === 'menu' || textLower === 'menú' || textLower === 'salir') {
-      // Salir del modo asesor
-      await asesorService.desactivarModoAsesor(from, context.sheets, negocio.id);
+    if (textLower === 'menu' || textLower === 'menú' || textLower === 'salir' || textLower === 'bot') {
+      // Cambiar modo a 'bot' en Firebase
+      await firebaseService.cambiarModo(negocio.id, from, 'bot');
+      console.log(`   ✅ Modo cambiado a BOT`);
+      
       await context.whatsapp.sendMessage(from, 
-        '👋 Has salido del modo de asesoría.\n\nVolviendo al menú principal...'
+        '👋 Has vuelto al modo automático.\n\nVolviendo al menú principal...'
       );
       // Marcar como leído (ahora sí, porque el bot responde)
       await context.whatsapp.markAsRead(messageId);
       // Resetear estado y continuar al handler
       stateManager.resetState(from, negocio.id);
+      // Continuar al handler para mostrar menú
     } else {
-      // Guardar mensaje para el asesor en Sheets también
-      const conversacionId = await asesorService.obtenerConversacionId(from, context.sheets);
-      if (conversacionId) {
-        await asesorService.guardarMensaje(conversacionId, from, text, 'CLIENTE', context.sheets, negocio.id);
-      }
+      // Guardar mensaje para el asesor en Sheets también (legacy)
+      try {
+        await mensajeLogger.logMensajeCliente(from, text || `[${type}]`, context.sheets);
+      } catch (e) {}
+      
       // NO marcar como leído (queda en gris para el cliente)
       // NO responder
       return;
     }
   } else {
     // ============================================
-    // MODO NORMAL - REGISTRAR MENSAJE DEL CLIENTE
+    // MODO BOT - REGISTRAR MENSAJE DEL CLIENTE
     // ============================================
     try {
       await mensajeLogger.logMensajeCliente(from, text || `[${type}]`, context.sheets);
@@ -340,7 +374,7 @@ async function processMessage(message, negocio, useSharedCredentials = false) {
     }
   }
 
-  // Marcar como leído (solo en modo normal o al salir de asesor)
+  // Marcar como leído (solo en modo bot o al salir de soporte)
   await context.whatsapp.markAsRead(messageId);
 
   // Guardar negocio activo en memoria Y en Sheets
