@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - Handler Unificado v2.9
+ * APARTALO CORE - Handler Unificado v3.0
  * 
  * Handler conversacional con IA para toma de pedidos natural.
  * 
@@ -9,18 +9,23 @@
  * - Reutiliza datos del cliente registrado (direccion, telefono)
  * - Formato de productos compatible con apartalo-app
  * - Estados unificados con config.orderStates
+ * - Recepción de comprobantes de pago (vouchers)
  */
 
 const { formatPrice, getGreeting, generateId } = require('../../core/utils/formatters');
 const aiOrderService = require('../../core/services/ai-order-service');
+const DriveService = require('../../core/services/drive-service');
 const config = require('../../config');
+
+// Instancia del servicio de Drive para subir vouchers
+const driveService = new DriveService();
 
 /**
  * Manejar mensaje entrante
  */
 async function handle(from, message, context) {
   const { whatsapp, sheets, stateManager, negocio, hasFeature, asesorService } = context;
-  const { text, type, interactiveData } = message;
+  const { text, type, interactiveData, mediaId } = message;
 
   const state = stateManager.getState(from, negocio.id);
   const mensajeLimpio = (text || '').trim();
@@ -40,8 +45,16 @@ async function handle(from, message, context) {
   console.log('HANDLER UNIFICADO - ' + negocio.nombre);
   console.log('   From: ' + from);
   console.log('   Mensaje: "' + mensajeLimpio + '"');
+  console.log('   Tipo: ' + type);
   console.log('   Estado: ' + state.step);
   console.log('------------------------------------\n');
+
+  // ============================================
+  // DETECTAR IMAGEN - POSIBLE VOUCHER
+  // ============================================
+  if (type === 'image' && mediaId) {
+    return await manejarImagenRecibida(from, mediaId, mensajeLimpio, context, cfg);
+  }
 
   // ============================================
   // COMANDOS GLOBALES
@@ -114,6 +127,149 @@ async function handle(from, message, context) {
 
     default:
       return await mostrarMenuPrincipal(from, context, cfg);
+  }
+}
+
+// ============================================
+// MANEJO DE IMÁGENES / VOUCHERS
+// ============================================
+
+/**
+ * Manejar imagen recibida - detectar si es voucher
+ */
+async function manejarImagenRecibida(from, mediaId, caption, context, cfg) {
+  const { whatsapp, sheets, stateManager, negocio, firebaseService } = context;
+
+  console.log('📸 Imagen recibida de ' + from);
+
+  // Buscar pedido pendiente de pago del cliente
+  let pedidoPendiente = null;
+  try {
+    const pedidos = await sheets.getPedidosByWhatsapp(from);
+    pedidoPendiente = pedidos.find(p => 
+      p.estado === 'PENDIENTE_PAGO' || 
+      p.estado === config.orderStates?.PENDING_PAYMENT ||
+      p.estado === 'PENDIENTE'
+    );
+  } catch (e) {
+    console.log('⚠️ Error buscando pedidos:', e.message);
+  }
+
+  // Si no hay pedido pendiente, preguntar
+  if (!pedidoPendiente) {
+    await whatsapp.sendButtonMessage(from,
+      '📸 Recibí tu imagen.\n\n¿Es un comprobante de pago?\n\nSi tienes un pedido pendiente, lo asociaré automáticamente.',
+      [
+        { id: 'pedir', title: 'Hacer pedido' },
+        { id: 'contactar', title: 'Hablar con asesor' }
+      ]
+    );
+    stateManager.setStep(from, negocio.id, 'menu');
+    return;
+  }
+
+  // Hay pedido pendiente - procesar como voucher
+  try {
+    // Descargar imagen de WhatsApp
+    const mediaData = await whatsapp.downloadMedia(mediaId);
+    
+    // Subir a Google Drive
+    const fileName = `voucher_${pedidoPendiente.id}_${Date.now()}.jpg`;
+    const uploadResult = await driveService.uploadImage(
+      mediaData.data,
+      fileName,
+      mediaData.contentType || 'image/jpeg',
+      negocio.id
+    );
+
+    console.log('✅ Voucher subido:', uploadResult.url);
+
+    // Guardar evidencia en el pedido
+    await guardarEvidenciaPedido(sheets, pedidoPendiente.id, {
+      url: uploadResult.url,
+      tipo: 'WHATSAPP',
+      fecha: new Date().toISOString(),
+      descripcion: caption || 'Comprobante enviado por WhatsApp'
+    });
+
+    // Actualizar estado del pedido
+    const nuevoEstado = config.orderStates?.PENDING_VALIDATION || 'PENDIENTE_VALIDACION';
+    await sheets.updateEstadoPedido(pedidoPendiente.id, nuevoEstado);
+
+    // Notificar al negocio
+    if (firebaseService) {
+      await firebaseService.notificarVoucherRecibido(negocio.id, pedidoPendiente);
+    }
+
+    // Confirmar al cliente
+    await whatsapp.sendMessage(from,
+      '✅ *COMPROBANTE RECIBIDO*\n\n' +
+      '📋 Pedido: ' + pedidoPendiente.id + '\n' +
+      '💰 Total: S/' + (pedidoPendiente.total || 0).toFixed(2) + '\n\n' +
+      'Tu pago está siendo validado. Te notificaremos cuando esté confirmado.\n\n' +
+      '¡Gracias por tu compra! 🙏'
+    );
+
+    stateManager.resetState(from, negocio.id);
+
+  } catch (error) {
+    console.error('❌ Error procesando voucher:', error.message);
+    
+    await whatsapp.sendMessage(from,
+      '⚠️ Hubo un problema guardando tu comprobante.\n\n' +
+      'Por favor intenta enviarlo de nuevo o escribe "ayuda" para contactar con soporte.'
+    );
+  }
+}
+
+/**
+ * Guardar evidencia de pago en el pedido (usando la columna K de Sheets)
+ */
+async function guardarEvidenciaPedido(sheets, pedidoId, evidencia) {
+  try {
+    const rows = await sheets.getRows('Pedidos!A:K');
+    
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === pedidoId) {
+        // Obtener evidencias actuales
+        let evidencias = [];
+        const voucherUrlsRaw = rows[i][10] || '';
+        
+        if (voucherUrlsRaw) {
+          try {
+            evidencias = JSON.parse(voucherUrlsRaw);
+            if (!Array.isArray(evidencias)) evidencias = [];
+          } catch (e) {
+            // Formato antiguo: convertir URL a evidencia
+            if (voucherUrlsRaw.startsWith('http')) {
+              evidencias = [{
+                id: 'ev_legacy',
+                url: voucherUrlsRaw,
+                tipo: 'WHATSAPP',
+                fecha: new Date().toISOString(),
+                descripcion: 'Comprobante migrado'
+              }];
+            }
+          }
+        }
+        
+        // Agregar nueva evidencia
+        evidencias.push({
+          id: `ev_${Date.now()}`,
+          ...evidencia
+        });
+        
+        // Guardar en Sheets
+        await sheets.updateCell(`Pedidos!K${i + 1}`, JSON.stringify(evidencias));
+        console.log('✅ Evidencia guardada en pedido ' + pedidoId);
+        return true;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('❌ Error guardando evidencia:', error.message);
+    return false;
   }
 }
 
@@ -207,6 +363,13 @@ async function mostrarMenuPrincipal(from, context, cfg) {
   let mensaje = '';
   let botones = [];
 
+  // Verificar si hay pedido pendiente de pago
+  const pendientePago = pedidosActivos.find(p => 
+    p.estado === 'PENDIENTE_PAGO' || 
+    p.estado === config.orderStates?.PENDING_PAYMENT ||
+    p.estado === 'PENDIENTE'
+  );
+
   if (!cliente && pedidosActivos.length === 0) {
     mensaje = saludo + '\n\nBienvenido a ' + negocio.nombre + '\n\nQue deseas hacer?';
     
@@ -220,17 +383,26 @@ async function mostrarMenuPrincipal(from, context, cfg) {
     
     pedidosActivos.slice(0, 2).forEach(p => {
       const nombreProd = extraerNombreProducto(p.productos);
-      mensaje += '- ' + nombreProd + '\n';
+      mensaje += '· ' + nombreProd + '\n';
       mensaje += '  Estado: ' + p.estado + '\n\n';
     });
     
     mensaje += 'Que deseas hacer?';
 
-    botones = [
-      { id: 'ver_pedidos', title: 'Ver pedidos' },
-      { id: 'pedir', title: 'Nuevo pedido' },
-      { id: 'contactar', title: 'Contactar' }
-    ];
+    // Si hay pedido pendiente de pago, mostrar opción de enviar voucher
+    if (pendientePago) {
+      botones = [
+        { id: 'enviar_voucher', title: '📸 Enviar voucher' },
+        { id: 'ver_pedidos', title: 'Ver pedidos' },
+        { id: 'pedir', title: 'Nuevo pedido' }
+      ];
+    } else {
+      botones = [
+        { id: 'ver_pedidos', title: 'Ver pedidos' },
+        { id: 'pedir', title: 'Nuevo pedido' },
+        { id: 'contactar', title: 'Contactar' }
+      ];
+    }
 
   } else {
     const nombreCliente = cliente?.nombre?.split(' ')[0] || cliente?.empresa || '';
@@ -261,7 +433,31 @@ async function manejarMenu(from, text, interactiveData, context, cfg) {
   }
 
   if (opcion === 'enviar_voucher') {
-    await whatsapp.sendMessage(from, 'Envia una foto de tu comprobante de pago.');
+    // Buscar pedido pendiente de pago
+    let pedidoPendiente = null;
+    try {
+      const pedidos = await sheets.getPedidosByWhatsapp(from);
+      pedidoPendiente = pedidos.find(p => 
+        p.estado === 'PENDIENTE_PAGO' || 
+        p.estado === config.orderStates?.PENDING_PAYMENT ||
+        p.estado === 'PENDIENTE'
+      );
+    } catch (e) {}
+
+    if (pedidoPendiente) {
+      await whatsapp.sendMessage(from, 
+        '📸 *ENVIAR COMPROBANTE DE PAGO*\n\n' +
+        '📋 Pedido: ' + pedidoPendiente.id + '\n' +
+        '💰 Total a pagar: S/' + (pedidoPendiente.total || 0).toFixed(2) + '\n\n' +
+        'Envía una foto de tu voucher, captura de Yape/Plin o comprobante de transferencia.\n\n' +
+        '_Puedes enviar la imagen directamente aquí._'
+      );
+    } else {
+      await whatsapp.sendMessage(from, 
+        'No tienes pedidos pendientes de pago.\n\n' +
+        'Escribe "menu" para ver opciones.'
+      );
+    }
     stateManager.setStep(from, negocio.id, 'esperando_voucher');
     return;
   }
@@ -566,29 +762,31 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   } else {
     const metodosPago = await sheets.getMetodosPago();
     
-    let mensajePago = 'PEDIDO REGISTRADO\n\n';
-    mensajePago += 'Codigo: ' + pedidoId + '\n';
-    mensajePago += productoSeleccionado.nombre + ' x' + cantidad + ' ' + unidadTexto + '\n';
-    mensajePago += 'Total: S/' + total.toFixed(2) + '\n\n';
-    mensajePago += 'METODOS DE PAGO:\n\n';
+    let mensajePago = '✅ *PEDIDO REGISTRADO*\n\n';
+    mensajePago += '📋 Codigo: ' + pedidoId + '\n';
+    mensajePago += '📦 ' + productoSeleccionado.nombre + ' x' + cantidad + ' ' + unidadTexto + '\n';
+    mensajePago += '💰 Total: S/' + total.toFixed(2) + '\n\n';
+    mensajePago += '━━━━━━━━━━━━━━━━━━━━\n';
+    mensajePago += '*MÉTODOS DE PAGO:*\n\n';
 
     if (metodosPago.length > 0) {
       metodosPago.forEach(m => {
         if (m.tipo === 'yape' || m.tipo === 'plin') {
-          mensajePago += m.tipo.toUpperCase() + ': ' + m.numero + '\n';
+          mensajePago += '📱 ' + m.tipo.toUpperCase() + ': ' + m.numero + '\n';
         } else {
-          mensajePago += m.tipo.toUpperCase() + '\n';
-          mensajePago += 'Cuenta: ' + m.cuenta + '\n';
-          if (m.cci) mensajePago += 'CCI: ' + m.cci + '\n';
+          mensajePago += '🏦 ' + m.tipo.toUpperCase() + '\n';
+          mensajePago += '   Cuenta: ' + m.cuenta + '\n';
+          if (m.cci) mensajePago += '   CCI: ' + m.cci + '\n';
         }
-        if (m.titular) mensajePago += 'Titular: ' + m.titular + '\n';
+        if (m.titular) mensajePago += '   Titular: ' + m.titular + '\n';
         mensajePago += '\n';
       });
     } else {
-      mensajePago += 'Yape/Plin: (consultar)\n\n';
+      mensajePago += '📱 Yape/Plin: (consultar)\n\n';
     }
 
-    mensajePago += 'Envia foto del comprobante para confirmar.';
+    mensajePago += '━━━━━━━━━━━━━━━━━━━━\n';
+    mensajePago += '📸 *Envía foto de tu comprobante* para confirmar el pago.';
 
     await whatsapp.sendMessage(from, mensajePago);
     stateManager.updateData(from, negocio.id, { pedidoId });
@@ -600,46 +798,40 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
 }
 
 // ============================================
-// VOUCHER
+// VOUCHER (estado esperando_voucher)
 // ============================================
 
 async function manejarVoucher(from, message, context, cfg) {
-  const { whatsapp, sheets, stateManager, negocio } = context;
+  const { whatsapp, sheets, stateManager, negocio, firebaseService } = context;
+  const { type, mediaId, text } = message;
 
-  if (message.type !== 'image') {
-    await whatsapp.sendMessage(from, 'Por favor, envia una foto del comprobante.');
+  // Si escribió texto, verificar si quiere salir
+  if (type === 'text') {
+    const textoLower = (text || '').toLowerCase();
+    if (textoLower === 'menu' || textoLower === 'cancelar') {
+      stateManager.resetState(from, negocio.id);
+      return await mostrarMenuPrincipal(from, context, cfg);
+    }
+    
+    await whatsapp.sendMessage(from, 
+      '📸 Por favor, envía una *foto* de tu comprobante de pago.\n\n' +
+      'Puede ser captura de Yape, Plin o voucher de transferencia.\n\n' +
+      '_Escribe "menu" para volver al menú principal._'
+    );
     return;
   }
 
-  const state = stateManager.getState(from, negocio.id);
-  let pedidoId = state.data?.pedidoId;
-
-  if (!pedidoId) {
-    const pedidos = await sheets.getPedidosByWhatsapp(from);
-    const pendiente = pedidos.find(p => 
-      p.estado === 'PENDIENTE_PAGO' || p.estado === config.orderStates?.PENDING_PAYMENT
+  // Si no es imagen
+  if (type !== 'image' || !mediaId) {
+    await whatsapp.sendMessage(from, 
+      '📸 Necesito una *imagen* del comprobante.\n\n' +
+      'Por favor envía una foto de tu voucher, captura de Yape/Plin o comprobante de transferencia.'
     );
-    if (pendiente) {
-      pedidoId = pendiente.id;
-    }
+    return;
   }
 
-  if (!pedidoId) {
-    await whatsapp.sendMessage(from, 'No tienes un pedido pendiente de pago.');
-    return await mostrarMenuPrincipal(from, context, cfg);
-  }
-
-  const nuevoEstado = config.orderStates?.PENDING_VALIDATION || 'PENDIENTE_VALIDACION';
-  await sheets.updateEstadoPedido(pedidoId, nuevoEstado);
-
-  await whatsapp.sendMessage(from,
-    'COMPROBANTE RECIBIDO\n\n' +
-    'Pedido ' + pedidoId + ' en validacion.\n\n' +
-    'Te avisamos cuando este confirmado.\n\n' +
-    'Gracias.'
-  );
-
-  stateManager.resetState(from, negocio.id);
+  // Es una imagen - procesar como voucher
+  return await manejarImagenRecibida(from, mediaId, text || '', context, cfg);
 }
 
 // ============================================
@@ -670,22 +862,18 @@ async function mostrarPedidosActivos(from, context, cfg) {
     return;
   }
 
-  let mensaje = 'TUS PEDIDOS ACTIVOS\n';
-  mensaje += '------------------------\n\n';
+  let mensaje = '*TUS PEDIDOS ACTIVOS*\n';
+  mensaje += '━━━━━━━━━━━━━━━━━━━━\n\n';
   
   activos.forEach(p => {
     const nombreProd = extraerNombreProducto(p.productos);
-    mensaje += nombreProd + '\n';
-    mensaje += 'Codigo: ' + p.id + '\n';
-    mensaje += 'Estado: ' + p.estado + '\n';
-    mensaje += 'Total: S/' + p.total + '\n';
+    mensaje += '📦 ' + nombreProd + '\n';
+    mensaje += '   Codigo: ' + p.id + '\n';
+    mensaje += '   Estado: ' + p.estado + '\n';
+    mensaje += '   Total: S/' + p.total + '\n';
     
     if (p.direccion) {
-      mensaje += 'Entrega: ' + p.direccion + '\n';
-    }
-    
-    if (p.cliente) {
-      mensaje += 'Cliente: ' + p.cliente + '\n';
+      mensaje += '   Entrega: ' + p.direccion + '\n';
     }
     
     mensaje += '\n';
@@ -693,11 +881,13 @@ async function mostrarPedidosActivos(from, context, cfg) {
 
   let botones = [];
   const pendientesPago = activos.filter(p => 
-    p.estado === 'PENDIENTE_PAGO' || p.estado === config.orderStates?.PENDING_PAYMENT
+    p.estado === 'PENDIENTE_PAGO' || 
+    p.estado === config.orderStates?.PENDING_PAYMENT ||
+    p.estado === 'PENDIENTE'
   );
 
   if (pendientesPago.length > 0 && cfg.flujoPago === 'voucher') {
-    botones.push({ id: 'enviar_voucher', title: 'Enviar voucher' });
+    botones.push({ id: 'enviar_voucher', title: '📸 Enviar voucher' });
   }
   botones.push({ id: 'pedir', title: 'Nuevo pedido' });
   botones.push({ id: 'contactar', title: 'Ayuda' });
