@@ -2,13 +2,13 @@
  * APARTALO CORE - AI Muestra Service
  * 
  * Servicio de IA conversacional para flujo de muestras gratis.
- * Usa GROQ (Llama) para conversación natural y extracción de datos.
+ * Usa GROQ (Llama) para procesamiento natural y conversacional.
  * 
- * CARACTERISTICAS:
- * - Conversación natural (no paso a paso rígido)
- * - Extrae datos en cualquier orden
- * - Valida teléfono (9 dígitos) y dirección (incluye distrito)
- * - Reutiliza datos del cliente si ya está registrado
+ * CARACTERÍSTICAS:
+ * - Conversación natural (no interrogatorio paso a paso)
+ * - Extrae múltiples datos de un solo mensaje
+ * - Valida datos (teléfono 9 dígitos, dirección con distrito)
+ * - Reutiliza datos del cliente registrado
  */
 
 const axios = require('axios');
@@ -22,11 +22,13 @@ class AIMuestraService {
 
   initialize() {
     if (this.initialized) return true;
+
     this.apiKey = process.env.GROQ_API_KEY;
     if (!this.apiKey) {
       console.log('⚠️ AIMuestraService: GROQ_API_KEY no configurada');
       return false;
     }
+
     this.initialized = true;
     console.log('✅ AIMuestraService inicializado');
     return true;
@@ -46,7 +48,11 @@ class AIMuestraService {
     }
 
     const { negocio } = context;
+
+    // Construir prompt del sistema
     const systemPrompt = this.construirSystemPromptMuestra(negocio, datosCliente);
+
+    // Construir mensajes
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -63,7 +69,11 @@ class AIMuestraService {
       });
 
       const respuestaTexto = response.data.choices[0].message.content;
+      
+      // Extraer JSON estructurado
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
+      
+      // Limpiar respuesta (quitar JSON)
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
 
       return {
@@ -98,14 +108,13 @@ CONTEXTO DEL NEGOCIO:
 - Somos productores de café premium de Villa Rica, Perú
 - Ofrecemos muestras GRATIS de 500g a cafeterías y negocios gastronómicos
 - Es para probar la calidad antes de comprar al por mayor
-- Solo 1 muestra por negocio (política estricta)
+- Solo 1 muestra por negocio (no se puede solicitar más de una)
 
 TU ROL:
 - Habla de forma natural, cálida y profesional
 - NO uses emojis
-- Explica brevemente el beneficio de la muestra
+- Explica brevemente el beneficio de la muestra (conocer calidad, probar antes de comprar)
 - Recopila datos de forma conversacional (no interrogatorio)
-- Respuestas cortas (máximo 4 líneas)
 
 DATOS NECESARIOS:
 1. **Nombre del negocio/cafetería** (campo: empresa)
@@ -114,17 +123,12 @@ DATOS NECESARIOS:
 4. **Teléfono de contacto** - 9 dígitos (campo: telefono)
 
 REGLAS DE CONVERSACIÓN:
-- Si el cliente da varios datos en un mensaje, extráelos todos
+- Si el cliente da varios datos en un solo mensaje, extráelos todos
 - Si falta algún dato, pregunta solo por lo que falta
 - Sé flexible: el cliente puede dar los datos en cualquier orden
-- Valida que la dirección incluya distrito (ej: "Miraflores", "San Isidro")
-- Valida que el teléfono tenga exactamente 9 dígitos
+- Valida que la dirección incluya distrito (Lima, Miraflores, San Isidro, etc.)
+- Valida que el teléfono tenga 9 dígitos
 - Si el cliente pregunta algo sobre el café, responde brevemente y vuelve a pedir datos${clienteTexto}
-
-VALIDACIONES ESTRICTAS:
-- direccion: DEBE incluir distrito peruano (ej: "Av. Larco 123, Miraflores")
-- telefono: DEBE tener exactamente 9 dígitos sin espacios
-- Si faltan datos o formato incorrecto, NO marques muestra_completa como true
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
@@ -139,35 +143,53 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 }
 \`\`\`
 
+VALIDACIONES:
+- direccion debe incluir distrito (ej: "Av. Larco 123, Miraflores")
+- telefono debe tener exactamente 9 dígitos (sin espacios ni guiones)
+- Si el cliente da un teléfono con menos de 9 dígitos, pide que lo corrija
+- muestra_completa debe ser true SOLO si tienes los 4 campos completos Y válidos
+
 EJEMPLOS DE RESPUESTAS:
 
 Ejemplo 1 (datos parciales):
 Cliente: "Soy María de Café Gourmet"
-Respuesta: "Hola María. Qué bueno que Café Gourmet quiera probar nuestro café de Villa Rica. Para enviarte la muestra de 500g necesito tu dirección completa (incluye distrito) y un teléfono de contacto."
+Tu respuesta: "Hola María, qué bueno que Café Gourmet quiera probar nuestro café de Villa Rica. Para enviarte la muestra de 500g, necesito tu dirección completa con distrito y un teléfono de contacto."
 
 Ejemplo 2 (casi completo, falta distrito):
 Cliente: "Mi dirección es Jr. Ucayali 345 y mi teléfono es 998877665"
-Respuesta: "Perfecto. Solo para confirmar, ¿en qué distrito está Jr. Ucayali 345?"
+Tu respuesta: "Perfecto. Solo para confirmar, en qué distrito está Jr. Ucayali 345?"
 
-Ejemplo 3 (completo):
+Ejemplo 3 (teléfono inválido):
+Cliente: "Mi teléfono es 12345678"
+Tu respuesta: "El teléfono que me diste tiene 8 dígitos. Por favor proporciona un número de 9 dígitos."
+
+Ejemplo 4 (completo):
 Cliente: "Jr. Ucayali 345, Cercado de Lima, teléfono 998877665"
-Respuesta: "Excelente María, ya tenemos todo registrado. Te enviaremos 500g de nuestro café premium de Villa Rica a Jr. Ucayali 345, Cercado de Lima. Te contactaremos pronto para coordinar la entrega."`;
+Tu respuesta: "Excelente María, ya tenemos todo registrado. Te enviaremos 500g de nuestro café premium de Villa Rica a Jr. Ucayali 345, Cercado de Lima. Te contactaremos pronto para coordinar la entrega."`;
   }
 
   /**
    * Construir array de mensajes para la API
    */
   construirMensajes(systemPrompt, historial, mensajeActual) {
-    const messages = [{ role: 'system', content: systemPrompt }];
-    
+    const messages = [
+      { role: 'system', content: systemPrompt }
+    ];
+
+    // Agregar historial
     for (const msg of historial) {
       messages.push({
         role: msg.rol === 'cliente' ? 'user' : 'assistant',
         content: msg.texto
       });
     }
-    
-    messages.push({ role: 'user', content: mensajeActual });
+
+    // Agregar mensaje actual
+    messages.push({
+      role: 'user',
+      content: mensajeActual
+    });
+
     return messages;
   }
 
@@ -190,7 +212,9 @@ Respuesta: "Excelente María, ya tenemos todo registrado. Te enviaremos 500g de 
    * Limpiar respuesta quitando el bloque JSON
    */
   limpiarRespuesta(respuesta) {
-    return respuesta.replace(/```json\s*[\s\S]*?\s*```/g, '').trim();
+    return respuesta
+      .replace(/```json\s*[\s\S]*?\s*```/g, '')
+      .trim();
   }
 }
 
