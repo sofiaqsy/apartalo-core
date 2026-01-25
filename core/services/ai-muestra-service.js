@@ -1,17 +1,20 @@
 /**
- * APARTALO CORE - AI Muestra Service
+ * APARTALO CORE - AI Muestra Service CON MEMORIA SIMULADA
  * 
  * Servicio de IA conversacional para flujo de muestras gratis.
  * Usa GROQ (Llama) para procesamiento natural y conversacional.
  * 
- * CARACTERÍSTICAS:
+ * CARACTERÍSTICAS CON MEMORIA:
+ * - Recupera información completa del cliente (Clientes, Pedidos, etc.)
+ * - "Recuerda" si el cliente ya compró antes
+ * - Personaliza la conversación basándose en el historial
  * - Conversación natural (no interrogatorio paso a paso)
  * - Extrae múltiples datos de un solo mensaje
  * - Valida datos (teléfono 9 dígitos, dirección con distrito)
- * - Reutiliza datos del cliente registrado
  */
 
 const axios = require('axios');
+const clienteContextService = require('./cliente-context-service');
 
 class AIMuestraService {
   constructor() {
@@ -30,12 +33,12 @@ class AIMuestraService {
     }
 
     this.initialized = true;
-    console.log('✅ AIMuestraService inicializado');
+    console.log('✅ AIMuestraService inicializado con GROQ + RAG');
     return true;
   }
 
   /**
-   * Procesar mensaje del cliente en flujo de muestra gratis
+   * Procesar mensaje del cliente en flujo de muestra gratis CON MEMORIA
    */
   async procesarMensajeMuestra(mensaje, context, historial = [], datosCliente = null) {
     if (!this.initialized && !this.initialize()) {
@@ -49,8 +52,21 @@ class AIMuestraService {
 
     const { negocio } = context;
 
-    // Construir prompt del sistema
-    const systemPrompt = this.construirSystemPromptMuestra(negocio, datosCliente);
+    // 🧠 NUEVO: Obtener contexto completo del cliente (MEMORIA SIMULADA)
+    // Extraer whatsapp del datosCliente
+    const whatsapp = datosCliente?.whatsapp || context.from || null;
+    
+    console.log('🧠 Recuperando memoria del cliente para muestra...');
+    const contextoCliente = await clienteContextService.obtenerContextoCompleto(
+      whatsapp, 
+      context
+    );
+
+    // Construir prompt del sistema con memoria
+    const systemPrompt = this.construirSystemPromptMuestraConMemoria(
+      negocio, 
+      contextoCliente
+    );
 
     // Construir mensajes
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
@@ -95,25 +111,28 @@ class AIMuestraService {
   }
 
   /**
-   * Construir prompt del sistema para muestras
+   * Construir prompt del sistema para muestras CON memoria
    */
-  construirSystemPromptMuestra(negocio, datosCliente) {
-    const clienteTexto = datosCliente 
-      ? `\nDATOS DEL CLIENTE REGISTRADO:\n- Nombre: ${datosCliente.nombre || 'No registrado'}\n- Empresa: ${datosCliente.empresa || 'No registrada'}\n- Dirección: ${datosCliente.direccion || 'No registrada'}\n- Teléfono: ${datosCliente.telefono || 'No registrado'}`
-      : '\nCLIENTE NUEVO: No tenemos datos previos.';
-
+  construirSystemPromptMuestraConMemoria(negocio, contextoCliente) {
     return `Eres el asistente de ${negocio.nombre} para el programa de MUESTRAS GRATIS de café.
 
-CONTEXTO DEL NEGOCIO:
-- Somos productores de café premium de Villa Rica, Perú
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTEXTO DEL CLIENTE (Usa esta info para personalizar):
+${contextoCliente}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SOBRE EL PROGRAMA DE MUESTRAS:
 - Ofrecemos muestras GRATIS de 500g a cafeterías y negocios gastronómicos
 - Es para probar la calidad antes de comprar al por mayor
-- Solo 1 muestra por negocio (no se puede solicitar más de una)
+- Solo 1 muestra por negocio (política estricta)
+- Somos productores de café premium de Villa Rica, Perú
 
 TU ROL:
 - Habla de forma natural, cálida y profesional
 - NO uses emojis
-- Explica brevemente el beneficio de la muestra (conocer calidad, probar antes de comprar)
+- Si el cliente YA compró antes, menciona que conoce nuestro café
+- Si tiene datos registrados, úsalos para agilizar el proceso
+- Explica brevemente el beneficio de la muestra
 - Recopila datos de forma conversacional (no interrogatorio)
 
 DATOS NECESARIOS:
@@ -124,11 +143,17 @@ DATOS NECESARIOS:
 
 REGLAS DE CONVERSACIÓN:
 - Si el cliente da varios datos en un solo mensaje, extráelos todos
+- Si ya tiene datos en el sistema, úsalos (pero confirma siempre)
 - Si falta algún dato, pregunta solo por lo que falta
 - Sé flexible: el cliente puede dar los datos en cualquier orden
 - Valida que la dirección incluya distrito (Lima, Miraflores, San Isidro, etc.)
 - Valida que el teléfono tenga 9 dígitos
-- Si el cliente pregunta algo sobre el café, responde brevemente y vuelve a pedir datos${clienteTexto}
+- Si el cliente pregunta algo sobre el café, responde brevemente
+
+PERSONALIZACIÓN SEGÚN HISTORIAL:
+- Si el cliente ya compró: "Qué bueno que quieras probar más de nuestro café antes de tu próximo pedido"
+- Si es cliente nuevo: "Perfecto para conocer la calidad de nuestro café de Villa Rica"
+- Si tiene empresa registrada: Úsala como sugerencia
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
@@ -146,26 +171,21 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 VALIDACIONES:
 - direccion debe incluir distrito (ej: "Av. Larco 123, Miraflores")
 - telefono debe tener exactamente 9 dígitos (sin espacios ni guiones)
-- Si el cliente da un teléfono con menos de 9 dígitos, pide que lo corrija
 - muestra_completa debe ser true SOLO si tienes los 4 campos completos Y válidos
 
-EJEMPLOS DE RESPUESTAS:
+EJEMPLOS:
 
-Ejemplo 1 (datos parciales):
-Cliente: "Soy María de Café Gourmet"
-Tu respuesta: "Hola María, qué bueno que Café Gourmet quiera probar nuestro café de Villa Rica. Para enviarte la muestra de 500g, necesito tu dirección completa con distrito y un teléfono de contacto."
+Cliente nuevo:
+Msg: "Soy María de Café Gourmet"
+Resp: "Hola María, qué bueno que Café Gourmet quiera probar nuestro café de Villa Rica. Para enviarte la muestra de 500g, necesito tu dirección completa con distrito y un teléfono de contacto."
 
-Ejemplo 2 (casi completo, falta distrito):
-Cliente: "Mi dirección es Jr. Ucayali 345 y mi teléfono es 998877665"
-Tu respuesta: "Perfecto. Solo para confirmar, en qué distrito está Jr. Ucayali 345?"
+Cliente con historial:
+Msg: "Quiero una muestra"
+Resp: "Perfecto! Veo que ya nos conoces, la última vez pediste 5kg de nuestro blend. Te enviaremos 500g de muestra a tu dirección registrada en Jr. Lima 123, Cercado de Lima. Solo confirma tu teléfono de contacto."
 
-Ejemplo 3 (teléfono inválido):
-Cliente: "Mi teléfono es 12345678"
-Tu respuesta: "El teléfono que me diste tiene 8 dígitos. Por favor proporciona un número de 9 dígitos."
-
-Ejemplo 4 (completo):
-Cliente: "Jr. Ucayali 345, Cercado de Lima, teléfono 998877665"
-Tu respuesta: "Excelente María, ya tenemos todo registrado. Te enviaremos 500g de nuestro café premium de Villa Rica a Jr. Ucayali 345, Cercado de Lima. Te contactaremos pronto para coordinar la entrega."`;
+Datos completos:
+Msg: "Jr. Ucayali 345, Cercado de Lima, teléfono 998877665"
+Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café premium de Villa Rica a Jr. Ucayali 345, Cercado de Lima. Te contactaremos pronto para coordinar la entrega."`;
   }
 
   /**
