@@ -1,16 +1,21 @@
 /**
- * APARTALO CORE - AI Order Service v4
+ * APARTALO CORE - AI Order Service v5 CON MEMORIA SIMULADA
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
- * CARACTERISTICAS:
- * - Carga productos con precios personalizados por cliente
- * - Precios vienen de PreciosClientes o Inventario
+ * NUEVAS CARACTERÍSTICAS v5:
+ * - Memoria simulada (RAG) - Recupera contexto completo del cliente
+ * - Información de todas las hojas: Clientes, Pedidos, PreciosClientes, Inventario, Configuracion
+ * - IA "recuerda" preferencias, pedidos anteriores y precios personalizados
+ * 
+ * CARACTERÍSTICAS ANTERIORES:
+ * - Precios personalizados por cliente (PreciosClientes)
  * - IA puede mencionar precios correctos en la conversacion
  */
 
 const axios = require('axios');
+const clienteContextService = require('./cliente-context-service');
 
 class AIOrderService {
   constructor() {
@@ -24,17 +29,17 @@ class AIOrderService {
 
     this.apiKey = process.env.GROQ_API_KEY;
     if (!this.apiKey) {
-      console.log('AIOrderService: GROQ_API_KEY no configurada');
+      console.log('⚠️ AIOrderService: GROQ_API_KEY no configurada');
       return false;
     }
 
     this.initialized = true;
-    console.log('AIOrderService inicializado con GROQ');
+    console.log('✅ AIOrderService inicializado con GROQ + RAG');
     return true;
   }
 
   /**
-   * Procesar mensaje del cliente en flujo de pedido
+   * Procesar mensaje del cliente en flujo de pedido CON MEMORIA SIMULADA
    */
   async procesarMensajePedido(mensaje, context, historial = [], datosCliente = null, whatsappFrom = null) {
     if (!this.initialized && !this.initialize()) {
@@ -46,16 +51,20 @@ class AIOrderService {
       };
     }
 
-    const { sheets, negocio } = context;
+    const { negocio } = context;
 
-    // Cargar contexto del negocio
-    const [configuracion, productos] = await Promise.all([
-      this.cargarConfiguracion(sheets),
-      this.cargarProductosConPrecios(sheets, whatsappFrom)
-    ]);
+    // 🧠 NUEVO: Obtener contexto completo del cliente (MEMORIA SIMULADA)
+    console.log('🧠 Recuperando memoria del cliente...');
+    const contextoCliente = await clienteContextService.obtenerContextoCompleto(
+      whatsappFrom, 
+      context
+    );
 
-    // Construir prompt del sistema con precios personalizados
-    const systemPrompt = this.construirSystemPrompt(negocio, configuracion, productos, datosCliente);
+    // Construir prompt del sistema CON contexto enriquecido
+    const systemPrompt = this.construirSystemPromptConMemoria(
+      negocio, 
+      contextoCliente
+    );
 
     // Construir mensajes
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
@@ -89,7 +98,7 @@ class AIOrderService {
       };
 
     } catch (error) {
-      console.error('Error en AI:', error.response?.data || error.message);
+      console.error('❌ Error en AI:', error.response?.data || error.message);
       return {
         respuesta: 'Ocurrio un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
@@ -100,90 +109,47 @@ class AIOrderService {
   }
 
   /**
-   * Cargar configuracion del negocio desde Sheets
+   * Construir prompt del sistema CON memoria simulada
+   * El contexto del cliente ya incluye:
+   * - Datos del cliente (Clientes)
+   * - Precios personalizados (PreciosClientes)
+   * - Historial de pedidos (Pedidos)
+   * - Productos disponibles (Inventario)
+   * - Configuración del negocio (Configuracion)
+   * - Últimas conversaciones (Firestore)
    */
-  async cargarConfiguracion(sheets) {
-    try {
-      const config = await sheets.getConfiguracion();
-      return {
-        prompt_negocio: config.prompt_negocio || '',
-        reglas_venta: config.reglas_venta || '',
-        tono: config.tono || 'amable y profesional',
-        info_adicional: config.info_adicional || '',
-        horario: config.horario || '',
-        departamento: config.departamento || 'Lima'
-      };
-    } catch (error) {
-      console.log('Error cargando configuracion:', error.message);
-      return {};
-    }
-  }
+  construirSystemPromptConMemoria(negocio, contextoCliente) {
+    return `Eres el asistente de ventas conversacional de ${negocio.nombre}.
 
-  /**
-   * Cargar productos CON precios personalizados para el cliente
-   */
-  async cargarProductosConPrecios(sheets, whatsappFrom) {
-    try {
-      if (whatsappFrom) {
-        // Usar precios personalizados del cliente
-        return await sheets.getProductosConPrecios(whatsappFrom);
-      } else {
-        // Sin cliente, usar precios de lista
-        return await sheets.getProductos('ACTIVO');
-      }
-    } catch (error) {
-      console.log('Error cargando productos:', error.message);
-      return [];
-    }
-  }
+Tu trabajo es ayudar a los clientes a hacer pedidos de forma natural y personalizada.
 
-  /**
-   * Construir prompt del sistema con precios personalizados
-   */
-  construirSystemPrompt(negocio, config, productos, datosCliente) {
-    // Lista de productos CON precios
-    const productosTexto = productos.map(p => {
-      let linea = '- ' + p.codigo + ': ' + p.nombre + ' - S/' + p.precio;
-      if (p.descripcion) {
-        linea += ' (' + p.descripcion + ')';
-      }
-      if (p.tieneDescuento) {
-        linea += ' [PRECIO ESPECIAL]';
-      }
-      return linea;
-    }).join('\n');
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANTE: A continuación tienes TODA la información del cliente:
+${contextoCliente}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    const clienteTexto = datosCliente 
-      ? '\nDATOS CONOCIDOS DEL CLIENTE:\n- Nombre: ' + (datosCliente.nombre || 'No registrado') + '\n- Direccion: ' + (datosCliente.direccion || 'No registrada') + '\n- Telefono: ' + (datosCliente.telefono || 'No registrado')
-      : '\nCLIENTE NUEVO: No tenemos datos registrados.';
-
-    return `Eres el asistente de ventas de ${negocio.nombre}. Tu trabajo es ayudar a los clientes a hacer pedidos de forma conversacional.
-
-SOBRE EL NEGOCIO:
-${config.prompt_negocio || 'Somos un negocio dedicado a ofrecer productos de calidad.'}
-
-REGLAS DE VENTA:
-${config.reglas_venta || 'Consultar disponibilidad.'}
-
-INFORMACION ADICIONAL:
-${config.info_adicional || ''}
-
-CATALOGO DE PRODUCTOS CON PRECIOS PARA ESTE CLIENTE:
-${productosTexto || 'Consultar catalogo'}
-${clienteTexto}
-
-INSTRUCCIONES:
-1. Responde de manera natural y conversacional
+INSTRUCCIONES DE CONVERSACIÓN:
+1. Responde de manera natural, cálida y conversacional
 2. NO uses emojis
-3. USA los precios del catalogo de arriba para calcular totales
-4. Guia al cliente para obtener: producto (codigo), cantidad, datos de entrega
-5. Si el cliente pregunta por productos, menciona las opciones CON sus precios
-6. Si el cliente pide un producto, identifica el CODIGO correcto y calcula el total
-7. Respuestas cortas, maximo 3-4 lineas
+3. USA la información del contexto para personalizar tus respuestas:
+   - Si el cliente ya compró antes, menciona sus preferencias
+   - Si tiene precios especiales, menciónalo como beneficio
+   - Si hay conversación previa, da continuidad
+4. Sé proactivo: sugiere productos basándote en su historial
+5. Calcula totales usando los precios del catálogo (incluye precios especiales)
+6. Respuestas cortas (máximo 3-4 líneas)
+7. Obtén: producto (código), cantidad, datos de entrega
 
-CALCULO DE TOTALES:
-- Usa el precio del catalogo x cantidad
-- Ejemplo: Si CAF-001 cuesta S/70 y piden 8kg, total = S/560
+EJEMPLOS DE PERSONALIZACIÓN:
+
+Cliente nuevo:
+"Hola! Bienvenido a ${negocio.nombre}. Tenemos café premium de Villa Rica. ¿Qué producto te interesa?"
+
+Cliente con historial:
+"Hola María! La última vez pediste 5kg de nuestro blend y te encantó. ¿Quieres más de ese o prefieres probar algo diferente?"
+
+Cliente con precio especial:
+"Perfecto! Como cliente frecuente tienes precio especial: S/65 por kilo en lugar de S/70. ¿Cuántos kilos quieres?"
 
 IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`json
@@ -203,10 +169,9 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
 \`\`\`
 
 REGLAS PARA IDENTIFICAR PRODUCTOS:
-- Si piden "cafe en grano" o "cafe por kilo" o "blend", usar CAF-001
-- Si piden "cafe molido 250g" o "bolsa molido", usar CAF-002  
-- Si piden "cafe en grano 250g" o "bolsa grano", usar CAF-003
-- Siempre usar el CODIGO exacto del catalogo
+- Si piden "cafe en grano" o "cafe por kilo" o "blend", buscar en el catálogo
+- Usa el CÓDIGO exacto del catálogo
+- Si hay precio especial, úsalo (ya está en el catálogo)
 
 El JSON debe tener los datos acumulados de toda la conversacion.`;
   }
@@ -246,7 +211,7 @@ El JSON debe tener los datos acumulados de toda la conversacion.`;
         return JSON.parse(jsonMatch[1]);
       }
     } catch (error) {
-      console.log('Error parseando JSON de respuesta:', error.message);
+      console.log('⚠️ Error parseando JSON de respuesta:', error.message);
     }
     return null;
   }
