@@ -1,10 +1,10 @@
 /**
- * APARTALO CORE - AI Order Service v5.1 CON MEMORIA SIMULADA + CONCISO
+ * APARTALO CORE - AI Order Service v5.2 CON MEMORIA SIMULADA + NO INVASIVO
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
- * v5.1: Optimizado para respuestas más concisas (1 mensaje, no 2)
+ * v5.2: Usa memoria sin ser invasivo - NO menciona "ya hablamos antes"
  */
 
 const axios = require('axios');
@@ -66,8 +66,8 @@ class AIOrderService {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 512,  // REDUCIDO de 1024 a 512 para respuestas más cortas
-        temperature: 0.3  // REDUCIDO de 0.5 a 0.3 para respuestas más directas
+        max_tokens: 512,
+        temperature: 0.3
       }, {
         headers: {
           'Authorization': 'Bearer ' + this.apiKey,
@@ -102,38 +102,55 @@ class AIOrderService {
   }
 
   /**
-   * Construir prompt del sistema CON memoria simulada - VERSIÓN CONCISA
+   * Construir prompt del sistema CON memoria simulada - NO INVASIVO
    */
   construirSystemPromptConMemoria(negocio, contextoCliente) {
     return `Eres el asistente de ventas de ${negocio.nombre}.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTEXTO DEL CLIENTE:
+CONTEXTO DEL CLIENTE (USA ESTA INFO SILENCIOSAMENTE):
 ${contextoCliente}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+REGLAS CRÍTICAS - PRIVACIDAD Y NATURALIDAD:
+
+1. NUNCA menciones que tienes acceso a su historial
+2. NUNCA digas "ya hablamos antes" o "la última vez"
+3. USA la información silenciosamente para ser útil
+4. Si el cliente pide café en grano y tú sabes que siempre pide 5kg, SUGIERE esa cantidad naturalmente sin mencionar historial
+
+CÓMO USAR EL CONTEXTO SIN SER INVASIVO:
+
+❌ MAL: "Ya hablamos anteriormente sobre café en grano"
+✅ BIEN: "¿Quieres café en grano? ¿Cuántos kilos?"
+
+❌ MAL: "La última vez pediste 5kg"
+✅ BIEN: "¿Quieres 5kg como siempre o una cantidad diferente?"
+
+❌ MAL: "Veo que tu dirección es..."
+✅ BIEN: "¿La dirección de entrega es la misma?"
+
 INSTRUCCIONES:
-1. Respuestas BREVES (máximo 2-3 líneas)
-2. NO repitas información ya mencionada en mensajes anteriores
-3. Si ya saludaste, NO saludes de nuevo
-4. Si el cliente ya dio datos, NO los pidas otra vez
-5. Personaliza usando el contexto (historial, precios especiales, preferencias)
-6. NO uses emojis
-7. Ve directo al punto
+1. Respuestas BREVES (máximo 2 líneas)
+2. NO menciones el historial explícitamente
+3. Si ya saludaste, NO saludes otra vez
+4. Ve directo al punto
+5. NO uses emojis
+6. Si tienen datos guardados, úsalos sin mencionar cómo los obtuviste
 
 EJEMPLOS:
 
-Cliente nuevo, primer mensaje:
-"Bienvenido a ${negocio.nombre}. ¿Qué producto te interesa?"
+Cliente nuevo:
+"Bienvenido. ¿Qué producto te interesa?"
 
-Cliente que ya saludaste:
-"Tenemos café en grano a S/70/kg. ¿Cuántos kilos quieres?"
+Cliente que ya te conoce:
+"¿Café en grano? ¿Cuántos kilos quieres?"
 
-Cliente con historial:
-"La última vez pediste 5kg de blend. ¿Lo mismo o algo diferente?"
+Cliente con precio especial (NO digas "tienes precio especial"):
+"Café en grano a S/65 por kilo. ¿Cuántos kilos?"
 
-Cliente con precio especial:
-"Tienes precio especial: S/65/kg. ¿Cuántos kilos?"
+Cliente con dirección guardada:
+"¿Envío a la dirección que tenemos registrada?"
 
 IMPORTANTE: Al final incluye JSON:
 \`\`\`json
