@@ -1,17 +1,10 @@
 /**
- * APARTALO CORE - AI Order Service v5 CON MEMORIA SIMULADA
+ * APARTALO CORE - AI Order Service v5.1 CON MEMORIA SIMULADA + CONCISO
  * 
  * Servicio de IA conversacional para toma de pedidos.
  * Usa GROQ (Llama) para procesamiento rapido y economico.
  * 
- * NUEVAS CARACTERÍSTICAS v5:
- * - Memoria simulada (RAG) - Recupera contexto completo del cliente
- * - Información de todas las hojas: Clientes, Pedidos, PreciosClientes, Inventario, Configuracion
- * - IA "recuerda" preferencias, pedidos anteriores y precios personalizados
- * 
- * CARACTERÍSTICAS ANTERIORES:
- * - Precios personalizados por cliente (PreciosClientes)
- * - IA puede mencionar precios correctos en la conversacion
+ * v5.1: Optimizado para respuestas más concisas (1 mensaje, no 2)
  */
 
 const axios = require('axios');
@@ -73,8 +66,8 @@ class AIOrderService {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 1024,
-        temperature: 0.5
+        max_tokens: 512,  // REDUCIDO de 1024 a 512 para respuestas más cortas
+        temperature: 0.3  // REDUCIDO de 0.5 a 0.3 para respuestas más directas
       }, {
         headers: {
           'Authorization': 'Bearer ' + this.apiKey,
@@ -109,54 +102,45 @@ class AIOrderService {
   }
 
   /**
-   * Construir prompt del sistema CON memoria simulada
-   * El contexto del cliente ya incluye:
-   * - Datos del cliente (Clientes)
-   * - Precios personalizados (PreciosClientes)
-   * - Historial de pedidos (Pedidos)
-   * - Productos disponibles (Inventario)
-   * - Configuración del negocio (Configuracion)
-   * - Últimas conversaciones (Firestore)
+   * Construir prompt del sistema CON memoria simulada - VERSIÓN CONCISA
    */
   construirSystemPromptConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente de ventas conversacional de ${negocio.nombre}.
-
-Tu trabajo es ayudar a los clientes a hacer pedidos de forma natural y personalizada.
+    return `Eres el asistente de ventas de ${negocio.nombre}.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-IMPORTANTE: A continuación tienes TODA la información del cliente:
+CONTEXTO DEL CLIENTE:
 ${contextoCliente}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INSTRUCCIONES DE CONVERSACIÓN:
-1. Responde de manera natural, cálida y conversacional
-2. NO uses emojis
-3. USA la información del contexto para personalizar tus respuestas:
-   - Si el cliente ya compró antes, menciona sus preferencias
-   - Si tiene precios especiales, menciónalo como beneficio
-   - Si hay conversación previa, da continuidad
-4. Sé proactivo: sugiere productos basándote en su historial
-5. Calcula totales usando los precios del catálogo (incluye precios especiales)
-6. Respuestas cortas (máximo 3-4 líneas)
-7. Obtén: producto (código), cantidad, datos de entrega
+INSTRUCCIONES:
+1. Respuestas BREVES (máximo 2-3 líneas)
+2. NO repitas información ya mencionada en mensajes anteriores
+3. Si ya saludaste, NO saludes de nuevo
+4. Si el cliente ya dio datos, NO los pidas otra vez
+5. Personaliza usando el contexto (historial, precios especiales, preferencias)
+6. NO uses emojis
+7. Ve directo al punto
 
-EJEMPLOS DE PERSONALIZACIÓN:
+EJEMPLOS:
 
-Cliente nuevo:
-"Hola! Bienvenido a ${negocio.nombre}. Tenemos café premium de Villa Rica. ¿Qué producto te interesa?"
+Cliente nuevo, primer mensaje:
+"Bienvenido a ${negocio.nombre}. ¿Qué producto te interesa?"
+
+Cliente que ya saludaste:
+"Tenemos café en grano a S/70/kg. ¿Cuántos kilos quieres?"
 
 Cliente con historial:
-"Hola María! La última vez pediste 5kg de nuestro blend y te encantó. ¿Quieres más de ese o prefieres probar algo diferente?"
+"La última vez pediste 5kg de blend. ¿Lo mismo o algo diferente?"
 
 Cliente con precio especial:
-"Perfecto! Como cliente frecuente tienes precio especial: S/65 por kilo en lugar de S/70. ¿Cuántos kilos quieres?"
+"Tienes precio especial: S/65/kg. ¿Cuántos kilos?"
 
-IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
+IMPORTANTE: Al final incluye JSON:
 \`\`\`json
 {
   "intent": "consulta|pedido|otro",
-  "producto_codigo": "CODIGO_DEL_CATALOGO o null",
-  "producto_nombre": "nombre del producto o null", 
+  "producto_codigo": "CODIGO o null",
+  "producto_nombre": "nombre o null", 
   "cantidad": numero o null,
   "precio_unitario": numero o null,
   "total_calculado": numero o null,
@@ -164,16 +148,9 @@ IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
   "direccion": "direccion o null",
   "telefono": "telefono o null",
   "pedido_completo": true/false,
-  "datos_faltantes": ["lista", "de", "datos", "faltantes"]
+  "datos_faltantes": ["lista"]
 }
-\`\`\`
-
-REGLAS PARA IDENTIFICAR PRODUCTOS:
-- Si piden "cafe en grano" o "cafe por kilo" o "blend", buscar en el catálogo
-- Usa el CÓDIGO exacto del catálogo
-- Si hay precio especial, úsalo (ya está en el catálogo)
-
-El JSON debe tener los datos acumulados de toda la conversacion.`;
+\`\`\``;
   }
 
   /**
