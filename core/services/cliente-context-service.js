@@ -1,62 +1,54 @@
 /**
  * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada)
  * 
- * Servicio para construir contexto COMPLETO del cliente recuperando datos de:
- * - Clientes: Datos personales (nombre, empresa, dirección, etc.)
- * - PreciosClientes: Precios personalizados para este cliente
- * - Pedidos: Historial de compras (últimos 5 pedidos)
+ * Servicio para construir contexto enriquecido del cliente usando:
  * - Inventario: Productos disponibles
+ * - PreciosClientes: Precios personalizados por cliente
+ * - Clientes: Datos completos del cliente
+ * - Pedidos: Historial de compras
  * - Configuracion: Prompt personalizado del negocio
- * - Conversaciones: Historial de mensajes recientes (Firestore)
+ * - Firestore: Últimas conversaciones
  * 
- * Esto permite que la IA "recuerde" todo sobre el cliente sin necesidad de fine-tuning.
+ * Esto permite que la IA "recuerde" al cliente sin necesidad de fine-tuning.
  */
 
 class ClienteContextService {
-  
   /**
    * Obtener contexto COMPLETO del cliente para enriquecer el prompt de la IA
    */
   async obtenerContextoCompleto(whatsapp, context) {
     const { sheets, negocio, firebaseService } = context;
     
-    console.log(`📊 Construyendo contexto completo para ${whatsapp}...`);
+    console.log(`🧠 Construyendo contexto completo para ${whatsapp}...`);
     
     try {
-      // 1. Obtener datos del cliente (tabla Clientes)
-      const datosCliente = await this.obtenerDatosCliente(whatsapp, sheets);
+      // 1. Configuración del negocio (prompt personalizado)
+      const configuracion = await this.obtenerConfiguracion(sheets);
       
-      // 2. Obtener precios personalizados (tabla PreciosClientes)
-      const preciosPersonalizados = await this.obtenerPreciosPersonalizados(
-        whatsapp, 
-        datosCliente?.id, 
-        sheets
-      );
+      // 2. Datos completos del cliente
+      const cliente = await this.obtenerDatosCliente(whatsapp, sheets);
       
-      // 3. Obtener historial de pedidos (tabla Pedidos)
-      const historialPedidos = await this.obtenerHistorialPedidos(whatsapp, sheets);
+      // 3. Productos con precios personalizados
+      const productos = await this.obtenerProductosConPrecios(whatsapp, sheets);
       
-      // 4. Obtener productos disponibles (tabla Inventario)
-      const productosDisponibles = await this.obtenerProductosDisponibles(sheets);
+      // 4. Historial de pedidos
+      const pedidos = await this.obtenerHistorialPedidos(whatsapp, sheets);
       
-      // 5. Obtener configuración del negocio (tabla Configuracion)
-      const configuracionNegocio = await this.obtenerConfiguracionNegocio(sheets);
-      
-      // 6. Obtener últimas conversaciones (Firestore)
-      const conversacionesRecientes = await this.obtenerConversacionesRecientes(
+      // 5. Últimas conversaciones
+      const conversaciones = await this.obtenerUltimasConversaciones(
         whatsapp, 
         negocio.id, 
         firebaseService
       );
       
-      // 7. Construir contexto enriquecido
+      // 6. Construir contexto enriquecido
       const contexto = this.construirContextoEnriquecido({
-        datosCliente,
-        preciosPersonalizados,
-        historialPedidos,
-        productosDisponibles,
-        configuracionNegocio,
-        conversacionesRecientes
+        configuracion,
+        cliente,
+        productos,
+        pedidos,
+        conversaciones,
+        negocio
       });
       
       console.log(`✅ Contexto construido: ${contexto.length} caracteres`);
@@ -65,141 +57,157 @@ class ClienteContextService {
       
     } catch (error) {
       console.error('❌ Error obteniendo contexto del cliente:', error.message);
-      // Si falla, devolver contexto mínimo (no romper el flujo)
-      return '\n\n[Cliente nuevo - No hay historial disponible]';
+      // Si falla, devolver contexto mínimo
+      return this.construirContextoMinimo(negocio);
     }
   }
 
   /**
-   * 1. Obtener datos del cliente de la tabla Clientes
-   * Columnas: id, whatsapp, nombre, telefono, direccion, fechaRegistro, 
-   *           ultimaCompra, departamento, ciudad, empresa, notas
+   * 1. Obtener configuración del negocio (hoja Configuracion)
+   */
+  async obtenerConfiguracion(sheets) {
+    try {
+      const config = await sheets.getConfiguracion();
+      return {
+        promptNegocio: config.prompt_negocio || '',
+        reglasVenta: config.reglas_venta || '',
+        tono: config.tono || 'amable y profesional',
+        infoAdicional: config.info_adicional || '',
+        horario: config.horario || '',
+        departamento: config.departamento || 'Lima'
+      };
+    } catch (error) {
+      console.log('⚠️ Error obteniendo configuración:', error.message);
+      return {
+        promptNegocio: '',
+        reglasVenta: '',
+        tono: 'amable y profesional',
+        infoAdicional: '',
+        horario: '',
+        departamento: 'Lima'
+      };
+    }
+  }
+
+  /**
+   * 2. Obtener datos completos del cliente (hoja Clientes)
    */
   async obtenerDatosCliente(whatsapp, sheets) {
     try {
       const cliente = await sheets.buscarCliente(whatsapp);
       
-      if (cliente) {
-        console.log(`   ✓ Cliente encontrado: ${cliente.nombre || cliente.empresa || 'Sin nombre'}`);
-      } else {
-        console.log(`   ⚠ Cliente nuevo (no registrado)`);
+      if (!cliente) {
+        return {
+          esNuevo: true,
+          whatsapp: whatsapp,
+          nombre: 'No registrado',
+          empresa: 'No registrado',
+          direccion: 'No registrada',
+          telefono: 'No registrado',
+          departamento: 'No registrado',
+          ciudad: 'No registrado',
+          fechaRegistro: null,
+          ultimaCompra: null,
+          notas: ''
+        };
       }
       
-      return cliente;
-    } catch (e) {
-      console.log(`   ⚠ Error buscando cliente:`, e.message);
-      return null;
+      return {
+        esNuevo: false,
+        whatsapp: cliente.whatsapp || whatsapp,
+        nombre: cliente.nombre || 'No registrado',
+        empresa: cliente.empresa || 'No registrado',
+        direccion: cliente.direccion || 'No registrada',
+        telefono: cliente.telefono || 'No registrado',
+        departamento: cliente.departamento || 'No registrado',
+        ciudad: cliente.ciudad || 'No registrado',
+        fechaRegistro: cliente.fechaRegistro || null,
+        ultimaCompra: cliente.ultimaCompra || null,
+        notas: cliente.notas || ''
+      };
+    } catch (error) {
+      console.log('⚠️ Error obteniendo datos del cliente:', error.message);
+      return { esNuevo: true, whatsapp: whatsapp };
     }
   }
 
   /**
-   * 2. Obtener precios personalizados de la tabla PreciosClientes
-   * Columnas: clienteId, codigoProducto, precioPersonalizado, fechaActualizacion, actualizadoPor
+   * 3. Obtener productos CON precios personalizados (Inventario + PreciosClientes)
    */
-  async obtenerPreciosPersonalizados(whatsapp, clienteId, sheets) {
+  async obtenerProductosConPrecios(whatsapp, sheets) {
     try {
-      if (!clienteId) return {};
+      // Usar el método que ya existe en sheets-service
+      const productos = await sheets.getProductosConPrecios(whatsapp);
       
-      const rows = await sheets.getRows('PreciosClientes!A:E');
-      const precios = {};
+      return productos.map(p => ({
+        codigo: p.codigo,
+        nombre: p.nombre,
+        descripcion: p.descripcion || '',
+        precio: p.precio,
+        precioOriginal: p.precioOriginal || p.precio,
+        tieneDescuento: p.tieneDescuento || false,
+        stock: p.disponible || 0,
+        imagenUrl: p.imagenUrl || '',
+        categoria: p.categoria || ''
+      }));
+    } catch (error) {
+      console.log('⚠️ Error obteniendo productos:', error.message);
       
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (row[0] === clienteId && row[1] && row[2]) {
-          const codigoProducto = row[1];
-          const precio = parseFloat(row[2]) || 0;
-          const fechaActualizacion = row[3] || '';
-          
-          precios[codigoProducto] = {
-            precio,
-            fechaActualizacion
-          };
-        }
+      // Fallback: obtener productos sin precios personalizados
+      try {
+        const productosBase = await sheets.getProductos('ACTIVO');
+        return productosBase.map(p => ({
+          codigo: p.codigo,
+          nombre: p.nombre,
+          descripcion: p.descripcion || '',
+          precio: p.precio,
+          stock: p.disponible || 0
+        }));
+      } catch (e) {
+        return [];
       }
-      
-      const cantidadPrecios = Object.keys(precios).length;
-      if (cantidadPrecios > 0) {
-        console.log(`   ✓ Precios personalizados: ${cantidadPrecios} productos`);
-      }
-      
-      return precios;
-    } catch (e) {
-      console.log(`   ⚠ Error obteniendo precios personalizados:`, e.message);
-      return {};
     }
   }
 
   /**
-   * 3. Obtener historial de pedidos de la tabla Pedidos
-   * Devuelve los últimos 5 pedidos con toda la información
+   * 4. Obtener historial de pedidos (hoja Pedidos)
    */
   async obtenerHistorialPedidos(whatsapp, sheets) {
     try {
       const pedidos = await sheets.getPedidosByWhatsapp(whatsapp);
       
-      // Ordenar por fecha (más recientes primero)
-      const pedidosOrdenados = pedidos.sort((a, b) => {
-        return this.compararFechas(b.fecha, a.fecha);
-      });
-      
-      // Devolver solo los últimos 5
-      const ultimos5 = pedidosOrdenados.slice(0, 5);
-      
-      if (ultimos5.length > 0) {
-        console.log(`   ✓ Historial de pedidos: ${ultimos5.length} pedidos encontrados`);
+      if (!pedidos || pedidos.length === 0) {
+        return [];
       }
       
-      return ultimos5;
-    } catch (e) {
-      console.log(`   ⚠ Error obteniendo pedidos:`, e.message);
+      // Ordenar por fecha (más recientes primero) y tomar últimos 5
+      const pedidosOrdenados = pedidos
+        .filter(p => p.id && p.fecha) // Solo pedidos válidos
+        .sort((a, b) => {
+          const fechaA = this.parsearFecha(a.fecha);
+          const fechaB = this.parsearFecha(b.fecha);
+          return fechaB - fechaA;
+        })
+        .slice(0, 5); // Últimos 5 pedidos
+      
+      return pedidosOrdenados.map(p => ({
+        id: p.id,
+        fecha: p.fecha,
+        productos: this.extraerNombreProducto(p.productos),
+        total: parseFloat(p.total) || 0,
+        estado: p.estado || '',
+        observaciones: p.observaciones || ''
+      }));
+    } catch (error) {
+      console.log('⚠️ Error obteniendo pedidos:', error.message);
       return [];
     }
   }
 
   /**
-   * 4. Obtener productos disponibles del Inventario
-   * Solo productos ACTIVOS con stock disponible
+   * 5. Obtener últimas conversaciones (Firestore)
    */
-  async obtenerProductosDisponibles(sheets) {
-    try {
-      const productos = await sheets.getProductos('ACTIVO');
-      
-      // Filtrar solo productos con stock disponible
-      const disponibles = productos.filter(p => p.disponible > 0);
-      
-      console.log(`   ✓ Productos disponibles: ${disponibles.length} productos`);
-      
-      return disponibles;
-    } catch (e) {
-      console.log(`   ⚠ Error obteniendo inventario:`, e.message);
-      return [];
-    }
-  }
-
-  /**
-   * 5. Obtener configuración del negocio (prompt personalizado, reglas, etc.)
-   * Columnas: prompt_negocio, reglas_venta, tono, info_adicional, horario, departamento
-   */
-  async obtenerConfiguracionNegocio(sheets) {
-    try {
-      const config = await sheets.getConfiguracion();
-      
-      if (config && config.prompt_negocio) {
-        console.log(`   ✓ Configuración del negocio cargada`);
-      }
-      
-      return config || {};
-    } catch (e) {
-      console.log(`   ⚠ Error obteniendo configuración:`, e.message);
-      return {};
-    }
-  }
-
-  /**
-   * 6. Obtener conversaciones recientes del cliente (Firestore)
-   * Últimos 10 mensajes para recordar el contexto de la conversación
-   */
-  async obtenerConversacionesRecientes(whatsapp, negocioId, firebaseService) {
+  async obtenerUltimasConversaciones(whatsapp, negocioId, firebaseService) {
     try {
       if (!firebaseService || !firebaseService.initialized) {
         return [];
@@ -208,234 +216,214 @@ class ClienteContextService {
       const mensajes = await firebaseService.getMensajes(
         negocioId, 
         whatsapp, 
-        10 // Últimos 10 mensajes
+        8 // Últimos 8 mensajes (4 intercambios cliente-bot)
       );
       
-      if (mensajes && mensajes.length > 0) {
-        console.log(`   ✓ Conversaciones recientes: ${mensajes.length} mensajes`);
+      if (!mensajes || mensajes.length === 0) {
+        return [];
       }
       
-      return mensajes || [];
-    } catch (e) {
-      console.log(`   ⚠ Error obteniendo conversaciones:`, e.message);
+      // Formatear mensajes
+      return mensajes.map(m => ({
+        origen: m.origen || 'cliente',
+        texto: m.texto || '',
+        timestamp: m.timestamp
+      }));
+    } catch (error) {
+      console.log('⚠️ Error obteniendo conversaciones:', error.message);
       return [];
     }
   }
 
   /**
-   * 7. Construir contexto enriquecido en formato legible para la IA
+   * 6. Construir contexto enriquecido en formato legible para la IA
    */
-  construirContextoEnriquecido(data) {
-    const {
-      datosCliente,
-      preciosPersonalizados,
-      historialPedidos,
-      productosDisponibles,
-      configuracionNegocio,
-      conversacionesRecientes
-    } = data;
+  construirContextoEnriquecido(datos) {
+    const { configuracion, cliente, productos, pedidos, conversaciones, negocio } = datos;
     
-    let contexto = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    contexto += '📋 CONTEXTO COMPLETO DEL CLIENTE (MEMORIA)\n';
-    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    let contexto = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    contexto += '📊 CONTEXTO DEL CLIENTE (Memoria del Sistema)\n';
+    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     
-    // ===== SECCIÓN 1: DATOS DEL CLIENTE =====
-    if (datosCliente) {
-      contexto += '\n👤 DATOS DEL CLIENTE:\n';
-      contexto += `   • Nombre: ${datosCliente.nombre || 'No registrado'}\n`;
-      if (datosCliente.empresa) {
-        contexto += `   • Empresa: ${datosCliente.empresa}\n`;
-      }
-      if (datosCliente.telefono) {
-        contexto += `   • Teléfono: ${datosCliente.telefono}\n`;
-      }
-      if (datosCliente.direccion) {
-        contexto += `   • Dirección: ${datosCliente.direccion}\n`;
-      }
-      if (datosCliente.ciudad || datosCliente.departamento) {
-        contexto += `   • Ubicación: ${datosCliente.ciudad || ''} ${datosCliente.departamento || ''}\n`;
-      }
-      if (datosCliente.fechaRegistro) {
-        contexto += `   • Cliente desde: ${datosCliente.fechaRegistro}\n`;
-      }
-      if (datosCliente.notas) {
-        contexto += `   • Notas: ${datosCliente.notas}\n`;
-      }
+    // SECCIÓN 1: Información del cliente
+    if (cliente.esNuevo) {
+      contexto += '👤 CLIENTE NUEVO\n';
+      contexto += '- Sin historial previo en el sistema\n';
+      contexto += '- WhatsApp: ' + cliente.whatsapp + '\n\n';
     } else {
-      contexto += '\n👤 CLIENTE NUEVO (sin datos registrados)\n';
+      contexto += '👤 INFORMACIÓN DEL CLIENTE\n';
+      contexto += '- Nombre: ' + cliente.nombre + '\n';
+      if (cliente.empresa !== 'No registrado') {
+        contexto += '- Empresa: ' + cliente.empresa + '\n';
+      }
+      contexto += '- Dirección: ' + cliente.direccion + '\n';
+      contexto += '- Teléfono: ' + cliente.telefono + '\n';
+      if (cliente.departamento !== 'No registrado') {
+        contexto += '- Ubicación: ' + cliente.ciudad + ', ' + cliente.departamento + '\n';
+      }
+      if (cliente.fechaRegistro) {
+        contexto += '- Cliente desde: ' + cliente.fechaRegistro + '\n';
+      }
+      if (cliente.ultimaCompra) {
+        contexto += '- Última compra: ' + cliente.ultimaCompra + '\n';
+      }
+      if (cliente.notas) {
+        contexto += '- Notas importantes: ' + cliente.notas + '\n';
+      }
+      contexto += '\n';
     }
     
-    // ===== SECCIÓN 2: HISTORIAL DE PEDIDOS =====
-    if (historialPedidos && historialPedidos.length > 0) {
-      contexto += '\n📦 HISTORIAL DE PEDIDOS (últimos 5):\n';
-      
-      historialPedidos.forEach((pedido, idx) => {
-        const numero = idx + 1;
-        contexto += `\n   ${numero}. Pedido ${pedido.id} - ${pedido.fecha}\n`;
-        contexto += `      Productos: ${pedido.productos}\n`;
-        contexto += `      Total: S/${pedido.total}\n`;
-        contexto += `      Estado: ${pedido.estado}\n`;
-        if (pedido.observaciones) {
-          contexto += `      Obs: ${pedido.observaciones}\n`;
+    // SECCIÓN 2: Historial de pedidos
+    if (pedidos.length > 0) {
+      contexto += '📦 HISTORIAL DE PEDIDOS (Últimos ' + pedidos.length + ')\n';
+      pedidos.forEach((p, idx) => {
+        contexto += `${idx + 1}. [${p.fecha}] ${p.productos} - S/${p.total.toFixed(2)} (${p.estado})`;
+        if (p.observaciones) {
+          contexto += ` - Nota: ${p.observaciones}`;
         }
+        contexto += '\n';
       });
       
       // Análisis de preferencias
-      contexto += '\n   💡 PREFERENCIAS DETECTADAS:\n';
-      const productosMasComprados = this.analizarProductosFavoritos(historialPedidos);
-      productosMasComprados.forEach(p => {
-        contexto += `      • ${p.nombre} (comprado ${p.veces} veces)\n`;
-      });
-      
+      const productosComprados = this.analizarPreferencias(pedidos);
+      if (productosComprados.length > 0) {
+        contexto += '\n💡 Productos que más compra:\n';
+        productosComprados.slice(0, 3).forEach(p => {
+          contexto += `   - ${p.nombre} (${p.veces} veces)\n`;
+        });
+      }
+      contexto += '\n';
     } else {
-      contexto += '\n📦 Sin pedidos anteriores (cliente nuevo)\n';
+      contexto += '📦 SIN PEDIDOS ANTERIORES\n';
+      contexto += '- Este cliente no ha realizado compras previas\n\n';
     }
     
-    // ===== SECCIÓN 3: PRECIOS PERSONALIZADOS =====
-    if (preciosPersonalizados && Object.keys(preciosPersonalizados).length > 0) {
-      contexto += '\n💰 PRECIOS PERSONALIZADOS PARA ESTE CLIENTE:\n';
+    // SECCIÓN 3: Productos disponibles CON precios personalizados
+    if (productos.length > 0) {
+      const tieneDescuentos = productos.some(p => p.tieneDescuento);
       
-      for (const [codigo, info] of Object.entries(preciosPersonalizados)) {
-        // Buscar nombre del producto
-        const producto = productosDisponibles.find(p => p.codigo === codigo);
-        const nombre = producto ? producto.nombre : codigo;
-        
-        contexto += `   • ${nombre}: S/${info.precio} (precio especial)\n`;
+      contexto += '🛒 CATÁLOGO DE PRODUCTOS';
+      if (tieneDescuentos) {
+        contexto += ' (CON PRECIOS ESPECIALES PARA ESTE CLIENTE)';
       }
+      contexto += '\n';
       
-      contexto += '\n   ⚠️ IMPORTANTE: Usa SIEMPRE estos precios personalizados para este cliente.\n';
-    }
-    
-    // ===== SECCIÓN 4: CATÁLOGO DE PRODUCTOS =====
-    if (productosDisponibles && productosDisponibles.length > 0) {
-      contexto += '\n🛒 CATÁLOGO DE PRODUCTOS DISPONIBLES:\n';
-      
-      productosDisponibles.forEach(p => {
-        // Verificar si tiene precio personalizado
-        const precioPersonalizado = preciosPersonalizados[p.codigo];
-        const precio = precioPersonalizado ? precioPersonalizado.precio : p.precio;
-        const etiquetaPrecio = precioPersonalizado ? '(PRECIO ESPECIAL)' : '';
+      productos.forEach(p => {
+        contexto += `- ${p.codigo}: ${p.nombre}`;
         
-        contexto += `   • ${p.codigo}: ${p.nombre} - S/${precio} ${etiquetaPrecio}\n`;
-        if (p.descripcion) {
-          contexto += `     ${p.descripcion}\n`;
+        if (p.tieneDescuento) {
+          contexto += ` - S/${p.precio} [PRECIO ESPECIAL, antes S/${p.precioOriginal}]`;
+        } else {
+          contexto += ` - S/${p.precio}`;
         }
-        contexto += `     Stock: ${p.disponible} unidades\n`;
+        
+        if (p.descripcion) {
+          contexto += ` (${p.descripcion})`;
+        }
+        
+        if (p.stock !== undefined) {
+          contexto += ` | Stock: ${p.stock}`;
+        }
+        
+        contexto += '\n';
       });
+      contexto += '\n';
     }
     
-    // ===== SECCIÓN 5: CONVERSACIONES RECIENTES =====
-    if (conversacionesRecientes && conversacionesRecientes.length > 0) {
-      contexto += '\n💬 CONVERSACIÓN RECIENTE (últimos mensajes):\n';
-      
-      conversacionesRecientes.slice(-5).forEach(msg => {
-        const rol = msg.origen === 'cliente' ? '👤 Cliente' : '🤖 Bot';
-        const fecha = msg.timestamp ? this.formatearFechaHora(msg.timestamp) : '';
-        contexto += `   ${rol} (${fecha}): "${msg.texto}"\n`;
+    // SECCIÓN 4: Últimas conversaciones
+    if (conversaciones.length > 0) {
+      contexto += '💬 ÚLTIMAS CONVERSACIONES\n';
+      conversaciones.forEach(conv => {
+        const emoji = conv.origen === 'cliente' ? '👤' : '🤖';
+        contexto += `${emoji} ${conv.origen}: "${conv.texto}"\n`;
       });
-      
-      contexto += '\n   💡 Usa este contexto para dar continuidad a la conversación.\n';
+      contexto += '\n';
     }
     
-    // ===== SECCIÓN 6: CONFIGURACIÓN DEL NEGOCIO =====
-    if (configuracionNegocio && configuracionNegocio.prompt_negocio) {
-      contexto += '\n🏪 INFORMACIÓN DEL NEGOCIO:\n';
-      contexto += `${configuracionNegocio.prompt_negocio}\n`;
-      
-      if (configuracionNegocio.reglas_venta) {
-        contexto += `\n📋 REGLAS DE VENTA:\n${configuracionNegocio.reglas_venta}\n`;
-      }
-      
-      if (configuracionNegocio.info_adicional) {
-        contexto += `\n📌 INFO ADICIONAL:\n${configuracionNegocio.info_adicional}\n`;
-      }
-      
-      if (configuracionNegocio.horario) {
-        contexto += `\n🕐 HORARIO: ${configuracionNegocio.horario}\n`;
-      }
+    // SECCIÓN 5: Configuración del negocio
+    if (configuracion.promptNegocio) {
+      contexto += '🏪 INFORMACIÓN DEL NEGOCIO\n';
+      contexto += configuracion.promptNegocio + '\n\n';
     }
     
-    contexto += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    contexto += '⚠️ INSTRUCCIONES:\n';
-    contexto += '• USA toda esta información para personalizar tus respuestas\n';
-    contexto += '• Si el cliente ya compró algo, menciónalo naturalmente\n';
-    contexto += '• Si tiene precios especiales, úsalos SIEMPRE\n';
-    contexto += '• Si hay conversaciones previas, da continuidad\n';
-    contexto += '• Sé natural, NO menciones que tienes "memoria" o "historial"\n';
-    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+    if (configuracion.reglasVenta) {
+      contexto += '📋 REGLAS DE VENTA\n';
+      contexto += configuracion.reglasVenta + '\n\n';
+    }
+    
+    if (configuracion.infoAdicional) {
+      contexto += '💡 INFORMACIÓN ADICIONAL\n';
+      contexto += configuracion.infoAdicional + '\n\n';
+    }
+    
+    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    contexto += 'IMPORTANTE: Usa esta información para personalizar tu respuesta.\n';
+    contexto += 'Si el cliente ya tiene pedidos, menciona sus preferencias.\n';
+    contexto += 'Si tiene precios especiales, menciónalo como beneficio.\n';
+    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     
     return contexto;
   }
 
   /**
-   * Analizar productos más comprados del historial
+   * Analizar preferencias del cliente basado en pedidos
    */
-  analizarProductosFavoritos(pedidos) {
-    const contadorProductos = {};
+  analizarPreferencias(pedidos) {
+    const contador = {};
     
-    pedidos.forEach(pedido => {
-      const productosStr = pedido.productos || '';
-      
-      // Parsear productos (formato: "5x Cafe Blend - S/350.00")
-      const match = productosStr.match(/\d+x\s+(.+?)\s+-\s+S\//);
-      if (match) {
-        const nombreProducto = match[1].trim();
-        contadorProductos[nombreProducto] = (contadorProductos[nombreProducto] || 0) + 1;
-      }
+    pedidos.forEach(p => {
+      const producto = this.extraerNombreProducto(p.productos);
+      contador[producto] = (contador[producto] || 0) + 1;
     });
     
-    // Convertir a array y ordenar por frecuencia
-    const productos = Object.entries(contadorProductos)
+    return Object.entries(contador)
       .map(([nombre, veces]) => ({ nombre, veces }))
-      .sort((a, b) => b.veces - a.veces)
-      .slice(0, 3); // Top 3
-    
-    return productos;
+      .sort((a, b) => b.veces - a.veces);
   }
 
   /**
-   * Comparar fechas en formato DD/MM/YYYY
+   * Extraer nombre simple de producto del formato "5x Cafe - S/350"
    */
-  compararFechas(fecha1, fecha2) {
-    const f1 = this.parsearFecha(fecha1);
-    const f2 = this.parsearFecha(fecha2);
-    return f1 - f2;
+  extraerNombreProducto(productosStr) {
+    if (!productosStr) return 'Producto';
+    
+    try {
+      // Formato: "5x Cafe Blend - S/350.00"
+      const match = productosStr.match(/\d+x\s+(.+?)\s+-/);
+      if (match) {
+        return match[1].trim();
+      }
+      
+      // Si no coincide, devolver primeros 30 caracteres
+      return productosStr.substring(0, 30);
+    } catch (e) {
+      return 'Producto';
+    }
   }
 
   /**
-   * Parsear fecha en formato DD/MM/YYYY a Date
+   * Parsear fecha en formato DD/MM/YYYY
    */
   parsearFecha(fechaStr) {
     if (!fechaStr) return new Date(0);
     
-    const partes = fechaStr.split('/');
-    if (partes.length === 3) {
-      const dia = parseInt(partes[0]);
-      const mes = parseInt(partes[1]) - 1;
-      const año = parseInt(partes[2]);
-      return new Date(año, mes, dia);
+    try {
+      const partes = fechaStr.split('/');
+      if (partes.length === 3) {
+        // DD/MM/YYYY
+        return new Date(partes[2], partes[1] - 1, partes[0]);
+      }
+      return new Date(fechaStr);
+    } catch (e) {
+      return new Date(0);
     }
-    
-    return new Date(0);
   }
 
   /**
-   * Formatear fecha/hora de timestamp
+   * Construir contexto mínimo si falla la carga completa
    */
-  formatearFechaHora(timestamp) {
-    if (!timestamp) return '';
-    
-    try {
-      const fecha = timestamp instanceof Date ? timestamp : new Date(timestamp);
-      const dia = String(fecha.getDate()).padStart(2, '0');
-      const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-      const hora = String(fecha.getHours()).padStart(2, '0');
-      const min = String(fecha.getMinutes()).padStart(2, '0');
-      
-      return `${dia}/${mes} ${hora}:${min}`;
-    } catch (e) {
-      return '';
-    }
+  construirContextoMinimo(negocio) {
+    return `\n\nCLIENTE NUEVO sin historial.\nNegocio: ${negocio.nombre}\n`;
   }
 }
 
