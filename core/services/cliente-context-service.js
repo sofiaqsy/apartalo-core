@@ -1,5 +1,7 @@
 /**
- * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada)
+ * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.0
+ * 
+ * OPTIMIZADO CON CACHÉ para evitar exceder límite de Google Sheets API
  * 
  * Servicio para construir contexto enriquecido del cliente usando:
  * - Inventario: Productos disponibles
@@ -9,39 +11,50 @@
  * - Configuracion: Prompt personalizado del negocio
  * - Firestore: Últimas conversaciones
  * 
- * Esto permite que la IA "recuerde" al cliente sin necesidad de fine-tuning.
+ * CACHÉ: 5 minutos en memoria para reducir lecturas a Sheets
  */
 
 class ClienteContextService {
+  constructor() {
+    // Caché en memoria con TTL de 5 minutos
+    this.cache = new Map();
+    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+  }
+
   /**
-   * Obtener contexto COMPLETO del cliente para enriquecer el prompt de la IA
+   * Obtener contexto COMPLETO del cliente con CACHÉ
    */
   async obtenerContextoCompleto(whatsapp, context) {
     const { sheets, negocio, firebaseService } = context;
     
+    // Verificar caché primero
+    const cacheKey = `${negocio.id}:${whatsapp}`;
+    const cached = this.cache.get(cacheKey);
+    
+    if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL) {
+      console.log(`⚡ Usando contexto en caché para ${whatsapp} (${Math.round((Date.now() - cached.timestamp) / 1000)}s ago)`);
+      return cached.contexto;
+    }
+    
     console.log(`🧠 Construyendo contexto completo para ${whatsapp}...`);
     
     try {
-      // 1. Configuración del negocio (prompt personalizado)
-      const configuracion = await this.obtenerConfiguracion(sheets);
+      // Recuperar datos (solo si no están en caché)
+      const [configuracion, cliente, productos, pedidos] = await Promise.all([
+        this.obtenerConfiguracion(sheets),
+        this.obtenerDatosCliente(whatsapp, sheets),
+        this.obtenerProductosConPrecios(whatsapp, sheets),
+        this.obtenerHistorialPedidos(whatsapp, sheets)
+      ]);
       
-      // 2. Datos completos del cliente
-      const cliente = await this.obtenerDatosCliente(whatsapp, sheets);
-      
-      // 3. Productos con precios personalizados
-      const productos = await this.obtenerProductosConPrecios(whatsapp, sheets);
-      
-      // 4. Historial de pedidos
-      const pedidos = await this.obtenerHistorialPedidos(whatsapp, sheets);
-      
-      // 5. Últimas conversaciones
+      // Conversaciones siempre frescas (Firestore no tiene límite)
       const conversaciones = await this.obtenerUltimasConversaciones(
         whatsapp, 
         negocio.id, 
         firebaseService
       );
       
-      // 6. Construir contexto enriquecido
+      // Construir contexto
       const contexto = this.construirContextoEnriquecido({
         configuracion,
         cliente,
@@ -51,14 +64,51 @@ class ClienteContextService {
         negocio
       });
       
-      console.log(`✅ Contexto construido: ${contexto.length} caracteres`);
+      // Guardar en caché
+      this.cache.set(cacheKey, {
+        contexto,
+        timestamp: Date.now()
+      });
+      
+      console.log(`✅ Contexto construido y cacheado: ${contexto.length} caracteres`);
       
       return contexto;
       
     } catch (error) {
       console.error('❌ Error obteniendo contexto del cliente:', error.message);
-      // Si falla, devolver contexto mínimo
       return this.construirContextoMinimo(negocio);
+    }
+  }
+
+  /**
+   * Limpiar caché expirado (llamar periódicamente)
+   */
+  limpiarCacheExpirado() {
+    const ahora = Date.now();
+    let eliminados = 0;
+    
+    for (const [key, value] of this.cache.entries()) {
+      if ((ahora - value.timestamp) >= this.CACHE_TTL) {
+        this.cache.delete(key);
+        eliminados++;
+      }
+    }
+    
+    if (eliminados > 0) {
+      console.log(`🧹 Caché limpiado: ${eliminados} entradas expiradas`);
+    }
+  }
+
+  /**
+   * Invalidar caché de un cliente específico
+   */
+  invalidarCache(negocioId, whatsapp) {
+    const cacheKey = `${negocioId}:${whatsapp}`;
+    const existia = this.cache.has(cacheKey);
+    this.cache.delete(cacheKey);
+    
+    if (existia) {
+      console.log(`🗑️ Caché invalidado para ${whatsapp}`);
     }
   }
 
@@ -136,7 +186,6 @@ class ClienteContextService {
    */
   async obtenerProductosConPrecios(whatsapp, sheets) {
     try {
-      // Usar el método que ya existe en sheets-service
       const productos = await sheets.getProductosConPrecios(whatsapp);
       
       return productos.map(p => ({
@@ -153,7 +202,6 @@ class ClienteContextService {
     } catch (error) {
       console.log('⚠️ Error obteniendo productos:', error.message);
       
-      // Fallback: obtener productos sin precios personalizados
       try {
         const productosBase = await sheets.getProductos('ACTIVO');
         return productosBase.map(p => ({
@@ -180,15 +228,14 @@ class ClienteContextService {
         return [];
       }
       
-      // Ordenar por fecha (más recientes primero) y tomar últimos 5
       const pedidosOrdenados = pedidos
-        .filter(p => p.id && p.fecha) // Solo pedidos válidos
+        .filter(p => p.id && p.fecha)
         .sort((a, b) => {
           const fechaA = this.parsearFecha(a.fecha);
           const fechaB = this.parsearFecha(b.fecha);
           return fechaB - fechaA;
         })
-        .slice(0, 5); // Últimos 5 pedidos
+        .slice(0, 5);
       
       return pedidosOrdenados.map(p => ({
         id: p.id,
@@ -213,17 +260,12 @@ class ClienteContextService {
         return [];
       }
       
-      const mensajes = await firebaseService.getMensajes(
-        negocioId, 
-        whatsapp, 
-        8 // Últimos 8 mensajes (4 intercambios cliente-bot)
-      );
+      const mensajes = await firebaseService.getMensajes(negocioId, whatsapp, 8);
       
       if (!mensajes || mensajes.length === 0) {
         return [];
       }
       
-      // Formatear mensajes
       return mensajes.map(m => ({
         origen: m.origen || 'cliente',
         texto: m.texto || '',
@@ -284,7 +326,6 @@ class ClienteContextService {
         contexto += '\n';
       });
       
-      // Análisis de preferencias
       const productosComprados = this.analizarPreferencias(pedidos);
       if (productosComprados.length > 0) {
         contexto += '\n💡 Productos que más compra:\n';
@@ -298,13 +339,13 @@ class ClienteContextService {
       contexto += '- Este cliente no ha realizado compras previas\n\n';
     }
     
-    // SECCIÓN 3: Productos disponibles CON precios personalizados
+    // SECCIÓN 3: Productos disponibles
     if (productos.length > 0) {
       const tieneDescuentos = productos.some(p => p.tieneDescuento);
       
       contexto += '🛒 CATÁLOGO DE PRODUCTOS';
       if (tieneDescuentos) {
-        contexto += ' (CON PRECIOS ESPECIALES PARA ESTE CLIENTE)';
+        contexto += ' (CON PRECIOS ESPECIALES)';
       }
       contexto += '\n';
       
@@ -365,9 +406,6 @@ class ClienteContextService {
     return contexto;
   }
 
-  /**
-   * Analizar preferencias del cliente basado en pedidos
-   */
   analizarPreferencias(pedidos) {
     const contador = {};
     
@@ -381,36 +419,27 @@ class ClienteContextService {
       .sort((a, b) => b.veces - a.veces);
   }
 
-  /**
-   * Extraer nombre simple de producto del formato "5x Cafe - S/350"
-   */
   extraerNombreProducto(productosStr) {
     if (!productosStr) return 'Producto';
     
     try {
-      // Formato: "5x Cafe Blend - S/350.00"
       const match = productosStr.match(/\d+x\s+(.+?)\s+-/);
       if (match) {
         return match[1].trim();
       }
       
-      // Si no coincide, devolver primeros 30 caracteres
       return productosStr.substring(0, 30);
     } catch (e) {
       return 'Producto';
     }
   }
 
-  /**
-   * Parsear fecha en formato DD/MM/YYYY
-   */
   parsearFecha(fechaStr) {
     if (!fechaStr) return new Date(0);
     
     try {
       const partes = fechaStr.split('/');
       if (partes.length === 3) {
-        // DD/MM/YYYY
         return new Date(partes[2], partes[1] - 1, partes[0]);
       }
       return new Date(fechaStr);
@@ -419,12 +448,13 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * Construir contexto mínimo si falla la carga completa
-   */
   construirContextoMinimo(negocio) {
     return `\n\nCLIENTE NUEVO sin historial.\nNegocio: ${negocio.nombre}\n`;
   }
 }
 
-module.exports = new ClienteContextService();
+// Instancia única con auto-limpieza de caché cada 10 minutos
+const instance = new ClienteContextService();
+setInterval(() => instance.limpiarCacheExpirado(), 10 * 60 * 1000);
+
+module.exports = instance;
