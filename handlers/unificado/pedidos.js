@@ -110,17 +110,21 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     ultimoProductoMostrado: productoCodigoActual
   });
 
-  // Enviar imagen del producto si hay una nueva identificación
+  // CAMBIO: Enviar imagen CON texto como caption (1 solo mensaje)
   if (productoParaMostrar && productoParaMostrar.imagenUrl) {
     try {
-      await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, productoParaMostrar.nombre);
+      // Enviar imagen con el texto de respuesta como caption
+      await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
+      console.log('✅ Imagen enviada con caption');
     } catch (e) {
-      console.log('⚠️ Error enviando imagen:', e.message);
+      console.log('⚠️ Error enviando imagen con caption:', e.message);
+      // Si falla, enviar texto sin imagen
+      await whatsapp.sendMessage(from, resultado.respuesta);
     }
+  } else {
+    // Sin imagen, enviar solo texto
+    await whatsapp.sendMessage(from, resultado.respuesta);
   }
-
-  // Enviar respuesta de texto
-  await whatsapp.sendMessage(from, resultado.respuesta);
 }
 
 /**
