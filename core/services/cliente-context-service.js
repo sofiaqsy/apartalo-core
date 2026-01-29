@@ -1,11 +1,17 @@
 /**
- * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.1
+ * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.2
  * 
- * v2.1: Contexto temporal inteligente - la IA sabe cuántos días pasaron
+ * v2.2: Contexto temporal INTELIGENTE con estados de pedidos
+ *       - Considera si hay pedidos ACTIVOS vs FINALIZADOS
+ *       - Si hay pedido activo, mantiene contexto aunque pasen días
+ *       - Si no hay pedido activo, trata como nueva conversación
  * 
  * OPTIMIZADO CON CACHÉ para evitar exceder límite de Google Sheets API
  * CACHÉ: 5 minutos en memoria para reducir lecturas a Sheets
  */
+
+// Estados finalizados - pedidos que ya no están activos
+const ESTADOS_FINALIZADOS = ['ENTREGADO', 'CANCELADO', 'COMPLETADO'];
 
 class ClienteContextService {
   constructor() {
@@ -71,7 +77,7 @@ class ClienteContextService {
   }
 
   /**
-   * Calcular días desde última interacción
+   * Calcular días desde fecha
    */
   calcularDiasDesde(fechaStr) {
     try {
@@ -81,7 +87,7 @@ class ClienteContextService {
       const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
       return diffDias;
     } catch (e) {
-      return 999; // Si falla, asumir mucho tiempo
+      return 999;
     }
   }
 
@@ -90,11 +96,11 @@ class ClienteContextService {
    */
   calcularHorasDesdeUltimoMensaje(conversaciones) {
     if (!conversaciones || conversaciones.length === 0) {
-      return 9999; // Sin conversaciones = mucho tiempo
+      return 9999;
     }
 
     try {
-      const ultimoMensaje = conversaciones[0]; // Ya vienen ordenados
+      const ultimoMensaje = conversaciones[0];
       if (ultimoMensaje.timestamp) {
         const ahora = Date.now();
         const diffMs = ahora - ultimoMensaje.timestamp;
@@ -104,6 +110,13 @@ class ClienteContextService {
     } catch (e) {}
     
     return 9999;
+  }
+
+  /**
+   * Identificar pedidos activos (no finalizados)
+   */
+  obtenerPedidosActivos(pedidos) {
+    return pedidos.filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
   }
 
   limpiarCacheExpirado() {
@@ -283,66 +296,93 @@ class ClienteContextService {
   }
 
   /**
-   * Construir contexto enriquecido CON INFORMACIÓN TEMPORAL
+   * Construir contexto enriquecido CON INTELIGENCIA TEMPORAL
    */
   construirContextoEnriquecido(datos) {
     const { configuracion, cliente, productos, pedidos, conversaciones, negocio } = datos;
     
-    // NUEVO: Calcular contexto temporal
+    // Calcular contexto temporal
     const horasDesdeUltimoMensaje = this.calcularHorasDesdeUltimoMensaje(conversaciones);
-    const diasDesdeUltimoPedido = pedidos.length > 0 ? this.calcularDiasDesde(pedidos[0].fecha) : 9999;
+    const pedidosActivos = this.obtenerPedidosActivos(pedidos);
+    const pedidoMasReciente = pedidos.length > 0 ? pedidos[0] : null;
+    const diasDesdeUltimoPedido = pedidoMasReciente ? this.calcularDiasDesde(pedidoMasReciente.fecha) : 9999;
     
     let contexto = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     contexto += '📊 CONTEXTO DEL CLIENTE\n';
     contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     
-    // NUEVO: Contexto temporal
+    // CONTEXTO TEMPORAL INTELIGENTE
     contexto += '⏰ CONTEXTO TEMPORAL\n';
-    if (horasDesdeUltimoMensaje < 1) {
-      contexto += '- Última interacción: AHORA (misma sesión)\n';
-      contexto += '- INSTRUCCIÓN: Continúa la conversación con naturalidad\n';
-    } else if (horasDesdeUltimoMensaje < 24) {
-      contexto += `- Última interacción: Hace ${horasDesdeUltimoMensaje} horas\n`;
-      contexto += '- INSTRUCCIÓN: Saluda brevemente, asume cierta continuidad\n';
-    } else {
-      const dias = Math.floor(horasDesdeUltimoMensaje / 24);
-      contexto += `- Última interacción: Hace ${dias} día(s)\n`;
-      contexto += '- INSTRUCCIÓN: Trata como NUEVA conversación, NO asumas que quiere lo mismo\n';
-    }
     
-    if (diasDesdeUltimoPedido < 9999) {
-      contexto += `- Último pedido: Hace ${diasDesdeUltimoPedido} día(s)\n`;
-      if (diasDesdeUltimoPedido > 7) {
-        contexto += '- INSTRUCCIÓN: Mucho tiempo pasó, NO asumas que quiere repetir\n';
+    // Caso 1: Hay pedidos ACTIVOS (no finalizados)
+    if (pedidosActivos.length > 0) {
+      const pedidoActivo = pedidosActivos[0];
+      const diasDesde = this.calcularDiasDesde(pedidoActivo.fecha);
+      
+      contexto += `- ⚠️ PEDIDO ACTIVO: ${pedidoActivo.productos} (${pedidoActivo.estado})\n`;
+      contexto += `- Pedido creado hace ${diasDesde} día(s)\n`;
+      contexto += '- INSTRUCCIÓN: Cliente puede estar preguntando por su pedido activo\n';
+      contexto += '- Si pregunta vagamente ("Hola", "¿Cómo va?"), menciona su pedido activo\n';
+      contexto += '- Si pregunta por otro producto, ayúdale con el nuevo pedido\n\n';
+      
+    } else {
+      // Caso 2: NO hay pedidos activos - usar lógica temporal normal
+      if (horasDesdeUltimoMensaje < 1) {
+        contexto += '- Última interacción: AHORA (misma sesión)\n';
+        contexto += '- INSTRUCCIÓN: Continúa conversación actual\n\n';
+      } else if (horasDesdeUltimoMensaje < 24) {
+        contexto += `- Última interacción: Hace ${horasDesdeUltimoMensaje} hora(s)\n`;
+        contexto += '- INSTRUCCIÓN: Saluda brevemente, puede haber continuidad\n\n';
+      } else {
+        const dias = Math.floor(horasDesdeUltimoMensaje / 24);
+        contexto += `- Última interacción: Hace ${dias} día(s)\n`;
+        
+        if (pedidoMasReciente && diasDesdeUltimoPedido < 30) {
+          contexto += `- Último pedido (FINALIZADO): Hace ${diasDesdeUltimoPedido} día(s)\n`;
+          if (diasDesdeUltimoPedido <= 7) {
+            contexto += '- INSTRUCCIÓN: Pregunta si quedó satisfecho, puede querer repetir\n\n';
+          } else {
+            contexto += '- INSTRUCCIÓN: Mucho tiempo pasó, NO asumas que quiere repetir\n\n';
+          }
+        } else {
+          contexto += '- INSTRUCCIÓN: Trata como NUEVA conversación\n\n';
+        }
       }
     }
-    contexto += '\n';
     
-    // SECCIÓN 1: Información del cliente
-    if (cliente.esNuevo) {
-      contexto += '👤 CLIENTE NUEVO\n';
-      contexto += '- Sin historial previo\n\n';
-    } else {
-      contexto += '👤 INFORMACIÓN DEL CLIENTE\n';
+    // Información del cliente
+    if (!cliente.esNuevo) {
+      contexto += '👤 CLIENTE REGISTRADO\n';
       contexto += '- Nombre: ' + cliente.nombre + '\n';
-      if (cliente.empresa !== 'No registrado') {
-        contexto += '- Empresa: ' + cliente.empresa + '\n';
+      if (cliente.direccion !== 'No registrada') {
+        contexto += '- Dirección guardada: ' + cliente.direccion + '\n';
       }
-      contexto += '- Dirección: ' + cliente.direccion + '\n';
-      contexto += '- Teléfono: ' + cliente.telefono + '\n\n';
-    }
-    
-    // SECCIÓN 2: Historial de pedidos
-    if (pedidos.length > 0) {
-      contexto += '📦 HISTORIAL DE PEDIDOS (Últimos ' + pedidos.length + ')\n';
-      pedidos.forEach((p, idx) => {
-        const diasDesde = this.calcularDiasDesde(p.fecha);
-        contexto += `${idx + 1}. [${p.fecha}, hace ${diasDesde} días] ${p.productos} - S/${p.total.toFixed(2)}\n`;
-      });
       contexto += '\n';
     }
     
-    // SECCIÓN 3: Productos disponibles
+    // Historial de pedidos (separando activos de finalizados)
+    if (pedidos.length > 0) {
+      if (pedidosActivos.length > 0) {
+        contexto += '📦 PEDIDOS ACTIVOS\n';
+        pedidosActivos.forEach(p => {
+          const diasDesde = this.calcularDiasDesde(p.fecha);
+          contexto += `- ${p.productos} (${p.estado}, hace ${diasDesde} días) - S/${p.total.toFixed(2)}\n`;
+        });
+        contexto += '\n';
+      }
+      
+      const pedidosFinalizados = pedidos.filter(p => ESTADOS_FINALIZADOS.includes(p.estado));
+      if (pedidosFinalizados.length > 0) {
+        contexto += '📜 HISTORIAL (Pedidos completados)\n';
+        pedidosFinalizados.slice(0, 3).forEach(p => {
+          const diasDesde = this.calcularDiasDesde(p.fecha);
+          contexto += `- ${p.productos} (hace ${diasDesde} días)\n`;
+        });
+        contexto += '\n';
+      }
+    }
+    
+    // Catálogo de productos
     if (productos.length > 0) {
       contexto += '🛒 CATÁLOGO\n';
       productos.forEach(p => {
@@ -355,26 +395,13 @@ class ClienteContextService {
       contexto += '\n';
     }
     
-    // SECCIÓN 4: Configuración del negocio
+    // Configuración del negocio
     if (configuracion.promptNegocio) {
       contexto += '🏪 INFO DEL NEGOCIO\n';
       contexto += configuracion.promptNegocio + '\n\n';
     }
     
     return contexto;
-  }
-
-  analizarPreferencias(pedidos) {
-    const contador = {};
-    
-    pedidos.forEach(p => {
-      const producto = this.extraerNombreProducto(p.productos);
-      contador[producto] = (contador[producto] || 0) + 1;
-    });
-    
-    return Object.entries(contador)
-      .map(([nombre, veces]) => ({ nombre, veces }))
-      .sort((a, b) => b.veces - a.veces);
   }
 
   extraerNombreProducto(productosStr) {
