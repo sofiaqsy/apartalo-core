@@ -1,31 +1,20 @@
 /**
- * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.2
+ * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.3
  * 
- * v2.2: Contexto temporal INTELIGENTE con estados de pedidos
- *       - Considera si hay pedidos ACTIVOS vs FINALIZADOS
- *       - Si hay pedido activo, mantiene contexto aunque pasen días
- *       - Si no hay pedido activo, trata como nueva conversación
- * 
- * OPTIMIZADO CON CACHÉ para evitar exceder límite de Google Sheets API
- * CACHÉ: 5 minutos en memoria para reducir lecturas a Sheets
+ * v2.3: REGLAS DE VENTA AL INICIO del contexto para evitar alucinaciones
  */
 
-// Estados finalizados - pedidos que ya no están activos
 const ESTADOS_FINALIZADOS = ['ENTREGADO', 'CANCELADO', 'COMPLETADO'];
 
 class ClienteContextService {
   constructor() {
     this.cache = new Map();
-    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+    this.CACHE_TTL = 5 * 60 * 1000;
   }
 
-  /**
-   * Obtener contexto COMPLETO del cliente con CACHÉ
-   */
   async obtenerContextoCompleto(whatsapp, context) {
     const { sheets, negocio, firebaseService } = context;
     
-    // Verificar caché primero
     const cacheKey = `${negocio.id}:${whatsapp}`;
     const cached = this.cache.get(cacheKey);
     
@@ -50,7 +39,6 @@ class ClienteContextService {
         firebaseService
       );
       
-      // Construir contexto
       const contexto = this.construirContextoEnriquecido({
         configuracion,
         cliente,
@@ -60,7 +48,6 @@ class ClienteContextService {
         negocio
       });
       
-      // Guardar en caché
       this.cache.set(cacheKey, {
         contexto,
         timestamp: Date.now()
@@ -76,9 +63,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * Calcular días desde fecha
-   */
   calcularDiasDesde(fechaStr) {
     try {
       const fecha = this.parsearFecha(fechaStr);
@@ -91,9 +75,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * Calcular horas desde último mensaje
-   */
   calcularHorasDesdeUltimoMensaje(conversaciones) {
     if (!conversaciones || conversaciones.length === 0) {
       return 9999;
@@ -112,9 +93,6 @@ class ClienteContextService {
     return 9999;
   }
 
-  /**
-   * Identificar pedidos activos (no finalizados)
-   */
   obtenerPedidosActivos(pedidos) {
     return pedidos.filter(p => !ESTADOS_FINALIZADOS.includes(p.estado));
   }
@@ -178,14 +156,8 @@ class ClienteContextService {
           esNuevo: true,
           whatsapp: whatsapp,
           nombre: 'No registrado',
-          empresa: 'No registrado',
           direccion: 'No registrada',
-          telefono: 'No registrado',
-          departamento: 'No registrado',
-          ciudad: 'No registrado',
-          fechaRegistro: null,
-          ultimaCompra: null,
-          notas: ''
+          telefono: 'No registrado'
         };
       }
       
@@ -193,14 +165,8 @@ class ClienteContextService {
         esNuevo: false,
         whatsapp: cliente.whatsapp || whatsapp,
         nombre: cliente.nombre || 'No registrado',
-        empresa: cliente.empresa || 'No registrado',
         direccion: cliente.direccion || 'No registrada',
-        telefono: cliente.telefono || 'No registrado',
-        departamento: cliente.departamento || 'No registrado',
-        ciudad: cliente.ciudad || 'No registrado',
-        fechaRegistro: cliente.fechaRegistro || null,
-        ultimaCompra: cliente.ultimaCompra || null,
-        notas: cliente.notas || ''
+        telefono: cliente.telefono || 'No registrado'
       };
     } catch (error) {
       console.log('⚠️ Error obteniendo datos del cliente:', error.message);
@@ -219,9 +185,7 @@ class ClienteContextService {
         precio: p.precio,
         precioOriginal: p.precioOriginal || p.precio,
         tieneDescuento: p.tieneDescuento || false,
-        stock: p.disponible || 0,
-        imagenUrl: p.imagenUrl || '',
-        categoria: p.categoria || ''
+        stock: p.disponible || 0
       }));
     } catch (error) {
       console.log('⚠️ Error obteniendo productos:', error.message);
@@ -263,8 +227,7 @@ class ClienteContextService {
         fecha: p.fecha,
         productos: this.extraerNombreProducto(p.productos),
         total: parseFloat(p.total) || 0,
-        estado: p.estado || '',
-        observaciones: p.observaciones || ''
+        estado: p.estado || ''
       }));
     } catch (error) {
       console.log('⚠️ Error obteniendo pedidos:', error.message);
@@ -296,109 +259,84 @@ class ClienteContextService {
   }
 
   /**
-   * Construir contexto enriquecido CON INTELIGENCIA TEMPORAL
+   * Construir contexto enriquecido - REGLAS DE VENTA PRIMERO
    */
   construirContextoEnriquecido(datos) {
     const { configuracion, cliente, productos, pedidos, conversaciones, negocio } = datos;
     
-    // Calcular contexto temporal
     const horasDesdeUltimoMensaje = this.calcularHorasDesdeUltimoMensaje(conversaciones);
     const pedidosActivos = this.obtenerPedidosActivos(pedidos);
     const pedidoMasReciente = pedidos.length > 0 ? pedidos[0] : null;
     const diasDesdeUltimoPedido = pedidoMasReciente ? this.calcularDiasDesde(pedidoMasReciente.fecha) : 9999;
     
     let contexto = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    contexto += '📊 CONTEXTO DEL CLIENTE\n';
+    contexto += '📋 REGLAS DE VENTA (LEE ESTO PRIMERO)\n';
     contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     
-    // CONTEXTO TEMPORAL INTELIGENTE
-    contexto += '⏰ CONTEXTO TEMPORAL\n';
-    
-    // Caso 1: Hay pedidos ACTIVOS (no finalizados)
-    if (pedidosActivos.length > 0) {
-      const pedidoActivo = pedidosActivos[0];
-      const diasDesde = this.calcularDiasDesde(pedidoActivo.fecha);
-      
-      contexto += `- ⚠️ PEDIDO ACTIVO: ${pedidoActivo.productos} (${pedidoActivo.estado})\n`;
-      contexto += `- Pedido creado hace ${diasDesde} día(s)\n`;
-      contexto += '- INSTRUCCIÓN: Cliente puede estar preguntando por su pedido activo\n';
-      contexto += '- Si pregunta vagamente ("Hola", "¿Cómo va?"), menciona su pedido activo\n';
-      contexto += '- Si pregunta por otro producto, ayúdale con el nuevo pedido\n\n';
-      
-    } else {
-      // Caso 2: NO hay pedidos activos - usar lógica temporal normal
-      if (horasDesdeUltimoMensaje < 1) {
-        contexto += '- Última interacción: AHORA (misma sesión)\n';
-        contexto += '- INSTRUCCIÓN: Continúa conversación actual\n\n';
-      } else if (horasDesdeUltimoMensaje < 24) {
-        contexto += `- Última interacción: Hace ${horasDesdeUltimoMensaje} hora(s)\n`;
-        contexto += '- INSTRUCCIÓN: Saluda brevemente, puede haber continuidad\n\n';
-      } else {
-        const dias = Math.floor(horasDesdeUltimoMensaje / 24);
-        contexto += `- Última interacción: Hace ${dias} día(s)\n`;
-        
-        if (pedidoMasReciente && diasDesdeUltimoPedido < 30) {
-          contexto += `- Último pedido (FINALIZADO): Hace ${diasDesdeUltimoPedido} día(s)\n`;
-          if (diasDesdeUltimoPedido <= 7) {
-            contexto += '- INSTRUCCIÓN: Pregunta si quedó satisfecho, puede querer repetir\n\n';
-          } else {
-            contexto += '- INSTRUCCIÓN: Mucho tiempo pasó, NO asumas que quiere repetir\n\n';
-          }
-        } else {
-          contexto += '- INSTRUCCIÓN: Trata como NUEVA conversación\n\n';
-        }
-      }
+    // SECCIÓN CRÍTICA: REGLAS DE VENTA
+    if (configuracion.reglasVenta) {
+      contexto += configuracion.reglasVenta + '\n\n';
     }
     
-    // Información del cliente
-    if (!cliente.esNuevo) {
-      contexto += '👤 CLIENTE REGISTRADO\n';
-      contexto += '- Nombre: ' + cliente.nombre + '\n';
-      if (cliente.direccion !== 'No registrada') {
-        contexto += '- Dirección guardada: ' + cliente.direccion + '\n';
-      }
-      contexto += '\n';
-    }
-    
-    // Historial de pedidos (separando activos de finalizados)
-    if (pedidos.length > 0) {
-      if (pedidosActivos.length > 0) {
-        contexto += '📦 PEDIDOS ACTIVOS\n';
-        pedidosActivos.forEach(p => {
-          const diasDesde = this.calcularDiasDesde(p.fecha);
-          contexto += `- ${p.productos} (${p.estado}, hace ${diasDesde} días) - S/${p.total.toFixed(2)}\n`;
-        });
-        contexto += '\n';
-      }
-      
-      const pedidosFinalizados = pedidos.filter(p => ESTADOS_FINALIZADOS.includes(p.estado));
-      if (pedidosFinalizados.length > 0) {
-        contexto += '📜 HISTORIAL (Pedidos completados)\n';
-        pedidosFinalizados.slice(0, 3).forEach(p => {
-          const diasDesde = this.calcularDiasDesde(p.fecha);
-          contexto += `- ${p.productos} (hace ${diasDesde} días)\n`;
-        });
-        contexto += '\n';
-      }
+    if (configuracion.infoAdicional) {
+      contexto += configuracion.infoAdicional + '\n\n';
     }
     
     // Catálogo de productos
     if (productos.length > 0) {
-      contexto += '🛒 CATÁLOGO\n';
+      contexto += '🛒 CATÁLOGO DISPONIBLE\n';
       productos.forEach(p => {
-        contexto += `- ${p.codigo}: ${p.nombre} - S/${p.precio}`;
+        contexto += `- ${p.codigo}: ${p.nombre}`;
+        if (p.descripcion) {
+          contexto += ` (${p.descripcion})`;
+        }
+        contexto += ` - S/${p.precio}`;
         if (p.tieneDescuento) {
-          contexto += ' [ESPECIAL]';
+          contexto += ' [PRECIO ESPECIAL]';
         }
         contexto += '\n';
       });
       contexto += '\n';
     }
     
-    // Configuración del negocio
-    if (configuracion.promptNegocio) {
-      contexto += '🏪 INFO DEL NEGOCIO\n';
-      contexto += configuracion.promptNegocio + '\n\n';
+    // CONTEXTO TEMPORAL
+    contexto += '⏰ CONTEXTO TEMPORAL\n';
+    
+    if (pedidosActivos.length > 0) {
+      const pedidoActivo = pedidosActivos[0];
+      const diasDesde = this.calcularDiasDesde(pedidoActivo.fecha);
+      
+      contexto += `- PEDIDO ACTIVO: ${pedidoActivo.productos} (${pedidoActivo.estado}, hace ${diasDesde} días)\n`;
+      contexto += '- Cliente puede estar preguntando por su pedido activo\n\n';
+      
+    } else {
+      if (horasDesdeUltimoMensaje < 1) {
+        contexto += '- Última interacción: AHORA (continúa conversación)\n\n';
+      } else if (horasDesdeUltimoMensaje < 24) {
+        contexto += `- Última interacción: Hace ${horasDesdeUltimoMensaje} horas\n\n`;
+      } else {
+        const dias = Math.floor(horasDesdeUltimoMensaje / 24);
+        contexto += `- Última interacción: Hace ${dias} días (trata como nueva conversación)\n\n`;
+      }
+    }
+    
+    // Información del cliente
+    if (!cliente.esNuevo) {
+      contexto += '👤 CLIENTE: ' + cliente.nombre + '\n';
+      if (cliente.direccion !== 'No registrada') {
+        contexto += '- Dirección guardada: ' + cliente.direccion + '\n';
+      }
+      contexto += '\n';
+    }
+    
+    // Historial resumido
+    if (pedidos.length > 0) {
+      const pedidosFinalizados = pedidos.filter(p => ESTADOS_FINALIZADOS.includes(p.estado));
+      if (pedidosFinalizados.length > 0) {
+        contexto += '📜 PEDIDOS ANTERIORES: ';
+        contexto += pedidosFinalizados.slice(0, 2).map(p => p.productos).join(', ');
+        contexto += '\n\n';
+      }
     }
     
     return contexto;
