@@ -1,22 +1,14 @@
 /**
- * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.0
+ * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.1
+ * 
+ * v2.1: Contexto temporal inteligente - la IA sabe cuántos días pasaron
  * 
  * OPTIMIZADO CON CACHÉ para evitar exceder límite de Google Sheets API
- * 
- * Servicio para construir contexto enriquecido del cliente usando:
- * - Inventario: Productos disponibles
- * - PreciosClientes: Precios personalizados por cliente
- * - Clientes: Datos completos del cliente
- * - Pedidos: Historial de compras
- * - Configuracion: Prompt personalizado del negocio
- * - Firestore: Últimas conversaciones
- * 
  * CACHÉ: 5 minutos en memoria para reducir lecturas a Sheets
  */
 
 class ClienteContextService {
   constructor() {
-    // Caché en memoria con TTL de 5 minutos
     this.cache = new Map();
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutos
   }
@@ -39,7 +31,6 @@ class ClienteContextService {
     console.log(`🧠 Construyendo contexto completo para ${whatsapp}...`);
     
     try {
-      // Recuperar datos (solo si no están en caché)
       const [configuracion, cliente, productos, pedidos] = await Promise.all([
         this.obtenerConfiguracion(sheets),
         this.obtenerDatosCliente(whatsapp, sheets),
@@ -47,7 +38,6 @@ class ClienteContextService {
         this.obtenerHistorialPedidos(whatsapp, sheets)
       ]);
       
-      // Conversaciones siempre frescas (Firestore no tiene límite)
       const conversaciones = await this.obtenerUltimasConversaciones(
         whatsapp, 
         negocio.id, 
@@ -81,8 +71,41 @@ class ClienteContextService {
   }
 
   /**
-   * Limpiar caché expirado (llamar periódicamente)
+   * Calcular días desde última interacción
    */
+  calcularDiasDesde(fechaStr) {
+    try {
+      const fecha = this.parsearFecha(fechaStr);
+      const ahora = new Date();
+      const diffMs = ahora - fecha;
+      const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      return diffDias;
+    } catch (e) {
+      return 999; // Si falla, asumir mucho tiempo
+    }
+  }
+
+  /**
+   * Calcular horas desde último mensaje
+   */
+  calcularHorasDesdeUltimoMensaje(conversaciones) {
+    if (!conversaciones || conversaciones.length === 0) {
+      return 9999; // Sin conversaciones = mucho tiempo
+    }
+
+    try {
+      const ultimoMensaje = conversaciones[0]; // Ya vienen ordenados
+      if (ultimoMensaje.timestamp) {
+        const ahora = Date.now();
+        const diffMs = ahora - ultimoMensaje.timestamp;
+        const diffHoras = diffMs / (1000 * 60 * 60);
+        return Math.floor(diffHoras);
+      }
+    } catch (e) {}
+    
+    return 9999;
+  }
+
   limpiarCacheExpirado() {
     const ahora = Date.now();
     let eliminados = 0;
@@ -99,9 +122,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * Invalidar caché de un cliente específico
-   */
   invalidarCache(negocioId, whatsapp) {
     const cacheKey = `${negocioId}:${whatsapp}`;
     const existia = this.cache.has(cacheKey);
@@ -112,9 +132,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * 1. Obtener configuración del negocio (hoja Configuracion)
-   */
   async obtenerConfiguracion(sheets) {
     try {
       const config = await sheets.getConfiguracion();
@@ -139,9 +156,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * 2. Obtener datos completos del cliente (hoja Clientes)
-   */
   async obtenerDatosCliente(whatsapp, sheets) {
     try {
       const cliente = await sheets.buscarCliente(whatsapp);
@@ -181,9 +195,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * 3. Obtener productos CON precios personalizados (Inventario + PreciosClientes)
-   */
   async obtenerProductosConPrecios(whatsapp, sheets) {
     try {
       const productos = await sheets.getProductosConPrecios(whatsapp);
@@ -217,9 +228,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * 4. Obtener historial de pedidos (hoja Pedidos)
-   */
   async obtenerHistorialPedidos(whatsapp, sheets) {
     try {
       const pedidos = await sheets.getPedidosByWhatsapp(whatsapp);
@@ -251,9 +259,6 @@ class ClienteContextService {
     }
   }
 
-  /**
-   * 5. Obtener últimas conversaciones (Firestore)
-   */
   async obtenerUltimasConversaciones(whatsapp, negocioId, firebaseService) {
     try {
       if (!firebaseService || !firebaseService.initialized) {
@@ -278,20 +283,45 @@ class ClienteContextService {
   }
 
   /**
-   * 6. Construir contexto enriquecido en formato legible para la IA
+   * Construir contexto enriquecido CON INFORMACIÓN TEMPORAL
    */
   construirContextoEnriquecido(datos) {
     const { configuracion, cliente, productos, pedidos, conversaciones, negocio } = datos;
     
+    // NUEVO: Calcular contexto temporal
+    const horasDesdeUltimoMensaje = this.calcularHorasDesdeUltimoMensaje(conversaciones);
+    const diasDesdeUltimoPedido = pedidos.length > 0 ? this.calcularDiasDesde(pedidos[0].fecha) : 9999;
+    
     let contexto = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    contexto += '📊 CONTEXTO DEL CLIENTE (Memoria del Sistema)\n';
+    contexto += '📊 CONTEXTO DEL CLIENTE\n';
     contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+    
+    // NUEVO: Contexto temporal
+    contexto += '⏰ CONTEXTO TEMPORAL\n';
+    if (horasDesdeUltimoMensaje < 1) {
+      contexto += '- Última interacción: AHORA (misma sesión)\n';
+      contexto += '- INSTRUCCIÓN: Continúa la conversación con naturalidad\n';
+    } else if (horasDesdeUltimoMensaje < 24) {
+      contexto += `- Última interacción: Hace ${horasDesdeUltimoMensaje} horas\n`;
+      contexto += '- INSTRUCCIÓN: Saluda brevemente, asume cierta continuidad\n';
+    } else {
+      const dias = Math.floor(horasDesdeUltimoMensaje / 24);
+      contexto += `- Última interacción: Hace ${dias} día(s)\n`;
+      contexto += '- INSTRUCCIÓN: Trata como NUEVA conversación, NO asumas que quiere lo mismo\n';
+    }
+    
+    if (diasDesdeUltimoPedido < 9999) {
+      contexto += `- Último pedido: Hace ${diasDesdeUltimoPedido} día(s)\n`;
+      if (diasDesdeUltimoPedido > 7) {
+        contexto += '- INSTRUCCIÓN: Mucho tiempo pasó, NO asumas que quiere repetir\n';
+      }
+    }
+    contexto += '\n';
     
     // SECCIÓN 1: Información del cliente
     if (cliente.esNuevo) {
       contexto += '👤 CLIENTE NUEVO\n';
-      contexto += '- Sin historial previo en el sistema\n';
-      contexto += '- WhatsApp: ' + cliente.whatsapp + '\n\n';
+      contexto += '- Sin historial previo\n\n';
     } else {
       contexto += '👤 INFORMACIÓN DEL CLIENTE\n';
       contexto += '- Nombre: ' + cliente.nombre + '\n';
@@ -299,109 +329,37 @@ class ClienteContextService {
         contexto += '- Empresa: ' + cliente.empresa + '\n';
       }
       contexto += '- Dirección: ' + cliente.direccion + '\n';
-      contexto += '- Teléfono: ' + cliente.telefono + '\n';
-      if (cliente.departamento !== 'No registrado') {
-        contexto += '- Ubicación: ' + cliente.ciudad + ', ' + cliente.departamento + '\n';
-      }
-      if (cliente.fechaRegistro) {
-        contexto += '- Cliente desde: ' + cliente.fechaRegistro + '\n';
-      }
-      if (cliente.ultimaCompra) {
-        contexto += '- Última compra: ' + cliente.ultimaCompra + '\n';
-      }
-      if (cliente.notas) {
-        contexto += '- Notas importantes: ' + cliente.notas + '\n';
-      }
-      contexto += '\n';
+      contexto += '- Teléfono: ' + cliente.telefono + '\n\n';
     }
     
     // SECCIÓN 2: Historial de pedidos
     if (pedidos.length > 0) {
       contexto += '📦 HISTORIAL DE PEDIDOS (Últimos ' + pedidos.length + ')\n';
       pedidos.forEach((p, idx) => {
-        contexto += `${idx + 1}. [${p.fecha}] ${p.productos} - S/${p.total.toFixed(2)} (${p.estado})`;
-        if (p.observaciones) {
-          contexto += ` - Nota: ${p.observaciones}`;
-        }
-        contexto += '\n';
+        const diasDesde = this.calcularDiasDesde(p.fecha);
+        contexto += `${idx + 1}. [${p.fecha}, hace ${diasDesde} días] ${p.productos} - S/${p.total.toFixed(2)}\n`;
       });
-      
-      const productosComprados = this.analizarPreferencias(pedidos);
-      if (productosComprados.length > 0) {
-        contexto += '\n💡 Productos que más compra:\n';
-        productosComprados.slice(0, 3).forEach(p => {
-          contexto += `   - ${p.nombre} (${p.veces} veces)\n`;
-        });
-      }
       contexto += '\n';
-    } else {
-      contexto += '📦 SIN PEDIDOS ANTERIORES\n';
-      contexto += '- Este cliente no ha realizado compras previas\n\n';
     }
     
     // SECCIÓN 3: Productos disponibles
     if (productos.length > 0) {
-      const tieneDescuentos = productos.some(p => p.tieneDescuento);
-      
-      contexto += '🛒 CATÁLOGO DE PRODUCTOS';
-      if (tieneDescuentos) {
-        contexto += ' (CON PRECIOS ESPECIALES)';
-      }
-      contexto += '\n';
-      
+      contexto += '🛒 CATÁLOGO\n';
       productos.forEach(p => {
-        contexto += `- ${p.codigo}: ${p.nombre}`;
-        
+        contexto += `- ${p.codigo}: ${p.nombre} - S/${p.precio}`;
         if (p.tieneDescuento) {
-          contexto += ` - S/${p.precio} [PRECIO ESPECIAL, antes S/${p.precioOriginal}]`;
-        } else {
-          contexto += ` - S/${p.precio}`;
+          contexto += ' [ESPECIAL]';
         }
-        
-        if (p.descripcion) {
-          contexto += ` (${p.descripcion})`;
-        }
-        
-        if (p.stock !== undefined) {
-          contexto += ` | Stock: ${p.stock}`;
-        }
-        
         contexto += '\n';
       });
       contexto += '\n';
     }
     
-    // SECCIÓN 4: Últimas conversaciones
-    if (conversaciones.length > 0) {
-      contexto += '💬 ÚLTIMAS CONVERSACIONES\n';
-      conversaciones.forEach(conv => {
-        const emoji = conv.origen === 'cliente' ? '👤' : '🤖';
-        contexto += `${emoji} ${conv.origen}: "${conv.texto}"\n`;
-      });
-      contexto += '\n';
-    }
-    
-    // SECCIÓN 5: Configuración del negocio
+    // SECCIÓN 4: Configuración del negocio
     if (configuracion.promptNegocio) {
-      contexto += '🏪 INFORMACIÓN DEL NEGOCIO\n';
+      contexto += '🏪 INFO DEL NEGOCIO\n';
       contexto += configuracion.promptNegocio + '\n\n';
     }
-    
-    if (configuracion.reglasVenta) {
-      contexto += '📋 REGLAS DE VENTA\n';
-      contexto += configuracion.reglasVenta + '\n\n';
-    }
-    
-    if (configuracion.infoAdicional) {
-      contexto += '💡 INFORMACIÓN ADICIONAL\n';
-      contexto += configuracion.infoAdicional + '\n\n';
-    }
-    
-    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    contexto += 'IMPORTANTE: Usa esta información para personalizar tu respuesta.\n';
-    contexto += 'Si el cliente ya tiene pedidos, menciona sus preferencias.\n';
-    contexto += 'Si tiene precios especiales, menciónalo como beneficio.\n';
-    contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     
     return contexto;
   }
@@ -449,11 +407,10 @@ class ClienteContextService {
   }
 
   construirContextoMinimo(negocio) {
-    return `\n\nCLIENTE NUEVO sin historial.\nNegocio: ${negocio.nombre}\n`;
+    return `\n\nCLIENTE NUEVO.\nNegocio: ${negocio.nombre}\n`;
   }
 }
 
-// Instancia única con auto-limpieza de caché cada 10 minutos
 const instance = new ClienteContextService();
 setInterval(() => instance.limpiarCacheExpirado(), 10 * 60 * 1000);
 
