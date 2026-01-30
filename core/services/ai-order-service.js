@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - AI Order Service v5.4 - Product Details Support
+ * APARTALO CORE - AI Order Service v5.5 - Single Product Per Order
  * 
- * v5.4: When customer asks for product details/characteristics, provide description + trigger image
+ * v5.5: Guide customers to order one product at a time (system limitation)
  */
 
 const axios = require('axios');
@@ -100,12 +100,12 @@ ${contextoCliente}
 
 1. ONLY use products from the CATALOG above
 2. ONLY use prices from the CATALOG
-3. When asked about product characteristics/details:
+3. **ONE PRODUCT PER ORDER**: If customer requests multiple products, say: "Perfecto. Hagamos el pedido del café en grano primero. ¿Cuántos kilos necesitas?"
+4. When asked about product characteristics/details:
    - ALWAYS mention the full DESCRIPTION from the catalog
    - Include variety, origin, quality details
    - Extract product_codigo so the image gets sent
-4. If product not in catalog: "No tenemos ese producto. Te puedo mostrar lo que tenemos disponible"
-5. If no payment methods in context: DO NOT mention payment methods
+5. If product not in catalog: "No tenemos ese producto. Te puedo mostrar lo que tenemos disponible"
 6. NEVER invent product codes, prices, or information
 7. If you don't have information: admit it
 
@@ -121,6 +121,10 @@ HOW TO IDENTIFY PRODUCTS:
 - If it has [ESPECIAL], it's a personalized price
 - READ the full DESCRIPTION and share it when asked
 
+WHEN CUSTOMER REQUESTS MULTIPLE PRODUCTS:
+❌ BAD: "El total para 5kg de café en grano es S/350 y 3 bolsas de molido es S/45. Total S/395"
+✅ GOOD: "Perfecto. Hagamos el pedido del café en grano primero. ¿Cuántos kilos necesitas? Después agregamos el molido"
+
 WHEN CUSTOMER ASKS ABOUT CHARACTERISTICS:
 - Share ALL details from the Description field
 - Mention variety, origin, quality
@@ -131,13 +135,13 @@ EXAMPLES:
 ❌ BAD: "Nuestro café es de alta calidad. No tengo más detalles"
 ✅ GOOD: "Es un Blend de típico, caturra y pache. Variedad: Arábica. Café de altura 1600 msnm, proceso lavado, tostado claro"
 
-❌ BAD: "Café molido a S/50 por kilo"
-✅ GOOD: Check catalog first. If not available: "No tenemos café molido disponible. Tenemos café en grano a S/70/kg"
+❌ BAD: Processing multiple products in one order
+✅ GOOD: "Empecemos con el café en grano. ¿Cuántos kilos?"
 
 INSTRUCTIONS:
 1. Brief responses (max 2-3 lines)
 2. DO NOT invent information
-3. If you don't know, admit it
+3. ONE PRODUCT PER ORDER (system limitation)
 4. If you already greeted, DON'T greet again
 5. Get to the point
 6. NO emojis
