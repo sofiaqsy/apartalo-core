@@ -1,7 +1,7 @@
 /**
  * APARTALO CORE - Handler Unificado - Pedidos
  * 
- * v4.3: Fix unit display per product (kg vs bolsas/unidades)
+ * v4.4: Gracefully handle Sheets quota errors - trust AI-validated products
  */
 
 const { getGreeting, generateId } = require('../../core/utils/formatters');
@@ -122,9 +122,9 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   if (debeEnviarImagen && productoParaMostrar && productoParaMostrar.imagenUrl) {
     try {
       await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
-      console.log('✅ Image sent with caption (characteristics request or new product)');
+      console.log('✅ Image sent with caption');
     } catch (e) {
-      console.log('⚠️ Error sending image with caption:', e.message);
+      console.log('⚠️ Error sending image:', e.message);
       await whatsapp.sendMessage(from, resultado.respuesta);
     }
   } else {
@@ -132,35 +132,10 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   }
 }
 
-/**
- * Helper: Determine unit text per product
- */
-function getUnidadTexto(producto, cantidad, cfg) {
-  // CAT-001: Bulk/kg products
-  if (producto.codigo === 'CAT-001' || cfg.unidad === 'kg') {
-    return 'kg';
-  }
-  
-  // CAT-002, CAT-003: Bag products (bolsas/unidades)
-  if (producto.codigo === 'CAT-002' || producto.codigo === 'CAT-003') {
-    return cantidad === 1 ? 'bolsa' : 'bolsas';
-  }
-  
-  // Default: unidades
-  return cantidad === 1 ? 'unidad' : 'unidades';
-}
-
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
   console.log('✅ confirmarPedidoIA - received data:', JSON.stringify(datos));
-
-  let productosDisponibles = [];
-  try {
-    productosDisponibles = await sheets.getProductosConPrecios(from);
-  } catch (e) {
-    productosDisponibles = await sheets.getProductos('ACTIVO');
-  }
 
   let productosParaPedido = [];
   let total = 0;
@@ -168,55 +143,93 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   if (datos.productos && Array.isArray(datos.productos) && datos.productos.length > 0) {
     console.log('🛒 Processing MULTI-PRODUCT order:', datos.productos.length, 'items');
     
-    for (const item of datos.productos) {
-      const producto = productosDisponibles.find(p => p.codigo === item.codigo);
-      
-      if (producto) {
-        const cantidad = parseFloat(item.cantidad) || 1;
-        const precioUnitario = producto.precio;
-        const subtotal = cantidad * precioUnitario;
+    let productosDisponibles = [];
+    try {
+      productosDisponibles = await sheets.getProductosConPrecios(from);
+    } catch (e) {
+      console.log('⚠️ Sheets error:', e.message);
+      try {
+        productosDisponibles = await sheets.getProductos('ACTIVO');
+      } catch (e2) {
+        console.log('⚠️ Sheets unavailable, using AI data');
+      }
+    }
+    
+    if (productosDisponibles.length === 0) {
+      console.log('📦 Trusting AI-validated products');
+      productosParaPedido = datos.productos.map(item => ({
+        codigo: item.codigo,
+        nombre: item.nombre,
+        cantidad: parseFloat(item.cantidad) || 1,
+        precio: parseFloat(item.precio) || 0
+      }));
+      total = datos.total_calculado || productosParaPedido.reduce((sum, p) => 
+        sum + (p.cantidad * p.precio), 0);
+    } else {
+      for (const item of datos.productos) {
+        const producto = productosDisponibles.find(p => p.codigo === item.codigo);
         
-        productosParaPedido.push({
-          codigo: producto.codigo,
-          nombre: producto.nombre,
-          cantidad: cantidad,
-          precio: precioUnitario
-        });
-        
-        total += subtotal;
-      } else {
-        console.log('⚠️ Product not found:', item.codigo);
+        if (producto) {
+          const cantidad = parseFloat(item.cantidad) || 1;
+          productosParaPedido.push({
+            codigo: producto.codigo,
+            nombre: producto.nombre,
+            cantidad: cantidad,
+            precio: producto.precio
+          });
+          total += cantidad * producto.precio;
+        } else {
+          console.log('⚠️ Using AI data for:', item.codigo);
+          productosParaPedido.push({
+            codigo: item.codigo,
+            nombre: item.nombre,
+            cantidad: parseFloat(item.cantidad) || 1,
+            precio: parseFloat(item.precio) || 0
+          });
+          total += (parseFloat(item.cantidad) || 1) * (parseFloat(item.precio) || 0);
+        }
       }
     }
   } 
   else if (datos.producto_codigo) {
-    console.log('📦 Processing SINGLE product order:', datos.producto_codigo);
+    console.log('📦 Processing SINGLE product');
+    
+    let productosDisponibles = [];
+    try {
+      productosDisponibles = await sheets.getProductosConPrecios(from);
+    } catch (e) {
+      try {
+        productosDisponibles = await sheets.getProductos('ACTIVO');
+      } catch (e2) {
+        console.log('⚠️ Sheets unavailable');
+      }
+    }
     
     let producto = productosDisponibles.find(p => p.codigo === datos.producto_codigo);
     
-    if (!producto && datos.producto_nombre) {
-      producto = productosDisponibles.find(p => 
-        p.nombre.toLowerCase().includes(datos.producto_nombre.toLowerCase())
-      );
+    if (!producto && datos.precio_unitario) {
+      console.log('📦 Using AI data');
+      producto = {
+        codigo: datos.producto_codigo,
+        nombre: datos.producto_nombre || 'Producto',
+        precio: datos.precio_unitario
+      };
     }
     
     if (producto) {
       const cantidad = parseFloat(datos.cantidad) || cfg.minimoCompra || 1;
-      const precioUnitario = producto.precio;
-      
       productosParaPedido.push({
         codigo: producto.codigo,
         nombre: producto.nombre,
         cantidad: cantidad,
-        precio: precioUnitario
+        precio: producto.precio
       });
-      
-      total = cantidad * precioUnitario;
+      total = cantidad * producto.precio;
     }
   }
 
   if (productosParaPedido.length === 0) {
-    console.log('❌ No valid products found');
+    console.log('❌ No products found');
     await whatsapp.sendMessage(from, 
       'No pude identificar los productos. ¿Podrías indicarme nuevamente qué deseas?'
     );
@@ -235,12 +248,11 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     telefono: datos.telefono
   });
 
-  // Build summary message with CORRECT units per product
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n';
   
   productosParaPedido.forEach(p => {
     const subtotal = p.cantidad * p.precio;
-    const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
+    const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
     mensaje += `${p.nombre}\n`;
     mensaje += `  ${p.cantidad} ${unidadTexto} x S/${p.precio} = S/${subtotal.toFixed(2)}\n\n`;
   });
@@ -294,7 +306,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   }
 
   const pedidoId = generateId(cfg.prefijoPedido);
-
   const estadoInicial = cfg.flujoPago === 'contacto' 
     ? config.orderStates?.IN_PREPARATION || 'EN_PREPARACION'
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
@@ -321,9 +332,9 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       observaciones: 'WhatsApp Bot IA + RAG (Multi-product)'
     });
     
-    console.log('✅ Multi-product order created:', pedidoId, '- Products:', productosParaPedido.length);
+    console.log('✅ Order created:', pedidoId, '- Products:', productosParaPedido.length);
   } catch (e) {
-    console.error('❌ Error creating order:', e.message);
+    console.error('❌ Error:', e.message);
   }
 
   if (cfg.flujoPago === 'contacto') {
@@ -331,8 +342,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     mensaje += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
-      const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
-      mensaje += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
+      mensaje += `${p.nombre} x${p.cantidad}\n`;
     });
     
     mensaje += `\nTotal: S/${total.toFixed(2)}\n\n`;
@@ -349,7 +359,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     mensajePago += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
-      const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
+      const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
       mensajePago += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
     });
     
