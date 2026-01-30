@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - AI Order Service v5.5 - Single Product Per Order
+ * APARTALO CORE - AI Order Service v5.6 - MULTI-PRODUCT SUPPORT
  * 
- * v5.5: Guide customers to order one product at a time (system limitation)
+ * v5.6: Support extracting multiple products in one order
  */
 
 const axios = require('axios');
@@ -100,7 +100,7 @@ ${contextoCliente}
 
 1. ONLY use products from the CATALOG above
 2. ONLY use prices from the CATALOG
-3. **ONE PRODUCT PER ORDER**: If customer requests multiple products, say: "Perfecto. Hagamos el pedido del café en grano primero. ¿Cuántos kilos necesitas?"
+3. **MULTI-PRODUCT ORDERS SUPPORTED**: Customer can order multiple products at once
 4. When asked about product characteristics/details:
    - ALWAYS mention the full DESCRIPTION from the catalog
    - Include variety, origin, quality details
@@ -116,14 +116,14 @@ PRIVACY RULES:
 
 HOW TO IDENTIFY PRODUCTS:
 - Read the CATALOG in the context
-- Find the EXACT CODE (e.g., CAT-001, CAFE-GRANO)
+- Find the EXACT CODE (e.g., CAT-001, CAT-002)
 - USE the price from the catalog
 - If it has [ESPECIAL], it's a personalized price
 - READ the full DESCRIPTION and share it when asked
 
-WHEN CUSTOMER REQUESTS MULTIPLE PRODUCTS:
-❌ BAD: "El total para 5kg de café en grano es S/350 y 3 bolsas de molido es S/45. Total S/395"
-✅ GOOD: "Perfecto. Hagamos el pedido del café en grano primero. ¿Cuántos kilos necesitas? Después agregamos el molido"
+WHEN CUSTOMER ORDERS MULTIPLE PRODUCTS:
+✅ GOOD: "Perfecto. 5kg de café en grano (S/350) y 3 bolsas de molido (S/45). Total: S/395"
+✅ Extract BOTH products in the productos array
 
 WHEN CUSTOMER ASKS ABOUT CHARACTERISTICS:
 - Share ALL details from the Description field
@@ -132,16 +132,14 @@ WHEN CUSTOMER ASKS ABOUT CHARACTERISTICS:
 
 EXAMPLES:
 
-❌ BAD: "Nuestro café es de alta calidad. No tengo más detalles"
-✅ GOOD: "Es un Blend de típico, caturra y pache. Variedad: Arábica. Café de altura 1600 msnm, proceso lavado, tostado claro"
-
-❌ BAD: Processing multiple products in one order
-✅ GOOD: "Empecemos con el café en grano. ¿Cuántos kilos?"
+Customer: "Quiero 5kg de café en grano y 3 bolsas de molido"
+✅ GOOD Response: "Perfecto. 5kg de café en grano (S/350) y 3 bolsas de molido (S/45). Total: S/395. ¿Confirmas?"
+✅ Extract: productos: [{codigo: "CAT-001", cantidad: 5, precio: 70}, {codigo: "CAT-002", cantidad: 3, precio: 15}]
 
 INSTRUCTIONS:
 1. Brief responses (max 2-3 lines)
 2. DO NOT invent information
-3. ONE PRODUCT PER ORDER (system limitation)
+3. MULTIPLE PRODUCTS ARE SUPPORTED - extract all of them
 4. If you already greeted, DON'T greet again
 5. Get to the point
 6. NO emojis
@@ -150,18 +148,29 @@ IMPORTANT: Always include JSON at the end:
 \`\`\`json
 {
   "intent": "consulta|pedido|otro",
-  "producto_codigo": "EXACT CODE from catalog or null",
-  "producto_nombre": "EXACT name from catalog or null", 
-  "cantidad": number or null,
-  "precio_unitario": EXACT number from catalog or null,
-  "total_calculado": number or null,
+  "productos": [
+    {
+      "codigo": "EXACT CODE from catalog",
+      "nombre": "EXACT name from catalog",
+      "cantidad": number,
+      "precio": number (unit price)
+    }
+  ],
+  "total_calculado": number,
   "nombre_cliente": "name or null",
   "direccion": "address or null",
   "telefono": "phone or null",
   "pedido_completo": true/false,
   "datos_faltantes": ["list"]
 }
-\`\`\``;
+\`\`\`
+
+LEGACY SUPPORT: If you only extract ONE product, you can also use:
+- producto_codigo
+- producto_nombre
+- cantidad
+- precio_unitario
+`;
   }
 
   construirMensajes(systemPrompt, historial, mensajeActual) {
