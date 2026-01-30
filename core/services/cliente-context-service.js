@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.3
+ * APARTALO CORE - Cliente Context Service (RAG - Memoria Simulada) v2.4
  * 
- * v2.3: REGLAS DE VENTA AL INICIO del contexto para evitar alucinaciones
+ * v2.4: ADD PAYMENT METHODS to context so AI can answer payment questions
  */
 
 const ESTADOS_FINALIZADOS = ['ENTREGADO', 'CANCELADO', 'COMPLETADO'];
@@ -26,11 +26,12 @@ class ClienteContextService {
     console.log(`🧠 Construyendo contexto completo para ${whatsapp}...`);
     
     try {
-      const [configuracion, cliente, productos, pedidos] = await Promise.all([
+      const [configuracion, cliente, productos, pedidos, metodosPago] = await Promise.all([
         this.obtenerConfiguracion(sheets),
         this.obtenerDatosCliente(whatsapp, sheets),
         this.obtenerProductosConPrecios(whatsapp, sheets),
-        this.obtenerHistorialPedidos(whatsapp, sheets)
+        this.obtenerHistorialPedidos(whatsapp, sheets),
+        this.obtenerMetodosPago(sheets) // NEW: Fetch payment methods
       ]);
       
       const conversaciones = await this.obtenerUltimasConversaciones(
@@ -45,6 +46,7 @@ class ClienteContextService {
         productos,
         pedidos,
         conversaciones,
+        metodosPago, // NEW: Include in context
         negocio
       });
       
@@ -235,6 +237,19 @@ class ClienteContextService {
     }
   }
 
+  /**
+   * NEW: Fetch payment methods from MetodosPago sheet
+   */
+  async obtenerMetodosPago(sheets) {
+    try {
+      const metodos = await sheets.getMetodosPago();
+      return metodos || [];
+    } catch (error) {
+      console.log('⚠️ Error obteniendo métodos de pago:', error.message);
+      return [];
+    }
+  }
+
   async obtenerUltimasConversaciones(whatsapp, negocioId, firebaseService) {
     try {
       if (!firebaseService || !firebaseService.initialized) {
@@ -259,10 +274,10 @@ class ClienteContextService {
   }
 
   /**
-   * Construir contexto enriquecido - REGLAS DE VENTA PRIMERO
+   * Build enriched context - SALES RULES FIRST + PAYMENT METHODS
    */
   construirContextoEnriquecido(datos) {
-    const { configuracion, cliente, productos, pedidos, conversaciones, negocio } = datos;
+    const { configuracion, cliente, productos, pedidos, conversaciones, metodosPago, negocio } = datos;
     
     const horasDesdeUltimoMensaje = this.calcularHorasDesdeUltimoMensaje(conversaciones);
     const pedidosActivos = this.obtenerPedidosActivos(pedidos);
@@ -273,7 +288,7 @@ class ClienteContextService {
     contexto += '📋 REGLAS DE VENTA (LEE ESTO PRIMERO)\n';
     contexto += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     
-    // SECCIÓN CRÍTICA: REGLAS DE VENTA
+    // CRITICAL SECTION: SALES RULES
     if (configuracion.reglasVenta) {
       contexto += configuracion.reglasVenta + '\n\n';
     }
@@ -282,7 +297,29 @@ class ClienteContextService {
       contexto += configuracion.infoAdicional + '\n\n';
     }
     
-    // Catálogo de productos
+    // NEW: PAYMENT METHODS
+    if (metodosPago && metodosPago.length > 0) {
+      contexto += '💳 MÉTODOS DE PAGO DISPONIBLES\n';
+      metodosPago.forEach(m => {
+        if (m.tipo === 'yape' || m.tipo === 'plin') {
+          contexto += `- ${m.tipo.toUpperCase()}: ${m.numero}\n`;
+          if (m.titular) contexto += `  Titular: ${m.titular}\n`;
+        } else if (m.tipo === 'bcp' || m.tipo === 'banco') {
+          contexto += `- TRANSFERENCIA BANCARIA\n`;
+          if (m.cuenta) contexto += `  Cuenta: ${m.cuenta}\n`;
+          if (m.cci) contexto += `  CCI: ${m.cci}\n`;
+          if (m.titular) contexto += `  Titular: ${m.titular}\n`;
+        } else {
+          contexto += `- ${m.tipo.toUpperCase()}\n`;
+          if (m.numero) contexto += `  ${m.numero}\n`;
+          if (m.cuenta) contexto += `  Cuenta: ${m.cuenta}\n`;
+          if (m.titular) contexto += `  Titular: ${m.titular}\n`;
+        }
+      });
+      contexto += '\n';
+    }
+    
+    // Product catalog
     if (productos.length > 0) {
       contexto += '🛒 CATÁLOGO DISPONIBLE\n';
       productos.forEach(p => {
@@ -299,7 +336,7 @@ class ClienteContextService {
       contexto += '\n';
     }
     
-    // CONTEXTO TEMPORAL
+    // TEMPORAL CONTEXT
     contexto += '⏰ CONTEXTO TEMPORAL\n';
     
     if (pedidosActivos.length > 0) {
@@ -320,7 +357,7 @@ class ClienteContextService {
       }
     }
     
-    // Información del cliente
+    // Customer info
     if (!cliente.esNuevo) {
       contexto += '👤 CLIENTE: ' + cliente.nombre + '\n';
       if (cliente.direccion !== 'No registrada') {
@@ -329,7 +366,7 @@ class ClienteContextService {
       contexto += '\n';
     }
     
-    // Historial resumido
+    // Order history summary
     if (pedidos.length > 0) {
       const pedidosFinalizados = pedidos.filter(p => ESTADOS_FINALIZADOS.includes(p.estado));
       if (pedidosFinalizados.length > 0) {
