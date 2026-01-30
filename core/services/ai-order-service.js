@@ -1,10 +1,7 @@
 /**
- * APARTALO CORE - AI Order Service v5.3 - SOLO USA CONTEXTO REAL
+ * APARTALO CORE - AI Order Service v5.4 - Product Details Support
  * 
- * Servicio de IA conversacional para toma de pedidos.
- * Usa GROQ (Llama) para procesamiento rapido y economico.
- * 
- * v5.3: CRÍTICO - NO inventar productos ni precios, SOLO usar catálogo real
+ * v5.4: When customer asks for product details/characteristics, provide description + trigger image
  */
 
 const axios = require('axios');
@@ -31,9 +28,6 @@ class AIOrderService {
     return true;
   }
 
-  /**
-   * Procesar mensaje del cliente en flujo de pedido CON MEMORIA SIMULADA
-   */
   async procesarMensajePedido(mensaje, context, historial = [], datosCliente = null, whatsappFrom = null) {
     if (!this.initialized && !this.initialize()) {
       return {
@@ -46,20 +40,17 @@ class AIOrderService {
 
     const { negocio } = context;
 
-    // 🧠 NUEVO: Obtener contexto completo del cliente (MEMORIA SIMULADA)
     console.log('🧠 Recuperando memoria del cliente...');
     const contextoCliente = await clienteContextService.obtenerContextoCompleto(
       whatsappFrom, 
       context
     );
 
-    // Construir prompt del sistema CON contexto enriquecido
     const systemPrompt = this.construirSystemPromptConMemoria(
       negocio, 
       contextoCliente
     );
 
-    // Construir mensajes
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -76,11 +67,7 @@ class AIOrderService {
       });
 
       const respuestaTexto = response.data.choices[0].message.content;
-      
-      // Extraer JSON estructurado si existe
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
-      
-      // Limpiar respuesta (quitar JSON si lo hay)
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
 
       return {
@@ -101,80 +88,83 @@ class AIOrderService {
     }
   }
 
-  /**
-   * Construir prompt del sistema CON memoria simulada - NO INVASIVO + NO INVENTAR
-   */
   construirSystemPromptConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente de ventas de ${negocio.nombre}.
+    return `You are the sales assistant for ${negocio.nombre}.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTEXTO DEL CLIENTE (USA ESTA INFO SILENCIOSAMENTE):
+CLIENT CONTEXT (USE THIS INFO SILENTLY):
 ${contextoCliente}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-⚠️ REGLAS CRÍTICAS - NO INVENTAR INFORMACIÓN:
+⚠️ CRITICAL RULES - DO NOT INVENT INFORMATION:
 
-1. SOLO USA productos que están en el CATÁLOGO arriba
-2. SOLO USA precios que aparecen en el CATÁLOGO
-3. Si el cliente pide un producto que NO está en el catálogo, di "No tenemos ese producto. Te puedo mostrar lo que tenemos disponible"
-4. Si NO hay métodos de pago en el contexto, NO menciones métodos de pago
-5. NUNCA inventes códigos de producto, precios, o información
-6. Si no tienes información sobre algo, admítelo
+1. ONLY use products from the CATALOG above
+2. ONLY use prices from the CATALOG
+3. When asked about product characteristics/details:
+   - ALWAYS mention the full DESCRIPTION from the catalog
+   - Include variety, origin, quality details
+   - Extract product_codigo so the image gets sent
+4. If product not in catalog: "No tenemos ese producto. Te puedo mostrar lo que tenemos disponible"
+5. If no payment methods in context: DO NOT mention payment methods
+6. NEVER invent product codes, prices, or information
+7. If you don't have information: admit it
 
-REGLAS DE PRIVACIDAD:
-1. NUNCA menciones que tienes acceso a su historial
-2. NUNCA digas "ya hablamos antes" o "la última vez"
-3. USA la información silenciosamente para ser útil
+PRIVACY RULES:
+1. NEVER mention you have access to their history
+2. NEVER say "ya hablamos antes" or "la última vez"
+3. USE information silently to be helpful
 
-CÓMO IDENTIFICAR PRODUCTOS:
-- Lee el CATÁLOGO en el contexto
-- Busca el CÓDIGO exacto (ej: CAT-001, CAFE-GRANO)
-- USA el precio que aparece en el catálogo
-- Si tiene [ESPECIAL], es precio personalizado
+HOW TO IDENTIFY PRODUCTS:
+- Read the CATALOG in the context
+- Find the EXACT CODE (e.g., CAT-001, CAFE-GRANO)
+- USE the price from the catalog
+- If it has [ESPECIAL], it's a personalized price
+- READ the full DESCRIPTION and share it when asked
 
-EJEMPLOS:
+WHEN CUSTOMER ASKS ABOUT CHARACTERISTICS:
+- Share ALL details from the Description field
+- Mention variety, origin, quality
+- Include the product_codigo in your JSON response so image gets sent
 
-❌ MAL: "Café molido a S/50 por kilo"
-✅ BIEN: Primero verificar si "café molido" está en el catálogo. Si NO está, decir "No tenemos café molido disponible. Tenemos café en grano a S/70/kg"
+EXAMPLES:
 
-❌ MAL: "¿Deseas pagar con tarjeta o efectivo?"
-✅ BIEN: Si NO hay métodos de pago en el contexto, NO mencionarlos. Pedir solo los datos de entrega.
+❌ BAD: "Nuestro café es de alta calidad. No tengo más detalles"
+✅ GOOD: "Es un Blend de típico, caturra y pache. Variedad: Arábica. Café de altura 1600 msnm, proceso lavado, tostado claro"
 
-INSTRUCCIONES:
-1. Respuestas BREVES (máximo 2 líneas)
-2. NO inventes información
-3. Si no sabes, admítelo
-4. Si ya saludaste, NO saludes otra vez
-5. Ve directo al punto
-6. NO uses emojis
+❌ BAD: "Café molido a S/50 por kilo"
+✅ GOOD: Check catalog first. If not available: "No tenemos café molido disponible. Tenemos café en grano a S/70/kg"
 
-IMPORTANTE: Al final incluye JSON:
+INSTRUCTIONS:
+1. Brief responses (max 2-3 lines)
+2. DO NOT invent information
+3. If you don't know, admit it
+4. If you already greeted, DON'T greet again
+5. Get to the point
+6. NO emojis
+
+IMPORTANT: Always include JSON at the end:
 \`\`\`json
 {
   "intent": "consulta|pedido|otro",
-  "producto_codigo": "CODIGO_EXACTO del catálogo o null",
-  "producto_nombre": "nombre EXACTO del catálogo o null", 
-  "cantidad": numero o null,
-  "precio_unitario": numero EXACTO del catálogo o null,
-  "total_calculado": numero o null,
-  "nombre_cliente": "nombre o null",
-  "direccion": "direccion o null",
-  "telefono": "telefono o null",
+  "producto_codigo": "EXACT CODE from catalog or null",
+  "producto_nombre": "EXACT name from catalog or null", 
+  "cantidad": number or null,
+  "precio_unitario": EXACT number from catalog or null,
+  "total_calculado": number or null,
+  "nombre_cliente": "name or null",
+  "direccion": "address or null",
+  "telefono": "phone or null",
   "pedido_completo": true/false,
-  "datos_faltantes": ["lista"]
+  "datos_faltantes": ["list"]
 }
 \`\`\``;
   }
 
-  /**
-   * Construir array de mensajes para la API
-   */
   construirMensajes(systemPrompt, historial, mensajeActual) {
     const messages = [
       { role: 'system', content: systemPrompt }
     ];
 
-    // Agregar historial
     for (const msg of historial) {
       messages.push({
         role: msg.rol === 'cliente' ? 'user' : 'assistant',
@@ -182,7 +172,6 @@ IMPORTANTE: Al final incluye JSON:
       });
     }
 
-    // Agregar mensaje actual
     messages.push({
       role: 'user',
       content: mensajeActual
@@ -191,9 +180,6 @@ IMPORTANTE: Al final incluye JSON:
     return messages;
   }
 
-  /**
-   * Extraer datos estructurados del JSON en la respuesta
-   */
   extraerDatosEstructurados(respuesta) {
     try {
       const jsonMatch = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
@@ -206,9 +192,6 @@ IMPORTANTE: Al final incluye JSON:
     return null;
   }
 
-  /**
-   * Limpiar respuesta quitando el bloque JSON
-   */
   limpiarRespuesta(respuesta) {
     return respuesta
       .replace(/```json\s*[\s\S]*?\s*```/g, '')
