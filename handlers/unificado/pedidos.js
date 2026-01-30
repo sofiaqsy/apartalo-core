@@ -1,7 +1,7 @@
 /**
  * APARTALO CORE - Handler Unificado - Pedidos
  * 
- * Módulo para flujo de pedidos conversacionales con IA + Memoria Simulada (RAG)
+ * v4.1: Send product image when customer asks for characteristics/details
  */
 
 const { getGreeting, generateId } = require('../../core/utils/formatters');
@@ -10,15 +10,14 @@ const config = require('../../config');
 const { mergeDatasSinNull, formatearProductosParaSheets } = require('./utils');
 
 /**
- * Iniciar pedido conversacional DIRECTO (sin menú de botones)
- * Usa memoria simulada (RAG) desde el primer mensaje
+ * Start conversational order flow DIRECTLY (no button menu)
+ * Uses simulated memory (RAG) from first message
  */
 async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
   
-  console.log('🤖 Iniciando conversación directa con IA + RAG (sin botones)');
+  console.log('🤖 Starting direct conversation with AI + RAG (no buttons)');
   
-  // Iniciar estado conversacional
   stateManager.setState(from, negocio.id, {
     step: 'pedido_conversacional',
     data: {
@@ -29,13 +28,11 @@ async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
     }
   });
   
-  // Si el cliente ya escribió algo, procesarlo con IA
   if (mensaje && mensaje.trim() !== '') {
-    console.log('   → Procesando mensaje con IA: "' + mensaje + '"');
+    console.log('   → Processing message with AI: "' + mensaje + '"');
     return await continuarPedidoConversacional(from, mensaje, context, cfg);
   }
   
-  // Si no hay mensaje, enviar saludo genérico
   const saludo = getGreeting();
   await whatsapp.sendMessage(from, 
     saludo + '\n\n' +
@@ -44,7 +41,7 @@ async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
 }
 
 /**
- * Continuar pedido conversacional con IA + RAG
+ * Continue conversational order with AI + RAG
  */
 async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
@@ -55,7 +52,7 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   let datosAcumulados = state.data?.datosExtraidos || {};
   const ultimoProductoMostrado = state.data?.ultimoProductoMostrado || null;
 
-  // Llamar a IA con memoria simulada (RAG)
+  // Call AI with simulated memory (RAG)
   const resultado = await aiOrderService.procesarMensajePedido(
     mensaje,
     context,
@@ -69,30 +66,54 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return;
   }
 
-  // Merge inteligente
+  // Intelligent merge
   if (resultado.datosExtraidos) {
     datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
 
-  console.log('📊 Datos acumulados:', JSON.stringify(datosAcumulados));
+  console.log('📊 Accumulated data:', JSON.stringify(datosAcumulados));
 
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
-  // Verificar si se identificó un producto nuevo
+  // Check if customer is asking about product details/characteristics
+  const mensajeLower = mensaje.toLowerCase();
+  const preguntaCaracteristicas = 
+    mensajeLower.includes('caracteristica') ||
+    mensajeLower.includes('característica') ||
+    mensajeLower.includes('detalle') ||
+    mensajeLower.includes('información') ||
+    mensajeLower.includes('informacion') ||
+    mensajeLower.includes('descrip') ||
+    mensajeLower.includes('que tiene') ||
+    mensajeLower.includes('qué tiene') ||
+    mensajeLower.includes('como es') ||
+    mensajeLower.includes('cómo es');
+
+  // Determine which product to show
   const productoCodigoActual = datosAcumulados.producto_codigo;
   let productoParaMostrar = null;
+  let debeEnviarImagen = false;
 
-  if (productoCodigoActual && productoCodigoActual !== ultimoProductoMostrado && cfg.mostrarFotos) {
+  if (productoCodigoActual && cfg.mostrarFotos) {
     try {
       const productos = await sheets.getProductosConPrecios(from);
       productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
+      
+      // Send image if:
+      // 1. New product identified (different from last shown)
+      // 2. Customer asks for characteristics (even if same product)
+      if (productoParaMostrar) {
+        debeEnviarImagen = 
+          (productoCodigoActual !== ultimoProductoMostrado) || 
+          preguntaCaracteristicas;
+      }
     } catch (e) {
-      console.log('⚠️ Error buscando producto para imagen:', e.message);
+      console.log('⚠️ Error finding product for image:', e.message);
     }
   }
 
-  // Verificar si pedido completo
+  // Check if order complete
   if (resultado.pedidoCompleto && datosAcumulados.producto_codigo && datosAcumulados.cantidad) {
     stateManager.updateData(from, negocio.id, {
       historial,
@@ -103,39 +124,37 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return await confirmarPedidoIA(from, context, cfg, datosAcumulados);
   }
 
-  // Actualizar estado
+  // Update state
   stateManager.updateData(from, negocio.id, {
     historial,
     datosExtraidos: datosAcumulados,
-    ultimoProductoMostrado: productoCodigoActual
+    ultimoProductoMostrado: debeEnviarImagen ? productoCodigoActual : ultimoProductoMostrado
   });
 
-  // CAMBIO: Enviar imagen CON texto como caption (1 solo mensaje)
-  if (productoParaMostrar && productoParaMostrar.imagenUrl) {
+  // Send image WITH text as caption (1 single message)
+  if (debeEnviarImagen && productoParaMostrar && productoParaMostrar.imagenUrl) {
     try {
-      // Enviar imagen con el texto de respuesta como caption
       await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
-      console.log('✅ Imagen enviada con caption');
+      console.log('✅ Image sent with caption (characteristics request or new product)');
     } catch (e) {
-      console.log('⚠️ Error enviando imagen con caption:', e.message);
-      // Si falla, enviar texto sin imagen
+      console.log('⚠️ Error sending image with caption:', e.message);
       await whatsapp.sendMessage(from, resultado.respuesta);
     }
   } else {
-    // Sin imagen, enviar solo texto
+    // No image, send text only
     await whatsapp.sendMessage(from, resultado.respuesta);
   }
 }
 
 /**
- * Confirmar pedido con IA
+ * Confirm order with AI
  */
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  console.log('✅ confirmarPedidoIA - datos recibidos:', JSON.stringify(datos));
+  console.log('✅ confirmarPedidoIA - received data:', JSON.stringify(datos));
 
-  // Obtener productos con precios personalizados
+  // Get products with personalized prices
   let productos = [];
   try {
     productos = await sheets.getProductosConPrecios(from);
@@ -143,7 +162,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     productos = await sheets.getProductos('ACTIVO');
   }
 
-  // Buscar producto
+  // Find product
   let producto = null;
   
   if (datos.producto_codigo) {
@@ -157,7 +176,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   }
 
   if (!producto) {
-    console.log('❌ Producto no encontrado. Codigo:', datos.producto_codigo, 'Nombre:', datos.producto_nombre);
+    console.log('❌ Product not found. Code:', datos.producto_codigo, 'Name:', datos.producto_nombre);
     
     await whatsapp.sendMessage(from, 
       'No pude identificar el producto. ¿Podrías indicarme nuevamente cuál deseas?'
@@ -170,7 +189,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   const total = cantidad * precioUnitario;
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
-  // Guardar datos
+  // Save data
   stateManager.updateData(from, negocio.id, {
     productoSeleccionado: producto,
     cantidad,
@@ -206,7 +225,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
 }
 
 /**
- * Manejar confirmación del pedido
+ * Handle order confirmation
  */
 async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
@@ -232,7 +251,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  // Si faltan datos, pedirlos
+  // If missing data, request it
   if (!nombreCliente || !direccion) {
     await whatsapp.sendMessage(from, 
       'Para completar el pedido, necesito tu nombre completo, dirección de entrega (incluye distrito) y teléfono de contacto.'
@@ -244,7 +263,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   const pedidoId = generateId(cfg.prefijoPedido);
   const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (cantidad === 1 ? 'unidad' : 'unidades');
 
-  // Estados unificados
+  // Unified states
   const estadoInicial = cfg.flujoPago === 'contacto' 
     ? config.orderStates?.IN_PREPARATION || 'EN_PREPARACION'
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
@@ -257,7 +276,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   }]);
 
   try {
-    // Actualizar o crear cliente
+    // Update or create customer
     await sheets.upsertCliente({
       whatsapp: from,
       nombre: nombreCliente,
@@ -265,7 +284,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       direccion: direccion
     });
 
-    // Crear pedido
+    // Create order
     await sheets.crearPedido({
       id: pedidoId,
       whatsapp: from,
@@ -278,9 +297,9 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       observaciones: 'WhatsApp Bot IA + RAG'
     });
     
-    console.log('✅ Pedido creado:', pedidoId);
+    console.log('✅ Order created:', pedidoId);
   } catch (e) {
-    console.error('❌ Error creando pedido:', e.message);
+    console.error('❌ Error creating order:', e.message);
   }
 
   if (cfg.flujoPago === 'contacto') {
