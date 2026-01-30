@@ -1,7 +1,7 @@
 /**
  * APARTALO CORE - Handler Unificado - Pedidos
  * 
- * v4.2: MULTI-PRODUCT ORDER SUPPORT - Handle both array and legacy formats
+ * v4.3: Fix unit display per product (kg vs bolsas/unidades)
  */
 
 const { getGreeting, generateId } = require('../../core/utils/formatters');
@@ -9,10 +9,6 @@ const aiOrderService = require('../../core/services/ai-order-service');
 const config = require('../../config');
 const { mergeDatasSinNull, formatearProductosParaSheets } = require('./utils');
 
-/**
- * Start conversational order flow DIRECTLY (no button menu)
- * Uses simulated memory (RAG) from first message
- */
 async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
   
@@ -40,9 +36,6 @@ async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   );
 }
 
-/**
- * Continue conversational order with AI + RAG
- */
 async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
@@ -52,7 +45,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   let datosAcumulados = state.data?.datosExtraidos || {};
   const ultimoProductoMostrado = state.data?.ultimoProductoMostrado || null;
 
-  // Call AI with simulated memory (RAG)
   const resultado = await aiOrderService.procesarMensajePedido(
     mensaje,
     context,
@@ -66,7 +58,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return;
   }
 
-  // Intelligent merge
   if (resultado.datosExtraidos) {
     datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
@@ -76,7 +67,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
-  // Check if customer is asking about product details/characteristics
   const mensajeLower = mensaje.toLowerCase();
   const preguntaCaracteristicas = 
     mensajeLower.includes('caracteristica') ||
@@ -90,7 +80,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     mensajeLower.includes('como es') ||
     mensajeLower.includes('cómo es');
 
-  // Determine which product to show image for
   const productoCodigoActual = datosAcumulados.producto_codigo || 
     (datosAcumulados.productos && datosAcumulados.productos[0]?.codigo);
   let productoParaMostrar = null;
@@ -101,9 +90,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
       const productos = await sheets.getProductosConPrecios(from);
       productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
       
-      // Send image if:
-      // 1. New product identified (different from last shown)
-      // 2. Customer asks for characteristics (even if same product)
       if (productoParaMostrar) {
         debeEnviarImagen = 
           (productoCodigoActual !== ultimoProductoMostrado) || 
@@ -114,7 +100,6 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     }
   }
 
-  // Check if order complete - handle both formats
   const tieneProductos = (datosAcumulados.productos && datosAcumulados.productos.length > 0) ||
                          (datosAcumulados.producto_codigo && datosAcumulados.cantidad);
   
@@ -128,14 +113,12 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     return await confirmarPedidoIA(from, context, cfg, datosAcumulados);
   }
 
-  // Update state
   stateManager.updateData(from, negocio.id, {
     historial,
     datosExtraidos: datosAcumulados,
     ultimoProductoMostrado: debeEnviarImagen ? productoCodigoActual : ultimoProductoMostrado
   });
 
-  // Send image WITH text as caption (1 single message)
   if (debeEnviarImagen && productoParaMostrar && productoParaMostrar.imagenUrl) {
     try {
       await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
@@ -145,20 +128,33 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
       await whatsapp.sendMessage(from, resultado.respuesta);
     }
   } else {
-    // No image, send text only
     await whatsapp.sendMessage(from, resultado.respuesta);
   }
 }
 
 /**
- * Confirm order with AI - SUPPORTS MULTI-PRODUCT
+ * Helper: Determine unit text per product
  */
+function getUnidadTexto(producto, cantidad, cfg) {
+  // CAT-001: Bulk/kg products
+  if (producto.codigo === 'CAT-001' || cfg.unidad === 'kg') {
+    return 'kg';
+  }
+  
+  // CAT-002, CAT-003: Bag products (bolsas/unidades)
+  if (producto.codigo === 'CAT-002' || producto.codigo === 'CAT-003') {
+    return cantidad === 1 ? 'bolsa' : 'bolsas';
+  }
+  
+  // Default: unidades
+  return cantidad === 1 ? 'unidad' : 'unidades';
+}
+
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
   console.log('✅ confirmarPedidoIA - received data:', JSON.stringify(datos));
 
-  // Get products with personalized prices
   let productosDisponibles = [];
   try {
     productosDisponibles = await sheets.getProductosConPrecios(from);
@@ -169,7 +165,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   let productosParaPedido = [];
   let total = 0;
 
-  // NEW: Multi-product support
   if (datos.productos && Array.isArray(datos.productos) && datos.productos.length > 0) {
     console.log('🛒 Processing MULTI-PRODUCT order:', datos.productos.length, 'items');
     
@@ -194,11 +189,10 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
       }
     }
   } 
-  // LEGACY: Single product support
   else if (datos.producto_codigo) {
     console.log('📦 Processing SINGLE product order:', datos.producto_codigo);
     
-    const producto = productosDisponibles.find(p => p.codigo === datos.producto_codigo);
+    let producto = productosDisponibles.find(p => p.codigo === datos.producto_codigo);
     
     if (!producto && datos.producto_nombre) {
       producto = productosDisponibles.find(p => 
@@ -221,7 +215,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     }
   }
 
-  // Validate we have products
   if (productosParaPedido.length === 0) {
     console.log('❌ No valid products found');
     await whatsapp.sendMessage(from, 
@@ -230,12 +223,10 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     return;
   }
 
-  // Use calculated total or from AI if available
   if (datos.total_calculado && datos.total_calculado > 0) {
     total = datos.total_calculado;
   }
 
-  // Save data
   stateManager.updateData(from, negocio.id, {
     productosParaPedido,
     total,
@@ -244,12 +235,12 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     telefono: datos.telefono
   });
 
-  // Build summary message
+  // Build summary message with CORRECT units per product
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n';
   
   productosParaPedido.forEach(p => {
     const subtotal = p.cantidad * p.precio;
-    const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
+    const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
     mensaje += `${p.nombre}\n`;
     mensaje += `  ${p.cantidad} ${unidadTexto} x S/${p.precio} = S/${subtotal.toFixed(2)}\n\n`;
   });
@@ -270,9 +261,6 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   stateManager.setStep(from, negocio.id, 'confirmar_pedido');
 }
 
-/**
- * Handle order confirmation - MULTI-PRODUCT SUPPORT
- */
 async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
@@ -297,7 +285,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  // If missing data, request it
   if (!nombreCliente || !direccion) {
     await whatsapp.sendMessage(from, 
       'Para completar el pedido, necesito tu nombre completo, dirección de entrega (incluye distrito) y teléfono de contacto.'
@@ -308,16 +295,13 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
 
   const pedidoId = generateId(cfg.prefijoPedido);
 
-  // Unified states
   const estadoInicial = cfg.flujoPago === 'contacto' 
     ? config.orderStates?.IN_PREPARATION || 'EN_PREPARACION'
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
 
-  // Format products for Google Sheets
   const productosTexto = formatearProductosParaSheets(productosParaPedido);
 
   try {
-    // Update or create customer
     await sheets.upsertCliente({
       whatsapp: from,
       nombre: nombreCliente,
@@ -325,7 +309,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       direccion: direccion
     });
 
-    // Create order with ALL products
     await sheets.crearPedido({
       id: pedidoId,
       whatsapp: from,
@@ -348,7 +331,8 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     mensaje += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
-      mensaje += `${p.nombre} x${p.cantidad}\n`;
+      const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
+      mensaje += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
     });
     
     mensaje += `\nTotal: S/${total.toFixed(2)}\n\n`;
@@ -365,7 +349,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     mensajePago += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
-      const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
+      const unidadTexto = getUnidadTexto(p, p.cantidad, cfg);
       mensajePago += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
     });
     
