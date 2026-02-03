@@ -1,6 +1,6 @@
 /**
  * PEDIDOS ROUTER - Gestión completa de pedidos
- * ACTUALIZACIÓN: Soporte para estado de pago, monto pagado y fecha de pago
+ * ACTUALIZACIÓN: Eliminación física de pedidos PENDIENTES
  * FIX: getRows() solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
  */
 
@@ -539,7 +539,7 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
   }
 });
 
-// ==================== ELIMINAR PEDIDO ====================
+// ==================== ELIMINAR PEDIDO (FÍSICO) ====================
 
 router.delete('/:businessId/:pedidoId', async (req, res) => {
   try {
@@ -550,22 +550,80 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:B');
+    // Obtener el pedido completo para verificar su estado
+    const rows = await sheets.getRows('Pedidos!A:J');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
-        await sheets.updateCell(`Pedidos!A${i + 1}`, `${pedidoId}_DELETED_${Date.now()}`);
-        await sheets.updateCell(`Pedidos!J${i + 1}`, 'ELIMINADO');
-        return res.json({
-          success: true,
-          mensaje: 'Pedido eliminado',
-          pedidoId
-        });
+        const estado = (rows[i][9] || 'PENDIENTE').toString().toUpperCase();
+        
+        // VALIDAR: Solo permitir eliminar pedidos PENDIENTES
+        if (estado !== 'PENDIENTE') {
+          return res.status(403).json({ 
+            error: 'Solo se pueden eliminar pedidos en estado PENDIENTE',
+            estadoActual: estado,
+            pedidoId
+          });
+        }
+
+        // ELIMINACIÓN FÍSICA: Borrar la fila usando Google Sheets API
+        const rowNumber = i + 1; // +1 porque las filas empiezan en 1
+        
+        try {
+          // Obtener el sheetId de la hoja "Pedidos"
+          const spreadsheetData = await sheets.sheets.spreadsheets.get({
+            spreadsheetId: sheets.spreadsheetId
+          });
+          
+          const pedidosSheet = spreadsheetData.data.sheets.find(
+            sheet => sheet.properties.title === 'Pedidos'
+          );
+          
+          if (!pedidosSheet) {
+            return res.status(500).json({ error: 'Hoja Pedidos no encontrada' });
+          }
+          
+          const sheetId = pedidosSheet.properties.sheetId;
+          
+          // Eliminar la fila físicamente
+          await sheets.sheets.spreadsheets.batchUpdate({
+            spreadsheetId: sheets.spreadsheetId,
+            resource: {
+              requests: [{
+                deleteDimension: {
+                  range: {
+                    sheetId: sheetId,
+                    dimension: 'ROWS',
+                    startIndex: rowNumber - 1, // 0-indexed
+                    endIndex: rowNumber // exclusive
+                  }
+                }
+              }]
+            }
+          });
+          
+          console.log(`🗑️ Pedido ${pedidoId} eliminado físicamente (fila ${rowNumber}, estado: ${estado})`);
+          
+          return res.json({
+            success: true,
+            mensaje: 'Pedido eliminado permanentemente',
+            pedidoId,
+            estado
+          });
+          
+        } catch (deleteError) {
+          console.error('❌ Error eliminando fila:', deleteError);
+          return res.status(500).json({ 
+            error: 'Error al eliminar la fila del pedido',
+            detalles: deleteError.message 
+          });
+        }
       }
     }
 
     res.status(404).json({ error: 'Pedido no encontrado' });
   } catch (error) {
+    console.error('❌ Error eliminando pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
