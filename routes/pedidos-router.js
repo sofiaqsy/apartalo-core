@@ -1,5 +1,6 @@
 /**
  * PEDIDOS ROUTER - Gestión completa de pedidos
+ * ACTUALIZACIÓN: Soporte para estado de pago, monto pagado y fecha de pago
  * FIX: getRows() solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
  */
 
@@ -56,7 +57,8 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:O');
+    // Actualizado: A:R para incluir estadoPago, montoPagado, fechaPago
+    const rows = await sheets.getRows('Pedidos!A:R');
 
     let pedidos = [];
     for (let i = 1; i < rows.length; i++) {
@@ -64,12 +66,26 @@ router.get('/:businessId', async (req, res) => {
       if (!row[0] || row[0].includes('_DELETED')) continue;
 
       const pedido = {
-        id: row[0] || '', fecha: row[1] || '', hora: row[2] || '', whatsapp: row[3] || '',
-        cliente: row[4] || '', telefono: row[5] || '', direccion: row[6] || '',
-        productos: row[7] || '', total: parseFloat(row[8]) || 0, estado: row[9] || 'PENDIENTE',
-        evidencias: parseEvidencias(row[10]), // Ahora parseamos como evidencias
-        observaciones: row[11] || '', tipoEnvio: row[12] || '',
-        empresaEnvio: row[13] || '', origen: row[14] || 'BOT', rowIndex: i + 1
+        id: row[0] || '',
+        fecha: row[1] || '',
+        hora: row[2] || '',
+        whatsapp: row[3] || '',
+        cliente: row[4] || '',
+        telefono: row[5] || '',
+        direccion: row[6] || '',
+        productos: row[7] || '',
+        total: parseFloat(row[8]) || 0,
+        estado: row[9] || 'PENDIENTE',
+        evidencias: parseEvidencias(row[10]),
+        observaciones: row[11] || '',
+        tipoEnvio: row[12] || '',
+        empresaEnvio: row[13] || '',
+        origen: row[14] || 'BOT',
+        // NUEVOS CAMPOS DE PAGO
+        estadoPago: row[15] || 'PENDIENTE_PAGO',
+        montoPagado: parseFloat(row[16]) || 0,
+        fechaPago: row[17] || '',
+        rowIndex: i + 1
       };
 
       if (estado && pedido.estado !== estado) continue;
@@ -87,7 +103,13 @@ router.get('/:businessId', async (req, res) => {
     const totalPaginas = Math.ceil(total / limiteNum);
     const inicio = (paginaNum - 1) * limiteNum;
 
-    res.json({ total, pagina: paginaNum, totalPaginas, hayMas: paginaNum < totalPaginas, pedidos: pedidos.slice(inicio, inicio + limiteNum) });
+    res.json({
+      total,
+      pagina: paginaNum,
+      totalPaginas,
+      hayMas: paginaNum < totalPaginas,
+      pedidos: pedidos.slice(inicio, inicio + limiteNum)
+    });
   } catch (error) {
     console.error('❌ Error obteniendo pedidos:', error);
     res.status(500).json({ error: error.message });
@@ -105,17 +127,30 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:O');
+    const rows = await sheets.getRows('Pedidos!A:R');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         return res.json({
-          id: rows[i][0], fecha: rows[i][1] || '', hora: rows[i][2] || '', whatsapp: rows[i][3] || '',
-          cliente: rows[i][4] || '', telefono: rows[i][5] || '', direccion: rows[i][6] || '',
-          productos: rows[i][7] || '', total: parseFloat(rows[i][8]) || 0, estado: rows[i][9] || 'PENDIENTE',
-          evidencias: parseEvidencias(rows[i][10]), // Ahora parseamos como evidencias
-          observaciones: rows[i][11] || '', tipoEnvio: rows[i][12] || '',
-          empresaEnvio: rows[i][13] || '', origen: rows[i][14] || 'BOT', rowIndex: i + 1
+          id: rows[i][0],
+          fecha: rows[i][1] || '',
+          hora: rows[i][2] || '',
+          whatsapp: rows[i][3] || '',
+          cliente: rows[i][4] || '',
+          telefono: rows[i][5] || '',
+          direccion: rows[i][6] || '',
+          productos: rows[i][7] || '',
+          total: parseFloat(rows[i][8]) || 0,
+          estado: rows[i][9] || 'PENDIENTE',
+          evidencias: parseEvidencias(rows[i][10]),
+          observaciones: rows[i][11] || '',
+          tipoEnvio: rows[i][12] || '',
+          empresaEnvio: rows[i][13] || '',
+          origen: rows[i][14] || 'BOT',
+          estadoPago: rows[i][15] || 'PENDIENTE_PAGO',
+          montoPagado: parseFloat(rows[i][16]) || 0,
+          fechaPago: rows[i][17] || '',
+          rowIndex: i + 1
         });
       }
     }
@@ -268,10 +303,26 @@ router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res)
 router.post('/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, cliente, telefono, direccion, productos, total, observaciones, tipoEnvio, empresaEnvio, notificarCliente } = req.body;
+    const {
+      whatsapp,
+      cliente,
+      telefono,
+      direccion,
+      productos,
+      total,
+      observaciones,
+      tipoEnvio,
+      empresaEnvio,
+      notificarCliente,
+      // Nuevos campos de pago
+      estadoPago,
+      montoPagado
+    } = req.body;
 
     if (!whatsapp) return res.status(400).json({ error: 'Campo requerido: whatsapp' });
-    if (!productos || (Array.isArray(productos) && productos.length === 0)) return res.status(400).json({ error: 'Campo requerido: productos' });
+    if (!productos || (Array.isArray(productos) && productos.length === 0)) {
+      return res.status(400).json({ error: 'Campo requerido: productos' });
+    }
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
@@ -300,14 +351,31 @@ router.post('/:businessId', async (req, res) => {
 
     const totalFinal = total || totalCalculado;
 
+    // Valores actualizados con campos de pago
     const valores = [
-      pedidoId, fecha, hora, whatsapp.replace(/[^0-9]/g, ''),
-      cliente || '', telefono || '', direccion || '', productosTexto, totalFinal,
-      'PENDIENTE', '', observaciones || '', tipoEnvio || '', empresaEnvio || '', 'APP'
+      pedidoId,
+      fecha,
+      hora,
+      whatsapp.replace(/[^0-9]/g, ''),
+      cliente || '',
+      telefono || '',
+      direccion || '',
+      productosTexto,
+      totalFinal,
+      'PENDIENTE', // estado
+      '', // evidencias (vacío inicialmente)
+      observaciones || '',
+      tipoEnvio || '',
+      empresaEnvio || '',
+      'APP', // origen
+      estadoPago || 'PENDIENTE_PAGO', // P - estadoPago
+      montoPagado || 0, // Q - montoPagado
+      '' // R - fechaPago (vacío inicialmente)
     ];
 
     await sheets.appendRow('Pedidos', valores);
 
+    // Actualizar stock si hay productos con código
     if (Array.isArray(productos)) {
       for (const p of productos) {
         if (p.codigo) {
@@ -321,20 +389,43 @@ router.post('/:businessId', async (req, res) => {
                 break;
               }
             }
-          } catch (e) { console.error(`⚠️ Error actualizando stock de ${p.codigo}:`, e.message); }
+          } catch (e) {
+            console.error(`⚠️ Error actualizando stock de ${p.codigo}:`, e.message);
+          }
         }
       }
     }
 
+    // Notificar al cliente si se solicita
     if (notificarCliente) {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
         const mensaje = `✅ *Pedido Registrado*\n\n📋 *ID:* ${pedidoId}\n📅 ${fecha} ${hora}\n\n*Productos:*\n${productosTexto}\n\n💰 *Total:* S/ ${totalFinal.toFixed(2)}\n\nTe avisaremos cuando esté listo. ¡Gracias! 🙏`;
         await whatsappService.sendMessage(whatsapp.replace(/[^0-9]/g, ''), mensaje);
-      } catch (e) { console.error('⚠️ Error notificando cliente:', e.message); }
+      } catch (e) {
+        console.error('⚠️ Error notificando cliente:', e.message);
+      }
     }
 
-    res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha, hora, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', productos: productosTexto, total: totalFinal, estado: 'PENDIENTE', origen: 'APP', evidencias: [] } });
+    res.status(201).json({
+      success: true,
+      mensaje: 'Pedido creado',
+      pedido: {
+        id: pedidoId,
+        fecha,
+        hora,
+        whatsapp: whatsapp.replace(/[^0-9]/g, ''),
+        cliente: cliente || '',
+        productos: productosTexto,
+        total: totalFinal,
+        estado: 'PENDIENTE',
+        origen: 'APP',
+        evidencias: [],
+        estadoPago: estadoPago || 'PENDIENTE_PAGO',
+        montoPagado: montoPagado || 0,
+        fechaPago: ''
+      }
+    });
   } catch (error) {
     console.error('❌ Error creando pedido:', error);
     res.status(500).json({ error: error.message });
@@ -346,7 +437,19 @@ router.post('/:businessId', async (req, res) => {
 router.put('/:businessId/:pedidoId', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
-    const { estado, observaciones, direccion, tipoEnvio, empresaEnvio, voucherUrls, notificarCliente } = req.body;
+    const {
+      estado,
+      observaciones,
+      direccion,
+      tipoEnvio,
+      empresaEnvio,
+      voucherUrls,
+      notificarCliente,
+      // NUEVOS: campos de pago
+      estadoPago,
+      montoPagado,
+      fechaPago
+    } = req.body;
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
@@ -354,13 +457,14 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:O');
+    const rows = await sheets.getRows('Pedidos!A:R');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         const updates = [];
         const rowNum = i + 1;
 
+        // Campos existentes
         if (estado !== undefined) updates.push({ range: `Pedidos!J${rowNum}`, value: estado });
         if (observaciones !== undefined) updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones });
         if (direccion !== undefined) updates.push({ range: `Pedidos!G${rowNum}`, value: direccion });
@@ -368,8 +472,32 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
         if (empresaEnvio !== undefined) updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio });
         if (voucherUrls !== undefined) updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls });
 
-        if (updates.length > 0) await sheets.batchUpdate(updates);
+        // NUEVOS: campos de pago
+        if (estadoPago !== undefined) {
+          updates.push({ range: `Pedidos!P${rowNum}`, value: estadoPago });
+          
+          // Si se marca como PAGADO, registrar fecha automáticamente
+          if (estadoPago === 'PAGADO' && !fechaPago) {
+            updates.push({ 
+              range: `Pedidos!R${rowNum}`, 
+              value: new Date().toISOString() 
+            });
+          }
+        }
+        
+        if (montoPagado !== undefined) {
+          updates.push({ range: `Pedidos!Q${rowNum}`, value: montoPagado });
+        }
+        
+        if (fechaPago !== undefined) {
+          updates.push({ range: `Pedidos!R${rowNum}`, value: fechaPago });
+        }
 
+        if (updates.length > 0) {
+          await sheets.batchUpdate(updates);
+        }
+
+        // Notificación al cliente por cambio de estado
         if (notificarCliente && estado) {
           try {
             const whatsappService = new WhatsAppService(negocio.whatsapp);
@@ -380,19 +508,33 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
               'LISTO': `✅ Tu pedido *${pedidoId}* está listo para envío/recojo.`,
               'ENVIADO': `🚚 Tu pedido *${pedidoId}* ha sido enviado. ¡Pronto llegará!`,
               'ENTREGADO': `✅ Tu pedido *${pedidoId}* ha sido entregado. ¡Gracias por tu compra!`,
-              'CANCELADO': `❌ Tu pedido *${pedidoId}* ha sido cancelado.`
+              'CANCELADO': `❌ Tu pedido *${pedidoId}* ha sido cancelado.`,
+              'COMPLETADO': `✅ Tu pedido *${pedidoId}* ha sido completado. ¡Gracias por tu compra!`
             };
             const mensaje = mensajesEstado[estado];
-            if (mensaje) await whatsappService.sendMessage(clienteWhatsapp, mensaje);
-          } catch (e) { console.error('⚠️ Error notificando cliente:', e.message); }
+            if (mensaje) {
+              await whatsappService.sendMessage(clienteWhatsapp, mensaje);
+            }
+          } catch (e) {
+            console.error('⚠️ Error notificando cliente:', e.message);
+          }
         }
 
-        return res.json({ success: true, mensaje: 'Pedido actualizado', pedidoId });
+        console.log(`✅ Pedido ${pedidoId} actualizado`);
+        if (estadoPago) console.log(`   → Estado de pago: ${estadoPago}`);
+        if (montoPagado !== undefined) console.log(`   → Monto pagado: S/ ${montoPagado}`);
+
+        return res.json({
+          success: true,
+          mensaje: 'Pedido actualizado',
+          pedidoId
+        });
       }
     }
 
     res.status(404).json({ error: 'Pedido no encontrado' });
   } catch (error) {
+    console.error('❌ Error actualizando pedido:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -414,7 +556,11 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
       if (rows[i][0] === pedidoId) {
         await sheets.updateCell(`Pedidos!A${i + 1}`, `${pedidoId}_DELETED_${Date.now()}`);
         await sheets.updateCell(`Pedidos!J${i + 1}`, 'ELIMINADO');
-        return res.json({ success: true, mensaje: 'Pedido eliminado', pedidoId });
+        return res.json({
+          success: true,
+          mensaje: 'Pedido eliminado',
+          pedidoId
+        });
       }
     }
 
