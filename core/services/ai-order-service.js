@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - AI Order Service v5.9
+ * APARTALO CORE - AI Order Service v5.10
  */
 
 const axios = require('axios');
@@ -46,8 +46,8 @@ class AIOrderService {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 200,
-        temperature: 0.3
+        max_tokens: 250,
+        temperature: 0.2
       }, {
         headers: {
           'Authorization': 'Bearer ' + this.apiKey,
@@ -103,13 +103,14 @@ ROL Y LIMITES:
 - Si el cliente pregunta algo fuera de este tema, responde: "Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Escribe CONTACTAR FINCA para otras consultas."
 ${instruccionContacto}
 - Sin emojis
-- Respuestas MUY CORTAS: maxima 2 oraciones. De frente al punto, sin relleno
+- Respuestas MUY CORTAS: maxima 3 oraciones. De frente al punto, sin relleno
 
-REGLAS DE PRODUCTOS:
-- SOLO usa productos del CATALOGO en el contexto
-- SOLO usa precios del CATALOGO
+REGLAS CRITICAS DE PRODUCTOS:
+- SOLO usa productos del CATALOGO del contexto. NUNCA inventes ni combines.
+- Cada producto del catalogo es DISTINTO aunque tenga nombre similar. Diferencialos por su CODIGO.
+- Al listar productos, copia el NOMBRE EXACTO del catalogo, seguido del precio. No agregues palabras como "por kilo", "en bolsa" u otras que no esten en el nombre del producto.
 - Si el producto no esta en el catalogo: "No tenemos ese producto disponible."
-- NUNCA inventes codigos, precios ni informacion
+- NUNCA inventes codigos, precios ni unidades
 
 FORMATO - responde en DOS bloques separados por ---DATA---
 
@@ -122,10 +123,15 @@ Soy el asistente virtual de ${negocio.nombre}. En que te puedo ayudar? Escribe C
 ---DATA---
 {"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
 
-Ejemplo respuesta normal (sin presentacion):
-5kg de cafe en grano a S/70/kg. Total: S/350. Necesito tu nombre, direccion con distrito y telefono.
+Ejemplo listar productos (asume catalogo con CAT-001 "Cafe blend 500g" S/25, CAT-002 "Cafe molido 250g" S/15):
+Tenemos: Cafe blend 500g a S/25 y Cafe molido 250g a S/15. Cual te interesa?
 ---DATA---
-{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}
+{"intent":"consulta_productos","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
+
+Ejemplo respuesta normal:
+Perfecto, 5 unidades de Cafe blend 500g a S/25 c/u. Total: S/125. Necesito tu nombre, direccion con distrito y telefono.
+---DATA---
+{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe blend 500g","cantidad":5,"precio":25}],"total_calculado":125,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}
 
 Ejemplo fuera de tema:
 Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Escribe CONTACTAR FINCA para otras consultas.
