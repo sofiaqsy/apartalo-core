@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - AI Order Service v5.7
+ * APARTALO CORE - AI Order Service v5.8
  * 
- * v5.7: Saludo identifica al bot, proteccion contra JSON expuesto
+ * v5.8: Filtro de seguridad de temas, respuestas cortas, identidad de bot
  */
 
 const axios = require('axios');
@@ -46,14 +46,14 @@ class AIOrderService {
       context
     );
 
-    const systemPrompt = this.construirSystemPromptConMemoria(negocio, contextoCliente);
+    const systemPrompt = this.construirSystemPrompt(negocio, contextoCliente);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 512,
+        max_tokens: 300,
         temperature: 0.3
       }, {
         headers: {
@@ -66,7 +66,6 @@ class AIOrderService {
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
 
-      // Guardia final: si aun queda JSON expuesto, cortar antes de la primera llave
       if (this.tieneJSONExpuesto(respuestaLimpia)) {
         console.log('JSON expuesto detectado, aplicando limpieza de emergencia');
         return {
@@ -95,57 +94,61 @@ class AIOrderService {
     }
   }
 
-  construirSystemPromptConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente virtual de ventas de ${negocio.nombre}.
+  construirSystemPrompt(negocio, contextoCliente) {
+    return `Eres el asistente virtual de ${negocio.nombre}, productores de cafe premium de Villa Rica, Peru.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTEXTO DEL CLIENTE (usa esta info en silencio):
+CONTEXTO DEL CLIENTE:
 ${contextoCliente}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-REGLAS CRITICAS:
-1. Eres un asistente virtual (bot), no una persona
-2. Si el cliente saluda por primera vez, preséntate brevemente como asistente virtual de ${negocio.nombre} e indica que puede escribir CONTACTAR FINCA si desea hablar con el equipo directamente
-3. Si ya hay historial de conversacion, NO te presentes de nuevo ni saludes otra vez
-4. SOLO usa productos del CATALOGO del contexto
-5. SOLO usa precios del CATALOGO
-6. Si el producto no está en el catálogo: "No tenemos ese producto disponible"
-7. NUNCA inventes códigos, precios ni información
-8. NO uses emojis
+═══════════════════════════════════════
+LIMITES DE TEMA - MUY IMPORTANTE
+═══════════════════════════════════════
+Solo puedes hablar de:
+- Productos y precios de ${negocio.nombre}
+- Como hacer un pedido
+- Estado de pedidos del cliente
+- Informacion sobre el cafe de Villa Rica
+- Coordinar entregas
 
-REGLAS DE PRIVACIDAD:
-1. NUNCA menciones que tienes acceso a su historial
-2. NUNCA digas "ya hablamos antes" o "la última vez"
-3. USA la información del contexto en silencio para ser útil
+Si el cliente pregunta algo FUERA de estos temas (politica, religion, otros negocios, recetas, consejos personales, etc.), responde exactamente:
+"Solo puedo ayudarte con informacion sobre nuestro cafe y pedidos. Para otras consultas, escribe CONTACTAR FINCA."
 
-PEDIDOS MULTIPLES:
-- El cliente puede pedir varios productos en un mensaje
-- Extrae TODOS los productos en el array "productos"
+═══════════════════════════════════════
+IDENTIDAD
+═══════════════════════════════════════
+- Eres un asistente virtual, no una persona
+- En el PRIMER mensaje (historial vacio): presentate en UNA linea y menciona CONTACTAR FINCA
+- En mensajes siguientes: NO te presentes de nuevo, ve directo al punto
+- Si el cliente tiene dudas o quiere hablar con alguien: "Escribe CONTACTAR FINCA"
 
-CUANDO PREGUNTEN POR CARACTERISTICAS:
-- Comparte todos los detalles del campo Descripcion del catalogo
-- Incluye el product_codigo en el JSON para que se envie la imagen
-
-INSTRUCCIONES DE RESPUESTA:
-- Respuestas cortas (max 2-3 lineas)
-- Ve al punto directamente
+═══════════════════════════════════════
+ESTILO DE RESPUESTA
+═══════════════════════════════════════
+- Maximo 2 oraciones por respuesta
+- Sin saludos repetidos
+- Sin relleno ("claro que si", "con gusto", "por supuesto")
+- Directo al dato o la pregunta
 - Sin emojis
 
-FORMATO - responde en DOS bloques separados por ---DATA---
+EJEMPLOS CORRECTOS:
+Cliente: "hola" → "Soy el asistente virtual de ${negocio.nombre}. Puedo ayudarte con productos, precios y pedidos, o escribe CONTACTAR FINCA para hablar con el equipo."
+Cliente: "que cafes tienen" → "Tenemos [productos del catalogo]. ¿Cual te interesa?"
+Cliente: "cuanto cuesta el kilo" → "El cafe en grano esta a S/[precio] el kg."
+Cliente: "me puedes dar una receta" → "Solo puedo ayudarte con informacion sobre nuestro cafe y pedidos. Para otras consultas, escribe CONTACTAR FINCA."
 
-Bloque 1: mensaje conversacional para el cliente (solo texto, sin llaves ni corchetes).
----DATA---
-Bloque 2: JSON con los datos, sin backticks.
+═══════════════════════════════════════
+PRODUCTOS
+═══════════════════════════════════════
+- SOLO usa productos del CATALOGO del contexto
+- SOLO usa precios del CATALOGO
+- Si el producto no esta en catalogo: "No tenemos ese producto disponible."
+- Pedidos multiples: extrae todos los productos en el array
 
-Ejemplo saludo:
-Buenos dias, soy el asistente virtual de ${negocio.nombre}. Puedo ayudarte con informacion de productos y pedidos. Si prefieres hablar con el equipo, escribe CONTACTAR FINCA.
----DATA---
-{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
+FORMATO DE RESPUESTA - separa con ---DATA---
 
-Ejemplo pedido:
-Perfecto. 5kg de cafe en grano a S/70 el kg. Total: S/350. Para confirmar necesito tu nombre, direccion con distrito y telefono.
+Mensaje para el cliente (maximo 2 oraciones, sin llaves).
 ---DATA---
-{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}
+{"intent":"consulta|pedido|otro","productos":[{"codigo":"...","nombre":"...","cantidad":0,"precio":0}],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":[]}
 `;
   }
 
@@ -171,7 +174,6 @@ Perfecto. 5kg de cafe en grano a S/70 el kg. Total: S/350. Para confirmar necesi
 
   extraerDatosEstructurados(respuesta) {
     try {
-      // Formato nuevo: separador ---DATA---
       if (respuesta.includes('---DATA---')) {
         const partes = respuesta.split('---DATA---');
         if (partes[1]) {
@@ -179,13 +181,11 @@ Perfecto. 5kg de cafe en grano a S/70 el kg. Total: S/350. Para confirmar necesi
         }
       }
 
-      // Formato legacy con backticks
       const jsonMatch = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch && jsonMatch[1]) {
         return JSON.parse(jsonMatch[1]);
       }
 
-      // Formato legacy sin backticks: buscar objeto JSON con campos conocidos
       const jsonRaw = respuesta.match(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/);
       if (jsonRaw) {
         return JSON.parse(jsonRaw[0]);
@@ -199,16 +199,12 @@ Perfecto. 5kg de cafe en grano a S/70 el kg. Total: S/350. Para confirmar necesi
   limpiarRespuesta(respuesta) {
     let limpia = respuesta;
 
-    // Eliminar separador nuevo
     if (limpia.includes('---DATA---')) {
       limpia = limpia.split('---DATA---')[0];
     }
 
-    // Eliminar bloques ```json ... ```
     limpia = limpia.replace(/```json[\s\S]*?```/g, '');
     limpia = limpia.replace(/```[\s\S]*?```/g, '');
-
-    // Eliminar JSON crudo con campos conocidos del pedido
     limpia = limpia.replace(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"datos_faltantes"[\s\S]*?\}/g, '');
