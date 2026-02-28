@@ -12,7 +12,7 @@ const { mergeDatasSinNull, formatearProductosParaSheets } = require('./utils');
 async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
   
-  console.log('🤖 Starting direct conversation with AI + RAG (no buttons)');
+  console.log('Starting direct conversation with AI + RAG (no buttons)');
   
   stateManager.setState(from, negocio.id, {
     step: 'pedido_conversacional',
@@ -30,9 +30,10 @@ async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   }
   
   const saludo = getGreeting();
-  await whatsapp.sendMessage(from, 
-    saludo + '\n\n' +
-    'Bienvenido a ' + negocio.nombre + '. ¿En qué puedo ayudarte?'
+  await whatsapp.sendMessage(from,
+    saludo + ' Soy el asistente virtual de *' + negocio.nombre + '*\n\n' +
+    '¿En qué puedo ayudarte hoy?\n\n' +
+    '_Si prefieres hablar directamente con la finca, escribe *CONTACTAR FINCA*._'
   );
 }
 
@@ -62,7 +63,7 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
 
-  console.log('📊 Accumulated data:', JSON.stringify(datosAcumulados));
+  console.log('Accumulated data:', JSON.stringify(datosAcumulados));
 
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
@@ -96,7 +97,7 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
           preguntaCaracteristicas;
       }
     } catch (e) {
-      console.log('⚠️ Error finding product for image:', e.message);
+      console.log('Error finding product for image:', e.message);
     }
   }
 
@@ -122,9 +123,9 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   if (debeEnviarImagen && productoParaMostrar && productoParaMostrar.imagenUrl) {
     try {
       await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
-      console.log('✅ Image sent with caption');
+      console.log('Image sent with caption');
     } catch (e) {
-      console.log('⚠️ Error sending image:', e.message);
+      console.log('Error sending image:', e.message);
       await whatsapp.sendMessage(from, resultado.respuesta);
     }
   } else {
@@ -135,28 +136,28 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
 async function confirmarPedidoIA(from, context, cfg, datos) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  console.log('✅ confirmarPedidoIA - received data:', JSON.stringify(datos));
+  console.log('confirmarPedidoIA - received data:', JSON.stringify(datos));
 
   let productosParaPedido = [];
   let total = 0;
 
   if (datos.productos && Array.isArray(datos.productos) && datos.productos.length > 0) {
-    console.log('🛒 Processing MULTI-PRODUCT order:', datos.productos.length, 'items');
+    console.log('Processing MULTI-PRODUCT order:', datos.productos.length, 'items');
     
     let productosDisponibles = [];
     try {
       productosDisponibles = await sheets.getProductosConPrecios(from);
     } catch (e) {
-      console.log('⚠️ Sheets error:', e.message);
+      console.log('Sheets error:', e.message);
       try {
         productosDisponibles = await sheets.getProductos('ACTIVO');
       } catch (e2) {
-        console.log('⚠️ Sheets unavailable, using AI data');
+        console.log('Sheets unavailable, using AI data');
       }
     }
     
     if (productosDisponibles.length === 0) {
-      console.log('📦 Trusting AI-validated products');
+      console.log('Trusting AI-validated products');
       productosParaPedido = datos.productos.map(item => ({
         codigo: item.codigo,
         nombre: item.nombre,
@@ -179,7 +180,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
           });
           total += cantidad * producto.precio;
         } else {
-          console.log('⚠️ Using AI data for:', item.codigo);
+          console.log('Using AI data for:', item.codigo);
           productosParaPedido.push({
             codigo: item.codigo,
             nombre: item.nombre,
@@ -192,7 +193,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
     }
   } 
   else if (datos.producto_codigo) {
-    console.log('📦 Processing SINGLE product');
+    console.log('Processing SINGLE product');
     
     let productosDisponibles = [];
     try {
@@ -201,14 +202,14 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
       try {
         productosDisponibles = await sheets.getProductos('ACTIVO');
       } catch (e2) {
-        console.log('⚠️ Sheets unavailable');
+        console.log('Sheets unavailable');
       }
     }
     
     let producto = productosDisponibles.find(p => p.codigo === datos.producto_codigo);
     
     if (!producto && datos.precio_unitario) {
-      console.log('📦 Using AI data');
+      console.log('Using AI data');
       producto = {
         codigo: datos.producto_codigo,
         nombre: datos.producto_nombre || 'Producto',
@@ -229,7 +230,7 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
   }
 
   if (productosParaPedido.length === 0) {
-    console.log('❌ No products found');
+    console.log('No products found');
     await whatsapp.sendMessage(from, 
       'No pude identificar los productos. ¿Podrías indicarme nuevamente qué deseas?'
     );
@@ -332,13 +333,13 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       observaciones: 'WhatsApp Bot IA + RAG (Multi-product)'
     });
     
-    console.log('✅ Order created:', pedidoId, '- Products:', productosParaPedido.length);
+    console.log('Order created:', pedidoId, '- Products:', productosParaPedido.length);
   } catch (e) {
-    console.error('❌ Error:', e.message);
+    console.error('Error:', e.message);
   }
 
   if (cfg.flujoPago === 'contacto') {
-    let mensaje = '✅ PEDIDO CONFIRMADO\n\n';
+    let mensaje = 'PEDIDO CONFIRMADO\n\n';
     mensaje += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
@@ -355,7 +356,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
   } else {
     const metodosPago = await sheets.getMetodosPago();
     
-    let mensajePago = '✅ PEDIDO REGISTRADO\n\n';
+    let mensajePago = 'PEDIDO REGISTRADO\n\n';
     mensajePago += `Código: ${pedidoId}\n\n`;
     
     productosParaPedido.forEach(p => {
@@ -364,7 +365,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     });
     
     mensajePago += `\nTotal: S/${total.toFixed(2)}\n\n`;
-    mensajePago += 'MÉTODOS DE PAGO:\n\n';
+    mensajePago += 'METODOS DE PAGO:\n\n';
 
     if (metodosPago.length > 0) {
       metodosPago.forEach(m => {
