@@ -45,10 +45,60 @@ class SheetsService {
   // UTILIDADES DE CONVERSION
   // ============================================
 
+  /**
+   * Parsea cualquier formato numérico que pueda venir de Google Sheets:
+   * - Número puro: 70 → 70
+   * - Decimal con punto: 70.5 → 70.5
+   * - Decimal con coma: 70,5 → 70.5
+   * - Miles con punto y decimal con coma: 1.000,50 → 1000.5
+   * - Miles con coma y decimal con punto: 1,000.50 → 1000.5
+   * - Con símbolo moneda: S/70 → 70  |  $70.5 → 70.5
+   * - Con espacios o texto extra: " 70 " → 70
+   */
   parseDecimal(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return value;
-    const str = String(value).trim().replace(',', '.');
+
+    let str = String(value).trim();
+
+    // Quitar símbolos de moneda y texto no numérico al inicio/fin (S/, $, etc.)
+    str = str.replace(/^[^0-9\-]+/, '').replace(/[^0-9\.,]+$/, '');
+
+    if (str === '') return 0;
+
+    const tienePunto = str.includes('.');
+    const tieneComa = str.includes(',');
+
+    if (tienePunto && tieneComa) {
+      // Determinar cuál es separador de miles y cuál de decimal
+      const idxPunto = str.lastIndexOf('.');
+      const idxComa = str.lastIndexOf(',');
+
+      if (idxComa > idxPunto) {
+        // Formato europeo: 1.000,50 → punto=miles, coma=decimal
+        str = str.replace(/\./g, '').replace(',', '.');
+      } else {
+        // Formato anglosajón: 1,000.50 → coma=miles, punto=decimal
+        str = str.replace(/,/g, '');
+      }
+    } else if (tieneComa && !tienePunto) {
+      // Solo coma: puede ser decimal (70,5) o miles (1,000)
+      const partesComa = str.split(',');
+      const ultimaParte = partesComa[partesComa.length - 1];
+
+      if (partesComa.length === 2 && ultimaParte.length <= 2) {
+        // Decimal: 70,5 o 70,50
+        str = str.replace(',', '.');
+      } else if (partesComa.length === 2 && ultimaParte.length === 3) {
+        // Ambiguo: podría ser 1,000 (miles) → tratar como entero
+        str = str.replace(',', '');
+      } else {
+        // Múltiples comas como separador de miles: 1,000,000
+        str = str.replace(/,/g, '');
+      }
+    }
+    // Si solo tiene punto ya es formato estándar JS, no hacer nada
+
     const num = parseFloat(str);
     return isNaN(num) ? 0 : num;
   }
@@ -56,9 +106,8 @@ class SheetsService {
   parseInt(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return Math.floor(value);
-    const str = String(value).trim().replace(',', '.');
-    const num = parseInt(str, 10);
-    return isNaN(num) ? 0 : num;
+    // Reusar parseDecimal para manejar todos los formatos
+    return Math.floor(this.parseDecimal(value));
   }
 
   formatValueForSheets(value) {
@@ -196,8 +245,6 @@ class SheetsService {
 
     if (clienteExistente) {
       const row = clienteExistente.rowIndex;
-
-      // Actualizar solo los campos que vienen con valor nuevo (no sobreescribir con vacío)
       const actualizaciones = [];
 
       const nombreNuevo = datosCliente.nombre || datosCliente.empresa || '';
@@ -215,7 +262,6 @@ class SheetsService {
         actualizaciones.push({ range: `Clientes!E${row}`, value: direccionNueva });
       }
 
-      // Siempre actualizar ultima compra/actividad
       actualizaciones.push({ range: `Clientes!G${row}`, value: hoy });
 
       if (actualizaciones.length > 0) {
@@ -226,7 +272,6 @@ class SheetsService {
       return { ...clienteExistente, updated: true };
     }
 
-    // Cliente nuevo — crear registro completo
     const nuevoId = 'CLI-' + Date.now().toString().slice(-6);
     const valores = [
       nuevoId,
@@ -246,7 +291,7 @@ class SheetsService {
   }
 
   // ============================================
-  // PRECIOS CLIENTES (precios especiales)
+  // PRECIOS CLIENTES
   // ============================================
 
   async getPreciosCliente(whatsapp) {
@@ -281,20 +326,14 @@ class SheetsService {
     const preciosCliente = await this.getPreciosCliente(whatsapp);
     
     if (preciosCliente[codigoProducto]) {
-      return {
-        precio: preciosCliente[codigoProducto],
-        tipo: 'especial'
-      };
+      return { precio: preciosCliente[codigoProducto], tipo: 'especial' };
     }
 
     const productos = await this.getProductos('ACTIVO');
     const producto = productos.find(p => p.codigo === codigoProducto);
     
     if (producto) {
-      return {
-        precio: producto.precio,
-        tipo: 'lista'
-      };
+      return { precio: producto.precio, tipo: 'lista' };
     }
 
     return null;
@@ -431,6 +470,7 @@ class SheetsService {
       if (productoEstado === 'ELIMINADO') continue;
 
       if (!estado || productoEstado === estado) {
+        const precio = this.parseDecimal(row[3]);
         const stock = this.parseInt(row[4]);
         const stockReservado = this.parseInt(row[5]);
         
@@ -438,9 +478,9 @@ class SheetsService {
           codigo: row[0] || '',
           nombre: row[1] || '',
           descripcion: row[2] || '',
-          precio: this.parseDecimal(row[3]),
-          stock: stock,
-          stockReservado: stockReservado,
+          precio,
+          stock,
+          stockReservado,
           imagenUrl: row[6] || '',
           estado: productoEstado,
           categoria: row[8] || '',
@@ -457,13 +497,8 @@ class SheetsService {
     const productos = await this.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
 
-    if (!producto) {
-      return { success: false, error: 'Producto no encontrado' };
-    }
-
-    if (producto.disponible < cantidad) {
-      return { success: false, error: 'Stock insuficiente' };
-    }
+    if (!producto) return { success: false, error: 'Producto no encontrado' };
+    if (producto.disponible < cantidad) return { success: false, error: 'Stock insuficiente' };
 
     const nuevoReservado = producto.stockReservado + cantidad;
     await this.updateCell('Inventario!F' + producto.rowIndex, nuevoReservado);
@@ -505,19 +540,11 @@ class SheetsService {
     const metodos = [];
 
     if (configObj.yape_activo === 'SI') {
-      metodos.push({
-        tipo: 'yape',
-        numero: configObj.yape_numero,
-        titular: configObj.yape_titular
-      });
+      metodos.push({ tipo: 'yape', numero: configObj.yape_numero, titular: configObj.yape_titular });
     }
 
     if (configObj.plin_activo === 'SI') {
-      metodos.push({
-        tipo: 'plin',
-        numero: configObj.plin_numero,
-        titular: configObj.plin_titular
-      });
+      metodos.push({ tipo: 'plin', numero: configObj.plin_numero, titular: configObj.plin_titular });
     }
 
     ['bcp', 'interbank', 'bbva', 'scotiabank'].forEach(banco => {
