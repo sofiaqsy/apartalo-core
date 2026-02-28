@@ -107,9 +107,9 @@ async function handle(from, message, context) {
       return;
     } else {
       await whatsapp.sendMessage(from,
-        '📞 *Contacto con la Finca*\n\n' +
+        '*Contacto con la Finca*\n\n' +
         'Voy a conectarte con el equipo de ' + negocio.nombre + '.\n\n' +
-        'En breve alguien se comunicará contigo. 🌿'
+        'En breve alguien se comunicará contigo.'
       );
       return;
     }
@@ -153,7 +153,7 @@ async function mostrarSaludoSimple(from, context) {
   
   const saludo = getGreeting();
   const mensaje =
-    saludo + ' Soy el asistente virtual de *' + negocio.nombre + '* 🤖\n\n' +
+    saludo + ' Soy el asistente virtual de *' + negocio.nombre + '*\n\n' +
     '¿En qué puedo ayudarte hoy?\n\n' +
     '_Si prefieres hablar directamente con la finca, escribe *CONTACTAR FINCA*._';
   
