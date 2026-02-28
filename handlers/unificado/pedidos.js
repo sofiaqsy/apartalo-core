@@ -1,7 +1,9 @@
 /**
  * APARTALO CORE - Handler Unificado - Pedidos
- * 
- * v4.4: Gracefully handle Sheets quota errors - trust AI-validated products
+ *
+ * v4.5:
+ * - Imagen se envía solo una vez por producto (no repetir si ya se mostró)
+ * - Si el cliente ya está registrado, no pedir datos — solo confirmar los existentes
  */
 
 const { getGreeting, generateId } = require('../../core/utils/formatters');
@@ -68,36 +70,25 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
-  const mensajeLower = mensaje.toLowerCase();
-  const preguntaCaracteristicas = 
-    mensajeLower.includes('caracteristica') ||
-    mensajeLower.includes('característica') ||
-    mensajeLower.includes('detalle') ||
-    mensajeLower.includes('información') ||
-    mensajeLower.includes('informacion') ||
-    mensajeLower.includes('descrip') ||
-    mensajeLower.includes('que tiene') ||
-    mensajeLower.includes('qué tiene') ||
-    mensajeLower.includes('como es') ||
-    mensajeLower.includes('cómo es');
-
+  // Determinar si hay un producto activo en la conversación
   const productoCodigoActual = datosAcumulados.producto_codigo || 
     (datosAcumulados.productos && datosAcumulados.productos[0]?.codigo);
+
   let productoParaMostrar = null;
   let debeEnviarImagen = false;
 
   if (productoCodigoActual && cfg.mostrarFotos) {
-    try {
-      const productos = await sheets.getProductosConPrecios(from);
-      productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
-      
-      if (productoParaMostrar) {
-        debeEnviarImagen = 
-          (productoCodigoActual !== ultimoProductoMostrado) || 
-          preguntaCaracteristicas;
+    // Solo mostrar imagen si es un producto DISTINTO al último mostrado
+    if (productoCodigoActual !== ultimoProductoMostrado) {
+      try {
+        const productos = await sheets.getProductosConPrecios(from);
+        productoParaMostrar = productos.find(p => p.codigo === productoCodigoActual);
+        if (productoParaMostrar?.imagenUrl) {
+          debeEnviarImagen = true;
+        }
+      } catch (e) {
+        console.log('Error finding product for image:', e.message);
       }
-    } catch (e) {
-      console.log('Error finding product for image:', e.message);
     }
   }
 
@@ -108,9 +99,18 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     stateManager.updateData(from, negocio.id, {
       historial,
       datosExtraidos: datosAcumulados,
-      ultimoProductoMostrado: productoCodigoActual
+      ultimoProductoMostrado: debeEnviarImagen ? productoCodigoActual : ultimoProductoMostrado
     });
     
+    // Enviar imagen antes de pasar a confirmar, si corresponde
+    if (debeEnviarImagen && productoParaMostrar?.imagenUrl) {
+      try {
+        await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
+      } catch (e) {
+        await whatsapp.sendMessage(from, resultado.respuesta);
+      }
+    }
+
     return await confirmarPedidoIA(from, context, cfg, datosAcumulados);
   }
 
@@ -120,7 +120,7 @@ async function continuarPedidoConversacional(from, mensaje, context, cfg) {
     ultimoProductoMostrado: debeEnviarImagen ? productoCodigoActual : ultimoProductoMostrado
   });
 
-  if (debeEnviarImagen && productoParaMostrar && productoParaMostrar.imagenUrl) {
+  if (debeEnviarImagen && productoParaMostrar?.imagenUrl) {
     try {
       await whatsapp.sendImage(from, productoParaMostrar.imagenUrl, resultado.respuesta);
       console.log('Image sent with caption');
@@ -138,133 +138,102 @@ async function confirmarPedidoIA(from, context, cfg, datos) {
 
   console.log('confirmarPedidoIA - received data:', JSON.stringify(datos));
 
+  // ============================================
+  // RESOLVER DATOS DEL CLIENTE
+  // Primero buscar en Sheets; si ya existe, usar sus datos guardados.
+  // Solo pedir datos si el cliente no está registrado.
+  // ============================================
+  let clienteRegistrado = null;
+  try {
+    clienteRegistrado = await sheets.buscarCliente(from);
+  } catch (e) {
+    console.log('Error buscando cliente:', e.message);
+  }
+
+  // Prioridad: datos que la IA recogió en esta conversación > datos guardados en Sheets
+  const nombreFinal    = datos.nombre_cliente || clienteRegistrado?.nombre || null;
+  const direccionFinal = datos.direccion       || clienteRegistrado?.direccion || null;
+  const telefonoFinal  = datos.telefono        || clienteRegistrado?.telefono || null;
+  const clienteYaExiste = !!clienteRegistrado;
+
+  // ============================================
+  // RESOLVER PRODUCTOS
+  // ============================================
   let productosParaPedido = [];
   let total = 0;
 
-  if (datos.productos && Array.isArray(datos.productos) && datos.productos.length > 0) {
-    console.log('Processing MULTI-PRODUCT order:', datos.productos.length, 'items');
-    
+  const resolverProductos = async (items) => {
     let productosDisponibles = [];
     try {
       productosDisponibles = await sheets.getProductosConPrecios(from);
     } catch (e) {
-      console.log('Sheets error:', e.message);
-      try {
-        productosDisponibles = await sheets.getProductos('ACTIVO');
-      } catch (e2) {
-        console.log('Sheets unavailable, using AI data');
-      }
+      try { productosDisponibles = await sheets.getProductos('ACTIVO'); } catch {}
     }
-    
-    if (productosDisponibles.length === 0) {
-      console.log('Trusting AI-validated products');
-      productosParaPedido = datos.productos.map(item => ({
-        codigo: item.codigo,
-        nombre: item.nombre,
-        cantidad: parseFloat(item.cantidad) || 1,
-        precio: parseFloat(item.precio) || 0
-      }));
-      total = datos.total_calculado || productosParaPedido.reduce((sum, p) => 
-        sum + (p.cantidad * p.precio), 0);
-    } else {
-      for (const item of datos.productos) {
-        const producto = productosDisponibles.find(p => p.codigo === item.codigo);
-        
-        if (producto) {
-          const cantidad = parseFloat(item.cantidad) || 1;
-          productosParaPedido.push({
-            codigo: producto.codigo,
-            nombre: producto.nombre,
-            cantidad: cantidad,
-            precio: producto.precio
-          });
-          total += cantidad * producto.precio;
-        } else {
-          console.log('Using AI data for:', item.codigo);
-          productosParaPedido.push({
-            codigo: item.codigo,
-            nombre: item.nombre,
-            cantidad: parseFloat(item.cantidad) || 1,
-            precio: parseFloat(item.precio) || 0
-          });
-          total += (parseFloat(item.cantidad) || 1) * (parseFloat(item.precio) || 0);
-        }
-      }
+
+    for (const item of items) {
+      const producto = productosDisponibles.find(p => p.codigo === item.codigo);
+      const cantidad = parseFloat(item.cantidad) || 1;
+      const precio   = producto?.precio ?? parseFloat(item.precio) ?? 0;
+      const nombre   = producto?.nombre ?? item.nombre ?? 'Producto';
+      productosParaPedido.push({ codigo: item.codigo, nombre, cantidad, precio });
+      total += cantidad * precio;
     }
-  } 
-  else if (datos.producto_codigo) {
-    console.log('Processing SINGLE product');
-    
-    let productosDisponibles = [];
-    try {
-      productosDisponibles = await sheets.getProductosConPrecios(from);
-    } catch (e) {
-      try {
-        productosDisponibles = await sheets.getProductos('ACTIVO');
-      } catch (e2) {
-        console.log('Sheets unavailable');
-      }
-    }
-    
-    let producto = productosDisponibles.find(p => p.codigo === datos.producto_codigo);
-    
-    if (!producto && datos.precio_unitario) {
-      console.log('Using AI data');
-      producto = {
-        codigo: datos.producto_codigo,
-        nombre: datos.producto_nombre || 'Producto',
-        precio: datos.precio_unitario
-      };
-    }
-    
-    if (producto) {
-      const cantidad = parseFloat(datos.cantidad) || cfg.minimoCompra || 1;
-      productosParaPedido.push({
-        codigo: producto.codigo,
-        nombre: producto.nombre,
-        cantidad: cantidad,
-        precio: producto.precio
-      });
-      total = cantidad * producto.precio;
-    }
+  };
+
+  if (datos.productos?.length > 0) {
+    await resolverProductos(datos.productos);
+  } else if (datos.producto_codigo) {
+    await resolverProductos([{
+      codigo: datos.producto_codigo,
+      nombre: datos.producto_nombre,
+      cantidad: datos.cantidad || cfg.minimoCompra || 1,
+      precio: datos.precio_unitario || 0
+    }]);
   }
 
   if (productosParaPedido.length === 0) {
-    console.log('No products found');
-    await whatsapp.sendMessage(from, 
-      'No pude identificar los productos. ¿Podrías indicarme nuevamente qué deseas?'
-    );
+    await whatsapp.sendMessage(from, '¿Podrías indicarme nuevamente qué producto deseas?');
     return;
   }
 
-  if (datos.total_calculado && datos.total_calculado > 0) {
-    total = datos.total_calculado;
-  }
+  if (datos.total_calculado > 0) total = datos.total_calculado;
 
   stateManager.updateData(from, negocio.id, {
     productosParaPedido,
     total,
-    nombreCliente: datos.nombre_cliente,
-    direccion: datos.direccion,
-    telefono: datos.telefono
+    nombreCliente: nombreFinal,
+    direccion: direccionFinal,
+    telefono: telefonoFinal,
+    clienteYaExiste
   });
 
+  // ============================================
+  // ARMAR RESUMEN
+  // ============================================
   let mensaje = 'RESUMEN DE TU PEDIDO\n\n';
   
   productosParaPedido.forEach(p => {
-    const subtotal = p.cantidad * p.precio;
     const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
     mensaje += `${p.nombre}\n`;
-    mensaje += `  ${p.cantidad} ${unidadTexto} x S/${p.precio} = S/${subtotal.toFixed(2)}\n\n`;
+    mensaje += `  ${p.cantidad} ${unidadTexto} x S/${p.precio} = S/${(p.cantidad * p.precio).toFixed(2)}\n\n`;
   });
 
   mensaje += `Total: S/${total.toFixed(2)}\n\n`;
-  
   mensaje += 'Entrega:\n';
-  if (datos.nombre_cliente) mensaje += `Nombre: ${datos.nombre_cliente}\n`;
-  if (datos.direccion) mensaje += `Dirección: ${datos.direccion}\n`;
-  if (datos.telefono) mensaje += `Teléfono: ${datos.telefono}\n`;
-  mensaje += '\n¿Confirmas el pedido?';
+
+  if (clienteYaExiste && nombreFinal) {
+    // Cliente registrado: mostrar datos existentes para confirmar, no pedirlos
+    mensaje += `Nombre: ${nombreFinal}\n`;
+    if (direccionFinal) mensaje += `Dirección: ${direccionFinal}\n`;
+    if (telefonoFinal)  mensaje += `Teléfono: ${telefonoFinal}\n`;
+    mensaje += '\n¿Confirmas el pedido con estos datos?';
+  } else {
+    // Cliente nuevo: aún no tenemos sus datos completos
+    if (nombreFinal)    mensaje += `Nombre: ${nombreFinal}\n`;
+    if (direccionFinal) mensaje += `Dirección: ${direccionFinal}\n`;
+    if (telefonoFinal)  mensaje += `Teléfono: ${telefonoFinal}\n`;
+    mensaje += '\n¿Confirmas el pedido?';
+  }
 
   await whatsapp.sendButtonMessage(from, mensaje, [
     { id: 'confirmar_si', title: 'Sí, confirmar' },
@@ -290,7 +259,7 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  const { productosParaPedido, total, nombreCliente, direccion, telefono } = state.data || {};
+  const { productosParaPedido, total, nombreCliente, direccion, telefono, clienteYaExiste } = state.data || {};
 
   if (!productosParaPedido || productosParaPedido.length === 0) {
     await whatsapp.sendMessage(from, 'Ocurrió un error. Por favor intenta de nuevo.');
@@ -298,20 +267,19 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     return;
   }
 
-  if (!nombreCliente || !direccion) {
-    await whatsapp.sendMessage(from, 
-      'Para completar el pedido, necesito tu nombre completo, dirección de entrega (incluye distrito) y teléfono de contacto.'
+  // Si es cliente nuevo y faltan datos, solicitarlos
+  if (!clienteYaExiste && (!nombreCliente || !direccion)) {
+    await whatsapp.sendMessage(from,
+      'Para completar el pedido necesito tu nombre completo, dirección de entrega (incluye distrito) y teléfono de contacto.'
     );
     stateManager.setStep(from, negocio.id, 'pedido_conversacional');
     return;
   }
 
   const pedidoId = generateId(cfg.prefijoPedido);
-  const estadoInicial = cfg.flujoPago === 'contacto' 
+  const estadoInicial = cfg.flujoPago === 'contacto'
     ? config.orderStates?.IN_PREPARATION || 'EN_PREPARACION'
     : config.orderStates?.PENDING_PAYMENT || 'PENDIENTE_PAGO';
-
-  const productosTexto = formatearProductosParaSheets(productosParaPedido);
 
   try {
     await sheets.upsertCliente({
@@ -327,25 +295,24 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
       cliente: nombreCliente,
       telefono: telefono || '',
       direccion: direccion,
-      productos: productosTexto,
+      productos: formatearProductosParaSheets(productosParaPedido),
       total,
       estado: estadoInicial,
-      observaciones: 'WhatsApp Bot IA + RAG (Multi-product)'
+      observaciones: 'WhatsApp Bot IA + RAG'
     });
     
-    console.log('Order created:', pedidoId, '- Products:', productosParaPedido.length);
+    console.log('Order created:', pedidoId);
   } catch (e) {
-    console.error('Error:', e.message);
+    console.error('Error guardando pedido:', e.message);
   }
 
   if (cfg.flujoPago === 'contacto') {
     let mensaje = 'PEDIDO CONFIRMADO\n\n';
     mensaje += `Código: ${pedidoId}\n\n`;
-    
     productosParaPedido.forEach(p => {
-      mensaje += `${p.nombre} x${p.cantidad}\n`;
+      const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
+      mensaje += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
     });
-    
     mensaje += `\nTotal: S/${total.toFixed(2)}\n\n`;
     mensaje += `Entrega en: ${direccion}\n\n`;
     mensaje += 'Te contactaremos pronto para coordinar el pago y la entrega.\n\n';
@@ -358,12 +325,10 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     
     let mensajePago = 'PEDIDO REGISTRADO\n\n';
     mensajePago += `Código: ${pedidoId}\n\n`;
-    
     productosParaPedido.forEach(p => {
       const unidadTexto = cfg.unidad === 'kg' ? 'kg' : (p.cantidad === 1 ? 'unidad' : 'unidades');
       mensajePago += `${p.nombre} x${p.cantidad} ${unidadTexto}\n`;
     });
-    
     mensajePago += `\nTotal: S/${total.toFixed(2)}\n\n`;
     mensajePago += 'METODOS DE PAGO:\n\n';
 
@@ -388,7 +353,6 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     await whatsapp.sendMessage(from, mensajePago);
     stateManager.updateData(from, negocio.id, { pedidoId });
     stateManager.setStep(from, negocio.id, 'esperando_voucher');
-    return;
   }
 }
 
