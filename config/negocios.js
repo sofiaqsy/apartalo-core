@@ -65,10 +65,10 @@ class NegociosService {
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        const negocio = this.parseNegocioRow(row);
+        const negocio = this.parseNegocioRow(row, i + 1);
         if (negocio && negocio.estado === 'ACTIVO') {
           this.negocios.set(negocio.id, negocio);
-          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo} [WhatsApp: ${negocio.whatsapp.tipo}]`);
+          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo} [WhatsApp: ${negocio.whatsapp.tipo}] [PhoneId: ${negocio.whatsapp.phoneId}]`);
         }
       }
     } catch (error) {
@@ -77,41 +77,39 @@ class NegociosService {
     }
   }
 
-  /**
-   * Parsear fila del Maestro.
-   *
-   * Lógica de WhatsApp:
-   * - COMPARTIDO: siempre usa las credenciales compartidas (config.whatsappShared)
-   * - PROPIO con phoneId+token: usa sus propias credenciales Y su propio webhook /webhook/:id
-   * - PROPIO sin credenciales: degradado a COMPARTIDO automáticamente
-   */
-  parseNegocioRow(row) {
+  parseNegocioRow(row, rowNum = '?') {
     if (!row[0]) return null;
 
-    const id           = (row[0] || '').trim();
-    const nombre       = (row[1] || id).trim();
-    const whatsappTipo = (row[2] || 'COMPARTIDO').trim().toUpperCase();
-    const phoneId      = (row[3] || '').trim();
-    const token        = (row[4] || '').trim();
-    const spreadsheetId= (row[5] || '').trim();
-    const webhookPath  = (row[6] || `/webhook/${id}`).trim();
-    const admin        = (row[7] || '').trim() || null;
-    const flujo        = (row[8] || 'UNIFICADO').trim().toUpperCase();
-    const featuresStr  = (row[9] || '').trim();
-    const prefijo      = (row[10] || id.substring(0, 4)).trim().toUpperCase();
-    const estado       = (row[11] || 'ACTIVO').trim().toUpperCase();
-    const configExtra  = this.parseJSON(row[12]);
+    const id            = (row[0] || '').trim();
+    const nombre        = (row[1] || id).trim();
+    const whatsappTipo  = (row[2] || 'COMPARTIDO').trim().toUpperCase();
+    const phoneId       = (row[3] || '').trim();
+    const token         = (row[4] || '').trim();
+    const spreadsheetId = (row[5] || '').trim();
+    const webhookPath   = (row[6] || `/webhook/${id}`).trim();
+    const admin         = (row[7] || '').trim() || null;
+    const flujo         = (row[8] || 'UNIFICADO').trim().toUpperCase();
+    const featuresStr   = (row[9] || '').trim();
+    const prefijo       = (row[10] || id.substring(0, 4)).trim().toUpperCase();
+    const estado        = (row[11] || 'ACTIVO').trim().toUpperCase();
+    const configExtra   = this.parseJSON(row[12]);
 
-    // Determinar si realmente puede usar número propio
+    // Log diagnóstico para verificar qué lee el parser
+    console.log(`[Negocios row ${rowNum}] id="${id}" tipo="${whatsappTipo}" phoneId="${phoneId ? phoneId.substring(0, 8) + '...' : 'VACÍO'}" token="${token ? 'SET' : 'VACÍO'}" estado="${estado}"`);
+
     const esPropio = whatsappTipo === 'PROPIO' && phoneId && token;
+
+    if (whatsappTipo === 'PROPIO' && !esPropio) {
+      console.log(`   ⚠️ ${id} tiene PROPIO en col C pero PhoneId/Token vacíos → degradado a COMPARTIDO`);
+    }
 
     return {
       id,
       nombre,
       whatsapp: {
-        tipo: esPropio ? 'PROPIO' : 'COMPARTIDO',
-        phoneId: esPropio ? phoneId : config.whatsappShared.phoneId,
-        token:   esPropio ? token   : config.whatsappShared.token,
+        tipo:        esPropio ? 'PROPIO' : 'COMPARTIDO',
+        phoneId:     esPropio ? phoneId : config.whatsappShared.phoneId,
+        token:       esPropio ? token   : config.whatsappShared.token,
         webhookPath,
         admin,
         prefijo
@@ -159,10 +157,6 @@ class NegociosService {
     }
   }
 
-  // ============================================
-  // GETTERS
-  // ============================================
-
   getById(id) { return this.negocios.get(id) || null; }
 
   getByPhoneId(phoneId) {
@@ -181,11 +175,6 @@ class NegociosService {
 
   getAll() { return Array.from(this.negocios.values()); }
 
-  /**
-   * Negocios que usan el número compartido.
-   * Un negocio PROPIO también puede recibir mensajes por el número compartido
-   * si el usuario llega por ahí (multi-tenant) — se incluyen todos.
-   */
   getSharedNegocios() {
     return this.getAll().filter(n => n.whatsapp.tipo === 'COMPARTIDO');
   }
