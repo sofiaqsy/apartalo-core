@@ -1,7 +1,7 @@
 /**
- * APARTALO CORE - AI Order Service v5.6 - MULTI-PRODUCT SUPPORT
+ * APARTALO CORE - AI Order Service v5.7
  * 
- * v5.6: Support extracting multiple products in one order
+ * v5.7: Saludo identifica al bot, proteccion contra JSON expuesto
  */
 
 const axios = require('axios');
@@ -19,7 +19,7 @@ class AIOrderService {
 
     this.apiKey = process.env.GROQ_API_KEY;
     if (!this.apiKey) {
-      console.log('⚠️ AIOrderService: GROQ_API_KEY no configurada');
+      console.log('AIOrderService: GROQ_API_KEY no configurada');
       return false;
     }
 
@@ -46,11 +46,7 @@ class AIOrderService {
       context
     );
 
-    const systemPrompt = this.construirSystemPromptConMemoria(
-      negocio, 
-      contextoCliente
-    );
-
+    const systemPrompt = this.construirSystemPromptConMemoria(negocio, contextoCliente);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -70,6 +66,17 @@ class AIOrderService {
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
 
+      // Guardia final: si aun queda JSON expuesto, cortar antes de la primera llave
+      if (this.tieneJSONExpuesto(respuestaLimpia)) {
+        console.log('JSON expuesto detectado, aplicando limpieza de emergencia');
+        return {
+          respuesta: this.limpiezaEmergencia(respuestaLimpia),
+          datosExtraidos: datosExtraidos,
+          pedidoCompleto: datosExtraidos?.pedido_completo === true,
+          error: false
+        };
+      }
+
       return {
         respuesta: respuestaLimpia,
         datosExtraidos: datosExtraidos,
@@ -78,7 +85,7 @@ class AIOrderService {
       };
 
     } catch (error) {
-      console.error('❌ Error en AI:', error.response?.data || error.message);
+      console.error('Error en AI:', error.response?.data || error.message);
       return {
         respuesta: 'Ocurrio un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
@@ -89,87 +96,56 @@ class AIOrderService {
   }
 
   construirSystemPromptConMemoria(negocio, contextoCliente) {
-    return `You are the sales assistant for ${negocio.nombre}.
+    return `Eres el asistente virtual de ventas de ${negocio.nombre}.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CLIENT CONTEXT (USE THIS INFO SILENTLY):
+CONTEXTO DEL CLIENTE (usa esta info en silencio):
 ${contextoCliente}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-⚠️ CRITICAL RULES - DO NOT INVENT INFORMATION:
+REGLAS CRITICAS:
+1. Eres un asistente virtual (bot), no una persona
+2. Si el cliente saluda por primera vez, preséntate brevemente como asistente virtual de ${negocio.nombre} e indica que puede escribir CONTACTAR FINCA si desea hablar con el equipo directamente
+3. Si ya hay historial de conversacion, NO te presentes de nuevo ni saludes otra vez
+4. SOLO usa productos del CATALOGO del contexto
+5. SOLO usa precios del CATALOGO
+6. Si el producto no está en el catálogo: "No tenemos ese producto disponible"
+7. NUNCA inventes códigos, precios ni información
+8. NO uses emojis
 
-1. ONLY use products from the CATALOG above
-2. ONLY use prices from the CATALOG
-3. **MULTI-PRODUCT ORDERS SUPPORTED**: Customer can order multiple products at once
-4. When asked about product characteristics/details:
-   - ALWAYS mention the full DESCRIPTION from the catalog
-   - Include variety, origin, quality details
-   - Extract product_codigo so the image gets sent
-5. If product not in catalog: "No tenemos ese producto. Te puedo mostrar lo que tenemos disponible"
-6. NEVER invent product codes, prices, or information
-7. If you don't have information: admit it
+REGLAS DE PRIVACIDAD:
+1. NUNCA menciones que tienes acceso a su historial
+2. NUNCA digas "ya hablamos antes" o "la última vez"
+3. USA la información del contexto en silencio para ser útil
 
-PRIVACY RULES:
-1. NEVER mention you have access to their history
-2. NEVER say "ya hablamos antes" or "la última vez"
-3. USE information silently to be helpful
+PEDIDOS MULTIPLES:
+- El cliente puede pedir varios productos en un mensaje
+- Extrae TODOS los productos en el array "productos"
 
-HOW TO IDENTIFY PRODUCTS:
-- Read the CATALOG in the context
-- Find the EXACT CODE (e.g., CAT-001, CAT-002)
-- USE the price from the catalog
-- If it has [ESPECIAL], it's a personalized price
-- READ the full DESCRIPTION and share it when asked
+CUANDO PREGUNTEN POR CARACTERISTICAS:
+- Comparte todos los detalles del campo Descripcion del catalogo
+- Incluye el product_codigo en el JSON para que se envie la imagen
 
-WHEN CUSTOMER ORDERS MULTIPLE PRODUCTS:
-✅ GOOD: "Perfecto. 5kg de café en grano (S/350) y 3 bolsas de molido (S/45). Total: S/395"
-✅ Extract BOTH products in the productos array
+INSTRUCCIONES DE RESPUESTA:
+- Respuestas cortas (max 2-3 lineas)
+- Ve al punto directamente
+- Sin emojis
 
-WHEN CUSTOMER ASKS ABOUT CHARACTERISTICS:
-- Share ALL details from the Description field
-- Mention variety, origin, quality
-- Include the product_codigo in your JSON response so image gets sent
+FORMATO - responde en DOS bloques separados por ---DATA---
 
-EXAMPLES:
+Bloque 1: mensaje conversacional para el cliente (solo texto, sin llaves ni corchetes).
+---DATA---
+Bloque 2: JSON con los datos, sin backticks.
 
-Customer: "Quiero 5kg de café en grano y 3 bolsas de molido"
-✅ GOOD Response: "Perfecto. 5kg de café en grano (S/350) y 3 bolsas de molido (S/45). Total: S/395. ¿Confirmas?"
-✅ Extract: productos: [{codigo: "CAT-001", cantidad: 5, precio: 70}, {codigo: "CAT-002", cantidad: 3, precio: 15}]
+Ejemplo saludo:
+Buenos dias, soy el asistente virtual de ${negocio.nombre}. Puedo ayudarte con informacion de productos y pedidos. Si prefieres hablar con el equipo, escribe CONTACTAR FINCA.
+---DATA---
+{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
 
-INSTRUCTIONS:
-1. Brief responses (max 2-3 lines)
-2. DO NOT invent information
-3. MULTIPLE PRODUCTS ARE SUPPORTED - extract all of them
-4. If you already greeted, DON'T greet again
-5. Get to the point
-6. NO emojis
-
-IMPORTANT: Always include JSON at the end:
-\`\`\`json
-{
-  "intent": "consulta|pedido|otro",
-  "productos": [
-    {
-      "codigo": "EXACT CODE from catalog",
-      "nombre": "EXACT name from catalog",
-      "cantidad": number,
-      "precio": number (unit price)
-    }
-  ],
-  "total_calculado": number,
-  "nombre_cliente": "name or null",
-  "direccion": "address or null",
-  "telefono": "phone or null",
-  "pedido_completo": true/false,
-  "datos_faltantes": ["list"]
-}
-\`\`\`
-
-LEGACY SUPPORT: If you only extract ONE product, you can also use:
-- producto_codigo
-- producto_nombre
-- cantidad
-- precio_unitario
+Ejemplo pedido:
+Perfecto. 5kg de cafe en grano a S/70 el kg. Total: S/350. Para confirmar necesito tu nombre, direccion con distrito y telefono.
+---DATA---
+{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}
 `;
   }
 
@@ -195,20 +171,67 @@ LEGACY SUPPORT: If you only extract ONE product, you can also use:
 
   extraerDatosEstructurados(respuesta) {
     try {
+      // Formato nuevo: separador ---DATA---
+      if (respuesta.includes('---DATA---')) {
+        const partes = respuesta.split('---DATA---');
+        if (partes[1]) {
+          return JSON.parse(partes[1].trim());
+        }
+      }
+
+      // Formato legacy con backticks
       const jsonMatch = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch && jsonMatch[1]) {
         return JSON.parse(jsonMatch[1]);
       }
+
+      // Formato legacy sin backticks: buscar objeto JSON con campos conocidos
+      const jsonRaw = respuesta.match(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/);
+      if (jsonRaw) {
+        return JSON.parse(jsonRaw[0]);
+      }
     } catch (error) {
-      console.log('⚠️ Error parseando JSON de respuesta:', error.message);
+      console.log('Error parseando JSON de respuesta:', error.message);
     }
     return null;
   }
 
   limpiarRespuesta(respuesta) {
-    return respuesta
-      .replace(/```json\s*[\s\S]*?\s*```/g, '')
-      .trim();
+    let limpia = respuesta;
+
+    // Eliminar separador nuevo
+    if (limpia.includes('---DATA---')) {
+      limpia = limpia.split('---DATA---')[0];
+    }
+
+    // Eliminar bloques ```json ... ```
+    limpia = limpia.replace(/```json[\s\S]*?```/g, '');
+    limpia = limpia.replace(/```[\s\S]*?```/g, '');
+
+    // Eliminar JSON crudo con campos conocidos del pedido
+    limpia = limpia.replace(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/g, '');
+    limpia = limpia.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
+    limpia = limpia.replace(/\{[\s\S]*?"datos_faltantes"[\s\S]*?\}/g, '');
+
+    return limpia.trim();
+  }
+
+  tieneJSONExpuesto(respuesta) {
+    return (
+      respuesta.includes('"intent"') ||
+      respuesta.includes('"pedido_completo"') ||
+      respuesta.includes('"datos_faltantes"') ||
+      respuesta.includes('"producto_codigo"') ||
+      /\{\s*"[a-z_]+"/.test(respuesta)
+    );
+  }
+
+  limpiezaEmergencia(respuesta) {
+    const indiceJson = respuesta.search(/\{[\s\S]*"[a-z_]+"/);
+    if (indiceJson > 0) {
+      return respuesta.substring(0, indiceJson).trim();
+    }
+    return 'En que te puedo ayudar?';
   }
 }
 
