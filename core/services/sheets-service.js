@@ -1,8 +1,5 @@
 /**
  * APARTALO CORE - Sheets Service
- * 
- * Servicio unificado para Google Sheets
- * Cada negocio tiene su propio spreadsheet
  */
 
 const { google } = require('googleapis');
@@ -22,17 +19,10 @@ class SheetsService {
         console.log('Google Sheets no configurado');
         return false;
       }
-
       const credentials = JSON.parse(config.google.serviceAccountKey);
-
-      this.auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/spreadsheets']
-      });
-
+      this.auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
       this.sheets = google.sheets({ version: 'v4', auth: this.auth });
       this.initialized = true;
-
       console.log('SheetsService inicializado para ' + this.spreadsheetId);
       return true;
     } catch (error) {
@@ -41,63 +31,34 @@ class SheetsService {
     }
   }
 
-  // ============================================
-  // UTILIDADES DE CONVERSION
-  // ============================================
-
-  /**
-   * Parsea cualquier formato numérico que pueda venir de Google Sheets:
-   * - Número puro: 70 → 70
-   * - Decimal con punto: 70.5 → 70.5
-   * - Decimal con coma: 70,5 → 70.5
-   * - Miles con punto y decimal con coma: 1.000,50 → 1000.5
-   * - Miles con coma y decimal con punto: 1,000.50 → 1000.5
-   * - Con símbolo moneda: S/70 → 70  |  $70.5 → 70.5
-   * - Con espacios o texto extra: " 70 " → 70
-   */
   parseDecimal(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return value;
 
     let str = String(value).trim();
-
-    // Quitar símbolos de moneda y texto no numérico al inicio/fin (S/, $, etc.)
     str = str.replace(/^[^0-9\-]+/, '').replace(/[^0-9\.,]+$/, '');
-
     if (str === '') return 0;
 
     const tienePunto = str.includes('.');
     const tieneComa = str.includes(',');
 
     if (tienePunto && tieneComa) {
-      // Determinar cuál es separador de miles y cuál de decimal
       const idxPunto = str.lastIndexOf('.');
       const idxComa = str.lastIndexOf(',');
-
       if (idxComa > idxPunto) {
-        // Formato europeo: 1.000,50 → punto=miles, coma=decimal
         str = str.replace(/\./g, '').replace(',', '.');
       } else {
-        // Formato anglosajón: 1,000.50 → coma=miles, punto=decimal
         str = str.replace(/,/g, '');
       }
     } else if (tieneComa && !tienePunto) {
-      // Solo coma: puede ser decimal (70,5) o miles (1,000)
       const partesComa = str.split(',');
       const ultimaParte = partesComa[partesComa.length - 1];
-
       if (partesComa.length === 2 && ultimaParte.length <= 2) {
-        // Decimal: 70,5 o 70,50
         str = str.replace(',', '.');
-      } else if (partesComa.length === 2 && ultimaParte.length === 3) {
-        // Ambiguo: podría ser 1,000 (miles) → tratar como entero
-        str = str.replace(',', '');
       } else {
-        // Múltiples comas como separador de miles: 1,000,000
         str = str.replace(/,/g, '');
       }
     }
-    // Si solo tiene punto ya es formato estándar JS, no hacer nada
 
     const num = parseFloat(str);
     return isNaN(num) ? 0 : num;
@@ -106,36 +67,19 @@ class SheetsService {
   parseInt(value) {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'number') return Math.floor(value);
-    // Reusar parseDecimal para manejar todos los formatos
     return Math.floor(this.parseDecimal(value));
   }
 
   formatValueForSheets(value) {
     if (value === null || value === undefined) return '';
-    if (typeof value === 'number') return value;
     return value;
   }
 
-  // ============================================
-  // OPERACIONES GENERICAS
-  // ============================================
-
   async getRows(range) {
-    if (!this.initialized) {
-      console.log('SheetsService no inicializado');
-      return [];
-    }
-
-    if (!range) {
-      console.error('Error: range es requerido en getRows()');
-      return [];
-    }
-
+    if (!this.initialized) { console.log('SheetsService no inicializado'); return []; }
+    if (!range) { console.error('Error: range es requerido en getRows()'); return []; }
     try {
-      const response = await this.sheets.spreadsheets.values.get({
-        spreadsheetId: this.spreadsheetId,
-        range
-      });
+      const response = await this.sheets.spreadsheets.values.get({ spreadsheetId: this.spreadsheetId, range });
       return response.data.values || [];
     } catch (error) {
       console.error('Error leyendo ' + range + ':', error.message);
@@ -145,16 +89,13 @@ class SheetsService {
 
   async appendRow(sheetName, values) {
     if (!this.initialized) return false;
-
     try {
-      const formattedValues = values.map(v => this.formatValueForSheets(v));
-      
       await this.sheets.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,
         range: sheetName + '!A1',
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
-        resource: { values: [formattedValues] }
+        resource: { values: [values.map(v => this.formatValueForSheets(v))] }
       });
       console.log('Fila agregada a ' + sheetName + ' con ' + values.length + ' columnas');
       return true;
@@ -166,15 +107,12 @@ class SheetsService {
 
   async updateCell(range, value) {
     if (!this.initialized) return false;
-
     try {
-      const formattedValue = this.formatValueForSheets(value);
-      
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
         range,
         valueInputOption: 'RAW',
-        resource: { values: [[formattedValue]] }
+        resource: { values: [[this.formatValueForSheets(value)]] }
       });
       return true;
     } catch (error) {
@@ -185,15 +123,11 @@ class SheetsService {
 
   async batchUpdate(updates) {
     if (!this.initialized) return false;
-
     try {
       await this.sheets.spreadsheets.values.batchUpdate({
         spreadsheetId: this.spreadsheetId,
         resource: {
-          data: updates.map(u => ({
-            range: u.range,
-            values: [[this.formatValueForSheets(u.value)]]
-          })),
+          data: updates.map(u => ({ range: u.range, values: [[this.formatValueForSheets(u.value)]] })),
           valueInputOption: 'RAW'
         }
       });
@@ -211,31 +145,18 @@ class SheetsService {
   async buscarCliente(whatsapp) {
     const rows = await this.getRows('Clientes!A:I');
     if (rows.length <= 1) return null;
-
     const numeroLimpio = this.cleanPhone(whatsapp);
-
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const clienteWhatsapp = this.cleanPhone(row[1] || '');
-
-      if (clienteWhatsapp === numeroLimpio) {
+      if (this.cleanPhone(row[1] || '') === numeroLimpio) {
         return {
-          id: row[0] || '',
-          whatsapp: row[1] || '',
-          nombre: row[2] || '',
-          telefono: row[3] || '',
-          direccion: row[4] || '',
-          fechaRegistro: row[5] || '',
-          ultimaCompra: row[6] || '',
-          departamento: row[7] || '',
-          ciudad: row[8] || '',
-          empresa: row[2] || '',
-          contacto: row[2] || '',
-          rowIndex: i + 1
+          id: row[0] || '', whatsapp: row[1] || '', nombre: row[2] || '',
+          telefono: row[3] || '', direccion: row[4] || '', fechaRegistro: row[5] || '',
+          ultimaCompra: row[6] || '', departamento: row[7] || '', ciudad: row[8] || '',
+          empresa: row[2] || '', contacto: row[2] || '', rowIndex: i + 1
         };
       }
     }
-
     return null;
   }
 
@@ -246,47 +167,31 @@ class SheetsService {
     if (clienteExistente) {
       const row = clienteExistente.rowIndex;
       const actualizaciones = [];
-
       const nombreNuevo = datosCliente.nombre || datosCliente.empresa || '';
-      if (nombreNuevo && nombreNuevo !== clienteExistente.nombre) {
+      if (nombreNuevo && nombreNuevo !== clienteExistente.nombre)
         actualizaciones.push({ range: `Clientes!C${row}`, value: nombreNuevo });
-      }
-
       const telefonoNuevo = datosCliente.telefono || '';
-      if (telefonoNuevo && telefonoNuevo !== clienteExistente.telefono) {
+      if (telefonoNuevo && telefonoNuevo !== clienteExistente.telefono)
         actualizaciones.push({ range: `Clientes!D${row}`, value: telefonoNuevo });
-      }
-
       const direccionNueva = datosCliente.direccion || '';
-      if (direccionNueva && direccionNueva !== clienteExistente.direccion) {
+      if (direccionNueva && direccionNueva !== clienteExistente.direccion)
         actualizaciones.push({ range: `Clientes!E${row}`, value: direccionNueva });
-      }
-
       actualizaciones.push({ range: `Clientes!G${row}`, value: hoy });
-
       if (actualizaciones.length > 0) {
         await this.batchUpdate(actualizaciones);
         console.log(`Cliente actualizado (${actualizaciones.length - 1} campos): ${clienteExistente.id}`);
       }
-
       return { ...clienteExistente, updated: true };
     }
 
     const nuevoId = 'CLI-' + Date.now().toString().slice(-6);
-    const valores = [
-      nuevoId,
-      this.cleanPhone(datosCliente.whatsapp),
+    await this.appendRow('Clientes', [
+      nuevoId, this.cleanPhone(datosCliente.whatsapp),
       datosCliente.nombre || datosCliente.empresa || '',
-      datosCliente.telefono || '',
-      datosCliente.direccion || '',
-      hoy,
-      hoy,
-      datosCliente.departamento || '',
-      datosCliente.ciudad || ''
-    ];
-
-    await this.appendRow('Clientes', valores);
-    console.log(`Cliente nuevo creado: ${nuevoId} - ${datosCliente.nombre || datosCliente.empresa || datosCliente.whatsapp}`);
+      datosCliente.telefono || '', datosCliente.direccion || '',
+      hoy, hoy, datosCliente.departamento || '', datosCliente.ciudad || ''
+    ]);
+    console.log(`Cliente nuevo creado: ${nuevoId}`);
     return { id: nuevoId, ...datosCliente, created: true };
   }
 
@@ -298,23 +203,16 @@ class SheetsService {
     try {
       const rows = await this.getRows('PreciosClientes!A:C');
       if (rows.length <= 1) return {};
-
       const numeroLimpio = this.cleanPhone(whatsapp);
       const precios = {};
-
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        const clienteWhatsapp = this.cleanPhone(row[0] || '');
-        
-        if (clienteWhatsapp === numeroLimpio) {
-          const codigoProducto = row[1] || '';
-          const precioEspecial = this.parseDecimal(row[2]);
-          if (codigoProducto && precioEspecial > 0) {
-            precios[codigoProducto] = precioEspecial;
-          }
+        if (this.cleanPhone(row[0] || '') === numeroLimpio) {
+          const codigo = row[1] || '';
+          const precio = this.parseDecimal(row[2]);
+          if (codigo && precio > 0) precios[codigo] = precio;
         }
       }
-
       return precios;
     } catch (error) {
       console.log('Error obteniendo precios cliente:', error.message);
@@ -324,25 +222,16 @@ class SheetsService {
 
   async getPrecioProducto(whatsapp, codigoProducto) {
     const preciosCliente = await this.getPreciosCliente(whatsapp);
-    
-    if (preciosCliente[codigoProducto]) {
-      return { precio: preciosCliente[codigoProducto], tipo: 'especial' };
-    }
-
+    if (preciosCliente[codigoProducto]) return { precio: preciosCliente[codigoProducto], tipo: 'especial' };
     const productos = await this.getProductos('ACTIVO');
     const producto = productos.find(p => p.codigo === codigoProducto);
-    
-    if (producto) {
-      return { precio: producto.precio, tipo: 'lista' };
-    }
-
+    if (producto) return { precio: producto.precio, tipo: 'lista' };
     return null;
   }
 
   async getProductosConPrecios(whatsapp) {
     const productos = await this.getProductos('ACTIVO');
     const preciosCliente = await this.getPreciosCliente(whatsapp);
-
     return productos.map(p => ({
       ...p,
       precioOriginal: p.precio,
@@ -358,98 +247,59 @@ class SheetsService {
   async getPedidosByWhatsapp(whatsapp) {
     const rows = await this.getRows('Pedidos!A:S');
     if (rows.length <= 1) return [];
-
     const numeroLimpio = this.cleanPhone(whatsapp);
     const pedidos = [];
-
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const pedidoWhatsapp = this.cleanPhone(row[3] || '');
-
-      if (pedidoWhatsapp === numeroLimpio) {
+      if (this.cleanPhone(row[3] || '') === numeroLimpio) {
         pedidos.push(this.parsePedidoRow(row, i + 1));
       }
     }
-
     return pedidos;
   }
 
   async getPedidoById(pedidoId) {
     const rows = await this.getRows('Pedidos!A:S');
-    
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === pedidoId) {
-        return this.parsePedidoRow(rows[i], i + 1);
-      }
+      if (rows[i][0] === pedidoId) return this.parsePedidoRow(rows[i], i + 1);
     }
-
     return null;
   }
 
   async crearPedido(datosPedido) {
     const pedidoId = datosPedido.id || 'PED-' + Date.now().toString().slice(-6);
     const ahora = new Date();
-
     const valores = [
-      pedidoId,
-      ahora.toLocaleDateString('es-PE'),
-      ahora.toLocaleTimeString('es-PE'),
-      this.cleanPhone(datosPedido.whatsapp),
-      datosPedido.cliente || '',
-      datosPedido.telefono || '',
-      datosPedido.direccion || '',
-      datosPedido.productos || '',
-      this.parseDecimal(datosPedido.total),
-      datosPedido.estado || config.orderStates.PENDING_PAYMENT,
-      '',
-      datosPedido.observaciones || '',
-      datosPedido.departamento || '',
-      datosPedido.ciudad || '',
-      datosPedido.tipoEnvio || '',
-      datosPedido.metodoEnvio || '',
-      datosPedido.detalleEnvio || '',
-      this.parseDecimal(datosPedido.costoEnvio),
+      pedidoId, ahora.toLocaleDateString('es-PE'), ahora.toLocaleTimeString('es-PE'),
+      this.cleanPhone(datosPedido.whatsapp), datosPedido.cliente || '',
+      datosPedido.telefono || '', datosPedido.direccion || '', datosPedido.productos || '',
+      this.parseDecimal(datosPedido.total), datosPedido.estado || config.orderStates.PENDING_PAYMENT,
+      '', datosPedido.observaciones || '', datosPedido.departamento || '',
+      datosPedido.ciudad || '', datosPedido.tipoEnvio || '', datosPedido.metodoEnvio || '',
+      datosPedido.detalleEnvio || '', this.parseDecimal(datosPedido.costoEnvio),
       datosPedido.origen || 'APP'
     ];
-
     const success = await this.appendRow('Pedidos', valores);
     return success ? { id: pedidoId, ...datosPedido } : null;
   }
 
   async updateEstadoPedido(pedidoId, nuevoEstado) {
     const rows = await this.getRows('Pedidos!A:J');
-    
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === pedidoId) {
-        return await this.updateCell('Pedidos!J' + (i + 1), nuevoEstado);
-      }
+      if (rows[i][0] === pedidoId) return await this.updateCell('Pedidos!J' + (i + 1), nuevoEstado);
     }
-
     return false;
   }
 
   parsePedidoRow(row, rowIndex) {
     return {
-      id: row[0] || '',
-      fecha: row[1] || '',
-      hora: row[2] || '',
-      whatsapp: row[3] || '',
-      cliente: row[4] || '',
-      telefono: row[5] || '',
-      direccion: row[6] || '',
-      productos: row[7] || '',
-      total: this.parseDecimal(row[8]),
-      estado: row[9] || '',
-      voucherUrls: row[10] || '',
-      observaciones: row[11] || '',
-      departamento: row[12] || '',
-      ciudad: row[13] || '',
-      tipoEnvio: row[14] || '',
-      metodoEnvio: row[15] || '',
-      detalleEnvio: row[16] || '',
-      costoEnvio: this.parseDecimal(row[17]),
-      origen: row[18] || 'APP',
-      rowIndex
+      id: row[0] || '', fecha: row[1] || '', hora: row[2] || '', whatsapp: row[3] || '',
+      cliente: row[4] || '', telefono: row[5] || '', direccion: row[6] || '',
+      productos: row[7] || '', total: this.parseDecimal(row[8]), estado: row[9] || '',
+      voucherUrls: row[10] || '', observaciones: row[11] || '', departamento: row[12] || '',
+      ciudad: row[13] || '', tipoEnvio: row[14] || '', metodoEnvio: row[15] || '',
+      detalleEnvio: row[16] || '', costoEnvio: this.parseDecimal(row[17]),
+      origen: row[18] || 'APP', rowIndex
     };
   }
 
@@ -465,111 +315,95 @@ class SheetsService {
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const productoEstado = row[7] || 'ACTIVO';
-      
-      if (productoEstado === 'ELIMINADO') continue;
 
-      if (!estado || productoEstado === estado) {
-        const precio = this.parseDecimal(row[3]);
-        const stock = this.parseInt(row[4]);
-        const stockReservado = this.parseInt(row[5]);
-        
-        productos.push({
-          codigo: row[0] || '',
-          nombre: row[1] || '',
-          descripcion: row[2] || '',
-          precio,
-          stock,
-          stockReservado,
-          imagenUrl: row[6] || '',
-          estado: productoEstado,
-          categoria: row[8] || '',
-          disponible: stock - stockReservado,
-          rowIndex: i + 1
-        });
-      }
+      // Ignorar filas completamente vacías
+      if (!row || row.every(cell => !cell || String(cell).trim() === '')) continue;
+
+      const codigo = (row[0] || '').trim();
+      const nombre = (row[1] || '').trim();
+
+      // Ignorar filas sin código ni nombre
+      if (!codigo && !nombre) continue;
+
+      const productoEstado = (row[7] || 'ACTIVO').trim().toUpperCase();
+
+      if (productoEstado === 'ELIMINADO') continue;
+      if (estado && productoEstado !== estado.toUpperCase()) continue;
+
+      const precio = this.parseDecimal(row[3]);
+      const stock = this.parseInt(row[4]);
+      const stockReservado = this.parseInt(row[5]);
+
+      // LOG DIAGNÓSTICO — ver exactamente qué llega de cada fila
+      console.log(`[Inventario row ${i+1}] codigo="${codigo}" nombre="${nombre}" precioRaw="${row[3]}" precioParseado=${precio} estado="${productoEstado}"`);
+
+      productos.push({
+        codigo: codigo || `PROD-${i}`,
+        nombre,
+        descripcion: (row[2] || '').trim(),
+        precio,
+        stock,
+        stockReservado,
+        imagenUrl: row[6] || '',
+        estado: productoEstado,
+        categoria: row[8] || '',
+        disponible: stock - stockReservado,
+        rowIndex: i + 1
+      });
     }
 
+    console.log(`[Inventario] Total productos leidos: ${productos.length}, con precio: ${productos.filter(p => p.precio > 0).length}`);
     return productos;
   }
 
   async reservarStock(codigo, cantidad) {
     const productos = await this.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
-
     if (!producto) return { success: false, error: 'Producto no encontrado' };
     if (producto.disponible < cantidad) return { success: false, error: 'Stock insuficiente' };
-
-    const nuevoReservado = producto.stockReservado + cantidad;
-    await this.updateCell('Inventario!F' + producto.rowIndex, nuevoReservado);
-
-    return { success: true, nuevoReservado };
+    await this.updateCell('Inventario!F' + producto.rowIndex, producto.stockReservado + cantidad);
+    return { success: true };
   }
 
   async liberarStock(codigo, cantidad) {
     const productos = await this.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
-
     if (!producto) return { success: false };
-
-    const nuevoReservado = Math.max(0, producto.stockReservado - cantidad);
-    await this.updateCell('Inventario!F' + producto.rowIndex, nuevoReservado);
-
-    return { success: true, nuevoReservado };
+    await this.updateCell('Inventario!F' + producto.rowIndex, Math.max(0, producto.stockReservado - cantidad));
+    return { success: true };
   }
 
   // ============================================
-  // CONFIGURACION DEL NEGOCIO
+  // CONFIGURACION
   // ============================================
 
   async getConfiguracion() {
     const rows = await this.getRows('Configuracion!A:B');
     const configObj = {};
-
     for (let i = 1; i < rows.length; i++) {
       const key = rows[i][0];
       const value = rows[i][1];
       if (key) configObj[key] = value;
     }
-
     return configObj;
   }
 
   async getMetodosPago() {
     const configObj = await this.getConfiguracion();
     const metodos = [];
-
-    if (configObj.yape_activo === 'SI') {
+    if (configObj.yape_activo === 'SI')
       metodos.push({ tipo: 'yape', numero: configObj.yape_numero, titular: configObj.yape_titular });
-    }
-
-    if (configObj.plin_activo === 'SI') {
+    if (configObj.plin_activo === 'SI')
       metodos.push({ tipo: 'plin', numero: configObj.plin_numero, titular: configObj.plin_titular });
-    }
-
     ['bcp', 'interbank', 'bbva', 'scotiabank'].forEach(banco => {
-      if (configObj[banco + '_activo'] === 'SI') {
-        metodos.push({
-          tipo: banco,
-          cuenta: configObj[banco + '_cuenta'],
-          cci: configObj[banco + '_cci'],
-          titular: configObj[banco + '_titular']
-        });
-      }
+      if (configObj[banco + '_activo'] === 'SI')
+        metodos.push({ tipo: banco, cuenta: configObj[banco + '_cuenta'], cci: configObj[banco + '_cci'], titular: configObj[banco + '_titular'] });
     });
-
     return metodos;
   }
 
-  // ============================================
-  // UTILIDADES
-  // ============================================
-
   cleanPhone(phone) {
-    return (phone || '')
-      .replace('whatsapp:', '')
-      .replace('+', '')
-      .replace(/[^0-9]/g, '');
+    return (phone || '').replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
   }
 }
 
