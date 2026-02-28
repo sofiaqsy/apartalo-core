@@ -20,14 +20,14 @@ class AIMuestraService {
       return false;
     }
     this.initialized = true;
-    console.log('✅ AIMuestraService inicializado con GROQ + RAG');
+    console.log('\u2705 AIMuestraService inicializado con GROQ + RAG');
     return true;
   }
 
   async procesarMensajeMuestra(mensaje, context, historial = [], datosCliente = null) {
     if (!this.initialized && !this.initialize()) {
       return {
-        respuesta: 'El servicio no está disponible en este momento.',
+        respuesta: 'El servicio no est\u00e1 disponible en este momento.',
         datosExtraidos: null,
         muestraCompleta: false,
         error: true
@@ -36,10 +36,11 @@ class AIMuestraService {
 
     const { negocio } = context;
     const whatsapp = datosCliente?.whatsapp || context.from || null;
+    const esPrimerMensaje = historial.length === 0;
 
-    console.log('🧠 Recuperando memoria del cliente para muestra...');
+    console.log('\ud83e\udde0 Recuperando memoria del cliente para muestra...');
     const contextoCliente = await clienteContextService.obtenerContextoCompleto(whatsapp, context);
-    const systemPrompt = this.construirSystemPromptMuestraConMemoria(negocio, contextoCliente);
+    const systemPrompt = this.construirSystemPromptMuestraConMemoria(negocio, contextoCliente, esPrimerMensaje);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -79,7 +80,7 @@ class AIMuestraService {
     } catch (error) {
       console.error('Error en AI Muestra:', error.response?.data || error.message);
       return {
-        respuesta: 'Ocurrió un error. Por favor intenta de nuevo.',
+        respuesta: 'Ocurri\u00f3 un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
         muestraCompleta: false,
         error: true
@@ -87,36 +88,40 @@ class AIMuestraService {
     }
   }
 
-  construirSystemPromptMuestraConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente virtual de ${negocio.nombre}, especializado UNICAMENTE en el programa de muestras gratis de café.
+  construirSystemPromptMuestraConMemoria(negocio, contextoCliente, esPrimerMensaje) {
+    const instruccionContacto = esPrimerMensaje
+      ? `- Es el primer mensaje: menciona brevemente que eres el asistente virtual de ${negocio.nombre} y que pueden escribir CONTACTAR FINCA si tienen otras consultas.`
+      : `- NO te presentes ni repitas que eres asistente. Ya se dijo.\n- Solo menciona CONTACTAR FINCA si el cliente pregunta algo fuera del programa de muestras.`;
+
+    return `Eres el asistente virtual de ${negocio.nombre}, especializado UNICAMENTE en el programa de muestras gratis de cafe.
 
 CONTEXTO DEL CLIENTE:
 ${contextoCliente}
 
 ROL Y LIMITES:
 - Eres un asistente virtual (bot), no una persona
-- SOLO puedes hablar de: muestras gratis, café de Finca Rosal, datos de entrega
-- Si el cliente pregunta algo fuera de este tema (política, recetas, otros productos, temas personales, etc.), responde: "Solo puedo ayudarte con el programa de muestras de cafe. Para otras consultas, escribe CONTACTAR FINCA."
-- En cada respuesta recuerda que eres un asistente virtual y que pueden escribir CONTACTAR FINCA para hablar con el equipo
+- SOLO puedes hablar de: muestras gratis, cafe de Finca Rosal, datos de entrega
+- Si el cliente pregunta algo fuera de este tema, responde: "Solo puedo ayudarte con el programa de muestras. Escribe CONTACTAR FINCA para otras consultas."
+${instruccionContacto}
 - Sin emojis
 - Respuestas MUY CORTAS: maxima 2 oraciones. De frente al punto, sin relleno
 
 SOBRE EL PROGRAMA:
-- Muestra gratis de 500g para cafeterias y negocios gastronómicos
+- Muestra gratis de 500g para cafeterias y negocios gastronomicos
 - Solo 1 muestra por negocio
-- Café premium de Villa Rica, Perú
+- Cafe premium de Villa Rica, Peru
 
 DATOS A RECOPILAR:
 1. empresa: nombre del negocio
 2. nombre_contacto: nombre completo del contacto
-3. direccion: dirección con distrito (ej: Av. Larco 123, Miraflores)
-4. telefono: 9 dígitos
+3. direccion: direccion con distrito (ej: Av. Larco 123, Miraflores)
+4. telefono: 9 digitos
 
 REGLAS:
-- Extrae todos los datos que el cliente dé en un mensaje
-- Si ya tiene datos registrados, úsalos
+- Extrae todos los datos que el cliente de en un mensaje
+- Si ya tiene datos registrados, usalos
 - Pregunta solo por lo que falta
-- Valida: dirección debe tener distrito, teléfono exactamente 9 dígitos
+- Valida: direccion debe tener distrito, telefono exactamente 9 digitos
 
 FORMATO - responde en DOS bloques separados por ---DATA---
 
@@ -124,10 +129,15 @@ Bloque 1: mensaje corto para el cliente (solo texto, sin llaves ni corchetes).
 ---DATA---
 Bloque 2: JSON sin backticks.
 
-Ejemplo:
-Perfecto. ¿Cuál es la dirección con distrito? Soy el asistente virtual de Finca Rosal, puedes escribir CONTACTAR FINCA si tienes otras consultas.
+Ejemplo primer mensaje:
+Soy el asistente virtual de ${negocio.nombre}. Para enviarte la muestra de cafe, necesito el nombre de tu negocio y direccion con distrito. Escribe CONTACTAR FINCA si tienes otras consultas.
 ---DATA---
-{"intent":"solicitar_muestra","empresa":"Café Gourmet","nombre_contacto":"Maria","direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["direccion","telefono"]}`;
+{"intent":"solicitar_muestra","empresa":null,"nombre_contacto":null,"direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["empresa","nombre_contacto","direccion","telefono"]}
+
+Ejemplo respuesta normal:
+Perfecto. Cual es la direccion con distrito de Cafe Gourmet?
+---DATA---
+{"intent":"solicitar_muestra","empresa":"Cafe Gourmet","nombre_contacto":"Maria","direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["direccion","telefono"]}`;
   }
 
   construirMensajes(systemPrompt, historial, mensajeActual) {
@@ -182,7 +192,7 @@ Perfecto. ¿Cuál es la dirección con distrito? Soy el asistente virtual de Fin
   limpiezaEmergencia(respuesta) {
     const indiceJson = respuesta.search(/\{[\s\S]*"[a-z_]+"/);
     if (indiceJson > 0) return respuesta.substring(0, indiceJson).trim();
-    return 'Gracias por la información. En breve te contactamos para coordinar el envío.';
+    return 'Gracias por la informacion. En breve te contactamos para coordinar el envio.';
   }
 }
 

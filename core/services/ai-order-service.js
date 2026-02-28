@@ -1,5 +1,5 @@
 /**
- * APARTALO CORE - AI Order Service v5.8
+ * APARTALO CORE - AI Order Service v5.9
  */
 
 const axios = require('axios');
@@ -20,7 +20,7 @@ class AIOrderService {
       return false;
     }
     this.initialized = true;
-    console.log('✅ AIOrderService inicializado con GROQ + RAG');
+    console.log('\u2705 AIOrderService inicializado con GROQ + RAG');
     return true;
   }
 
@@ -36,9 +36,10 @@ class AIOrderService {
 
     const { negocio } = context;
 
-    console.log('🧠 Recuperando memoria del cliente...');
+    console.log('\ud83e\udde0 Recuperando memoria del cliente...');
     const contextoCliente = await clienteContextService.obtenerContextoCompleto(whatsappFrom, context);
-    const systemPrompt = this.construirSystemPromptConMemoria(negocio, contextoCliente);
+    const esPrimerMensaje = historial.length === 0;
+    const systemPrompt = this.construirSystemPromptConMemoria(negocio, contextoCliente, esPrimerMensaje);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -86,8 +87,12 @@ class AIOrderService {
     }
   }
 
-  construirSystemPromptConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente virtual de ventas de ${negocio.nombre}, especializado UNICAMENTE en pedidos de café.
+  construirSystemPromptConMemoria(negocio, contextoCliente, esPrimerMensaje) {
+    const instruccionContacto = esPrimerMensaje
+      ? `- En este primer mensaje presentate en UNA linea como asistente virtual de ${negocio.nombre} e indica que pueden escribir CONTACTAR FINCA si prefieren hablar con el equipo.`
+      : `- NO te presentes ni repitas que eres un asistente. Eso ya se dijo.\n- Solo menciona CONTACTAR FINCA si el cliente pregunta algo que no puedes resolver o que requiere atencion humana.`;
+
+    return `Eres el asistente virtual de ventas de ${negocio.nombre}, especializado UNICAMENTE en pedidos de cafe.
 
 CONTEXTO DEL CLIENTE:
 ${contextoCliente}
@@ -95,21 +100,16 @@ ${contextoCliente}
 ROL Y LIMITES:
 - Eres un asistente virtual (bot), no una persona
 - SOLO puedes hablar de: productos del catalogo, precios, pedidos, entregas
-- Si el cliente pregunta algo fuera de este tema (política, recetas, consejos de vida, otros negocios, etc.), responde: "Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Para otras consultas, escribe CONTACTAR FINCA."
-- Si el cliente saluda por primera vez (historial vacío), presentate en UNA línea como asistente virtual de ${negocio.nombre} e indica que puede escribir CONTACTAR FINCA
-- Si ya hay historial, NO te presentes de nuevo
-- Al final de cada respuesta añade en una línea aparte: "Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo."
+- Si el cliente pregunta algo fuera de este tema, responde: "Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Escribe CONTACTAR FINCA para otras consultas."
+${instruccionContacto}
 - Sin emojis
-- Respuestas MUY CORTAS: maxima 2 oraciones + la línea de asistente. De frente al punto
+- Respuestas MUY CORTAS: maxima 2 oraciones. De frente al punto, sin relleno
 
 REGLAS DE PRODUCTOS:
 - SOLO usa productos del CATALOGO en el contexto
 - SOLO usa precios del CATALOGO
-- Si el producto no está en el catálogo: "No tenemos ese producto disponible."
-- NUNCA inventes códigos, precios ni información
-
-CUANDO EL CLIENTE PIDE VARIOS PRODUCTOS:
-- Extrae TODOS en el array "productos"
+- Si el producto no esta en el catalogo: "No tenemos ese producto disponible."
+- NUNCA inventes codigos, precios ni informacion
 
 FORMATO - responde en DOS bloques separados por ---DATA---
 
@@ -117,22 +117,20 @@ Bloque 1: mensaje corto para el cliente (texto, sin llaves ni corchetes).
 ---DATA---
 Bloque 2: JSON sin backticks.
 
-Ejemplo saludo:
-Soy el asistente virtual de ${negocio.nombre}. ¿En que te puedo ayudar?
-Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo.
+Ejemplo primer saludo:
+Soy el asistente virtual de ${negocio.nombre}. En que te puedo ayudar? Escribe CONTACTAR FINCA si prefieres hablar con el equipo.
 ---DATA---
 {"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
 
-Ejemplo fuera de tema:
-Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Para otras consultas, escribe CONTACTAR FINCA.
+Ejemplo respuesta normal (sin presentacion):
+5kg de cafe en grano a S/70/kg. Total: S/350. Necesito tu nombre, direccion con distrito y telefono.
 ---DATA---
-{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":[]}
+{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}
 
-Ejemplo pedido:
-5kg de cafe en grano a S/70/kg. Total: S/350. Necesito tu nombre, dirección con distrito y teléfono.
-Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo.
+Ejemplo fuera de tema:
+Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Escribe CONTACTAR FINCA para otras consultas.
 ---DATA---
-{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}`;
+{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":[]}`;
   }
 
   construirMensajes(systemPrompt, historial, mensajeActual) {
