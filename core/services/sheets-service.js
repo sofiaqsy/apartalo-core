@@ -192,15 +192,41 @@ class SheetsService {
 
   async upsertCliente(datosCliente) {
     const clienteExistente = await this.buscarCliente(datosCliente.whatsapp);
+    const hoy = new Date().toLocaleDateString('es-PE');
 
     if (clienteExistente) {
-      await this.updateCell(
-        'Clientes!G' + clienteExistente.rowIndex,
-        new Date().toLocaleDateString('es-PE')
-      );
+      const row = clienteExistente.rowIndex;
+
+      // Actualizar solo los campos que vienen con valor nuevo (no sobreescribir con vacío)
+      const actualizaciones = [];
+
+      const nombreNuevo = datosCliente.nombre || datosCliente.empresa || '';
+      if (nombreNuevo && nombreNuevo !== clienteExistente.nombre) {
+        actualizaciones.push({ range: `Clientes!C${row}`, value: nombreNuevo });
+      }
+
+      const telefonoNuevo = datosCliente.telefono || '';
+      if (telefonoNuevo && telefonoNuevo !== clienteExistente.telefono) {
+        actualizaciones.push({ range: `Clientes!D${row}`, value: telefonoNuevo });
+      }
+
+      const direccionNueva = datosCliente.direccion || '';
+      if (direccionNueva && direccionNueva !== clienteExistente.direccion) {
+        actualizaciones.push({ range: `Clientes!E${row}`, value: direccionNueva });
+      }
+
+      // Siempre actualizar ultima compra/actividad
+      actualizaciones.push({ range: `Clientes!G${row}`, value: hoy });
+
+      if (actualizaciones.length > 0) {
+        await this.batchUpdate(actualizaciones);
+        console.log(`Cliente actualizado (${actualizaciones.length - 1} campos): ${clienteExistente.id}`);
+      }
+
       return { ...clienteExistente, updated: true };
     }
 
+    // Cliente nuevo — crear registro completo
     const nuevoId = 'CLI-' + Date.now().toString().slice(-6);
     const valores = [
       nuevoId,
@@ -208,13 +234,14 @@ class SheetsService {
       datosCliente.nombre || datosCliente.empresa || '',
       datosCliente.telefono || '',
       datosCliente.direccion || '',
-      new Date().toLocaleDateString('es-PE'),
-      new Date().toLocaleDateString('es-PE'),
+      hoy,
+      hoy,
       datosCliente.departamento || '',
       datosCliente.ciudad || ''
     ];
 
     await this.appendRow('Clientes', valores);
+    console.log(`Cliente nuevo creado: ${nuevoId} - ${datosCliente.nombre || datosCliente.empresa || datosCliente.whatsapp}`);
     return { id: nuevoId, ...datosCliente, created: true };
   }
 
@@ -222,10 +249,6 @@ class SheetsService {
   // PRECIOS CLIENTES (precios especiales)
   // ============================================
 
-  /**
-   * Obtener precio especial para un cliente
-   * Hoja PreciosClientes: whatsapp | codigo_producto | precio_especial
-   */
   async getPreciosCliente(whatsapp) {
     try {
       const rows = await this.getRows('PreciosClientes!A:C');
@@ -254,12 +277,7 @@ class SheetsService {
     }
   }
 
-  /**
-   * Obtener precio de un producto para un cliente especifico
-   * Primero busca en PreciosClientes, si no existe usa precio de Inventario
-   */
   async getPrecioProducto(whatsapp, codigoProducto) {
-    // Buscar precio especial del cliente
     const preciosCliente = await this.getPreciosCliente(whatsapp);
     
     if (preciosCliente[codigoProducto]) {
@@ -269,7 +287,6 @@ class SheetsService {
       };
     }
 
-    // Si no hay precio especial, usar precio de inventario
     const productos = await this.getProductos('ACTIVO');
     const producto = productos.find(p => p.codigo === codigoProducto);
     
@@ -283,9 +300,6 @@ class SheetsService {
     return null;
   }
 
-  /**
-   * Obtener productos con precios personalizados para un cliente
-   */
   async getProductosConPrecios(whatsapp) {
     const productos = await this.getProductos('ACTIVO');
     const preciosCliente = await this.getPreciosCliente(whatsapp);
