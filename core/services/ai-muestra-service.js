@@ -52,8 +52,6 @@ class AIMuestraService {
 
     const { negocio } = context;
 
-    // 🧠 NUEVO: Obtener contexto completo del cliente (MEMORIA SIMULADA)
-    // Extraer whatsapp del datosCliente
     const whatsapp = datosCliente?.whatsapp || context.from || null;
     
     console.log('🧠 Recuperando memoria del cliente para muestra...');
@@ -62,13 +60,11 @@ class AIMuestraService {
       context
     );
 
-    // Construir prompt del sistema con memoria
     const systemPrompt = this.construirSystemPromptMuestraConMemoria(
       negocio, 
       contextoCliente
     );
 
-    // Construir mensajes
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
@@ -86,11 +82,23 @@ class AIMuestraService {
 
       const respuestaTexto = response.data.choices[0].message.content;
       
-      // Extraer JSON estructurado
+      // Extraer datos estructurados del JSON (antes de limpiar)
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
       
-      // Limpiar respuesta (quitar JSON)
+      // Limpiar respuesta eliminando CUALQUIER forma de JSON
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
+
+      // Validar que la respuesta limpia no tenga JSON expuesto
+      if (this.tieneJSONExpuesto(respuestaLimpia)) {
+        console.error('⚠️ JSON detectado en respuesta limpia, aplicando limpieza de emergencia');
+        const respuestaEmergencia = this.limpiezaEmergencia(respuestaLimpia);
+        return {
+          respuesta: respuestaEmergencia,
+          datosExtraidos: datosExtraidos,
+          muestraCompleta: datosExtraidos?.muestra_completa === true,
+          error: false
+        };
+      }
 
       return {
         respuesta: respuestaLimpia,
@@ -136,10 +144,10 @@ TU ROL:
 - Recopila datos de forma conversacional (no interrogatorio)
 
 DATOS NECESARIOS:
-1. **Nombre del negocio/cafetería** (campo: empresa)
-2. **Nombre completo del contacto** (campo: nombre_contacto)
-3. **Dirección completa de entrega** - DEBE incluir distrito (campo: direccion)
-4. **Teléfono de contacto** - 9 dígitos (campo: telefono)
+1. Nombre del negocio/cafetería (campo: empresa)
+2. Nombre completo del contacto (campo: nombre_contacto)
+3. Dirección completa de entrega - DEBE incluir distrito (campo: direccion)
+4. Teléfono de contacto - 9 dígitos (campo: telefono)
 
 REGLAS DE CONVERSACIÓN:
 - Si el cliente da varios datos en un solo mensaje, extráelos todos
@@ -155,37 +163,22 @@ PERSONALIZACIÓN SEGÚN HISTORIAL:
 - Si es cliente nuevo: "Perfecto para conocer la calidad de nuestro café de Villa Rica"
 - Si tiene empresa registrada: Úsala como sugerencia
 
-IMPORTANTE - Al final de CADA respuesta, incluye un bloque JSON:
-\`\`\`json
-{
-  "intent": "solicitar_muestra|consulta|otro",
-  "empresa": "nombre del negocio o null",
-  "nombre_contacto": "nombre completo o null",
-  "direccion": "dirección completa con distrito o null",
-  "telefono": "teléfono de 9 dígitos o null",
-  "muestra_completa": true/false,
-  "datos_faltantes": ["lista", "de", "campos", "faltantes"]
-}
-\`\`\`
+FORMATO DE RESPUESTA - MUY IMPORTANTE:
+Responde en DOS bloques separados por ---DATA---
+
+Bloque 1: El mensaje conversacional para el cliente (solo texto natural, sin llaves ni corchetes).
+---DATA---
+Bloque 2: Solo el JSON con los datos, sin backticks ni markdown.
+
+Ejemplo:
+Hola María, qué bueno que Café Gourmet quiera probar nuestro café. Para enviarte la muestra de 500g, ¿cuál es tu dirección con distrito?
+---DATA---
+{"intent":"solicitar_muestra","empresa":"Café Gourmet","nombre_contacto":"María","direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["direccion","telefono"]}
 
 VALIDACIONES:
 - direccion debe incluir distrito (ej: "Av. Larco 123, Miraflores")
 - telefono debe tener exactamente 9 dígitos (sin espacios ni guiones)
-- muestra_completa debe ser true SOLO si tienes los 4 campos completos Y válidos
-
-EJEMPLOS:
-
-Cliente nuevo:
-Msg: "Soy María de Café Gourmet"
-Resp: "Hola María, qué bueno que Café Gourmet quiera probar nuestro café de Villa Rica. Para enviarte la muestra de 500g, necesito tu dirección completa con distrito y un teléfono de contacto."
-
-Cliente con historial:
-Msg: "Quiero una muestra"
-Resp: "Perfecto! Veo que ya nos conoces, la última vez pediste 5kg de nuestro blend. Te enviaremos 500g de muestra a tu dirección registrada en Jr. Lima 123, Cercado de Lima. Solo confirma tu teléfono de contacto."
-
-Datos completos:
-Msg: "Jr. Ucayali 345, Cercado de Lima, teléfono 998877665"
-Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café premium de Villa Rica a Jr. Ucayali 345, Cercado de Lima. Te contactaremos pronto para coordinar la entrega."`;
+- muestra_completa debe ser true SOLO si tienes los 4 campos completos Y válidos`;
   }
 
   /**
@@ -196,7 +189,6 @@ Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café pr
       { role: 'system', content: systemPrompt }
     ];
 
-    // Agregar historial
     for (const msg of historial) {
       messages.push({
         role: msg.rol === 'cliente' ? 'user' : 'assistant',
@@ -204,7 +196,6 @@ Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café pr
       });
     }
 
-    // Agregar mensaje actual
     messages.push({
       role: 'user',
       content: mensajeActual
@@ -214,13 +205,28 @@ Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café pr
   }
 
   /**
-   * Extraer datos estructurados del JSON en la respuesta
+   * Extraer datos estructurados - soporta múltiples formatos de respuesta
    */
   extraerDatosEstructurados(respuesta) {
     try {
-      const jsonMatch = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch && jsonMatch[1]) {
-        return JSON.parse(jsonMatch[1]);
+      // Formato nuevo: separador ---DATA---
+      if (respuesta.includes('---DATA---')) {
+        const partes = respuesta.split('---DATA---');
+        if (partes[1]) {
+          return JSON.parse(partes[1].trim());
+        }
+      }
+
+      // Formato legacy con backticks: ```json ... ```
+      const jsonConBackticks = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonConBackticks && jsonConBackticks[1]) {
+        return JSON.parse(jsonConBackticks[1]);
+      }
+
+      // Formato legacy sin backticks: buscar objeto JSON al final
+      const jsonMatch = respuesta.match(/\{[\s\S]*"muestra_completa"[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
       }
     } catch (error) {
       console.log('⚠️ Error parseando JSON de respuesta:', error.message);
@@ -229,12 +235,53 @@ Resp: "Excelente María, ya tenemos todo. Te enviaremos 500g de nuestro café pr
   }
 
   /**
-   * Limpiar respuesta quitando el bloque JSON
+   * Limpiar respuesta - elimina el bloque de datos del mensaje al cliente
    */
   limpiarRespuesta(respuesta) {
-    return respuesta
-      .replace(/```json\s*[\s\S]*?\s*```/g, '')
-      .trim();
+    let limpia = respuesta;
+
+    // Eliminar formato nuevo con separador
+    if (limpia.includes('---DATA---')) {
+      limpia = limpia.split('---DATA---')[0];
+    }
+
+    // Eliminar bloques ```json ... ```
+    limpia = limpia.replace(/```json[\s\S]*?```/g, '');
+
+    // Eliminar bloques ``` ... ``` genéricos
+    limpia = limpia.replace(/```[\s\S]*?```/g, '');
+
+    // Eliminar objetos JSON crudos que contengan campos del formulario
+    limpia = limpia.replace(/\{[\s\S]*?"muestra_completa"[\s\S]*?\}/g, '');
+    limpia = limpia.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
+    limpia = limpia.replace(/\{[\s\S]*?"datos_faltantes"[\s\S]*?\}/g, '');
+
+    return limpia.trim();
+  }
+
+  /**
+   * Verificar si la respuesta limpia todavía contiene JSON expuesto
+   */
+  tieneJSONExpuesto(respuesta) {
+    return (
+      respuesta.includes('"intent"') ||
+      respuesta.includes('"muestra_completa"') ||
+      respuesta.includes('"datos_faltantes"') ||
+      respuesta.includes('"nombre_contacto"') ||
+      /\{\s*"[a-z_]+"/.test(respuesta)
+    );
+  }
+
+  /**
+   * Limpieza de emergencia: quitar todo a partir del primer { que parezca JSON
+   */
+  limpiezaEmergencia(respuesta) {
+    const indiceJson = respuesta.search(/\{[\s\S]*"[a-z_]+"/);
+    if (indiceJson > 0) {
+      return respuesta.substring(0, indiceJson).trim();
+    }
+    // Si todo es JSON, devolver mensaje genérico
+    return 'Gracias por la información. En breve te contactamos para coordinar el envío.';
   }
 }
 
