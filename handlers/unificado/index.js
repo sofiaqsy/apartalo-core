@@ -94,7 +94,6 @@ async function handle(from, message, context) {
   switch (state.step) {
     case 'inicio':
     case 'menu':
-      // Verificar pedidos pendientes antes de iniciar nueva conversación
       return await iniciarConPendientes(from, mensajeLimpio, context, cfg, sheets);
 
     case 'pedido_conversacional':
@@ -118,8 +117,8 @@ async function handle(from, message, context) {
 }
 
 /**
- * Al iniciar sesión (estado 'inicio'), verificar si el cliente tiene pedidos pendientes.
- * Si los tiene, notificarlos antes de continuar.
+ * Al iniciar sesión (estado 'inicio'), mostrar pedidos en curso si los hay.
+ * Filtro: todo lo que NO esté en ESTADOS_FINALIZADOS.
  */
 async function iniciarConPendientes(from, mensajeLimpio, context, cfg, sheets) {
   const { whatsapp, stateManager, negocio } = context;
@@ -127,27 +126,27 @@ async function iniciarConPendientes(from, mensajeLimpio, context, cfg, sheets) {
   let pedidosPendientes = [];
   try {
     const pedidos = await sheets.getPedidosByWhatsapp(from);
-    // Pendientes = activos y con pago pendiente o en preparación
-    const ESTADOS_PENDIENTES = ['PENDIENTE', 'PENDIENTE_PAGO', 'PENDIENTE_ENVIO', 'EN_PREPARACION'];
+    // Mostrar TODOS los que no están finalizados — sin filtro de estado específico
     pedidosPendientes = pedidos.filter(p =>
-      !ESTADOS_FINALIZADOS.includes(p.estado) &&
-      ESTADOS_PENDIENTES.some(e => p.estado?.toUpperCase().includes(e.replace('_', '')))
+      !ESTADOS_FINALIZADOS.includes((p.estado || '').toUpperCase().trim())
     );
+    console.log(`[Pendientes] Total pedidos: ${pedidos.length}, en curso: ${pedidosPendientes.length}`);
+    if (pedidos.length > 0) {
+      console.log(`[Pendientes] Estados encontrados: ${pedidos.map(p => p.estado).join(', ')}`);
+    }
   } catch (e) {
     console.log('Error verificando pedidos pendientes:', e.message);
   }
 
   if (pedidosPendientes.length > 0) {
-    // Notificar pedidos en curso antes de responder al mensaje
     let aviso = pedidosPendientes.length === 1
       ? 'Tienes un pedido en curso:\n\n'
       : `Tienes ${pedidosPendientes.length} pedidos en curso:\n\n`;
 
     pedidosPendientes.forEach((p, idx) => {
       const d = parsearDetallePedido(p);
-      const estadoLabel = formatearEstado(p.estado);
       aviso += `${idx + 1}. ${d.producto}\n`;
-      aviso += `   Total: S/${d.total.toFixed(2)} | Estado: ${estadoLabel}\n`;
+      aviso += `   Total: S/${d.total.toFixed(2)} | Estado: ${formatearEstado(p.estado)}\n`;
       aviso += `   Código: ${p.id}\n\n`;
     });
 
@@ -155,7 +154,6 @@ async function iniciarConPendientes(from, mensajeLimpio, context, cfg, sheets) {
     await whatsapp.sendMessage(from, aviso);
   }
 
-  // Continuar procesando el mensaje normalmente
   return await pedidosModule.iniciarPedidoConversacionalDirecto(from, mensajeLimpio, context, cfg);
 }
 
@@ -167,7 +165,7 @@ function formatearEstado(estado) {
     'EN_PREPARACION': 'En preparación',
     'EN_CAMINO': 'En camino',
   };
-  return mapa[estado?.toUpperCase()] || estado || 'En proceso';
+  return mapa[(estado || '').toUpperCase().trim()] || estado || 'En proceso';
 }
 
 async function mostrarSaludoConPendientes(from, context, sheets) {
