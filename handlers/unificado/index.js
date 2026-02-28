@@ -93,18 +93,23 @@ async function handle(from, message, context) {
   }
 
   // ============================================
-  // 4. CONTACTAR ASESOR
+  // 4. CONTACTAR FINCA
   // ============================================
-  const palabrasAsesor = ['contactar', 'asesor', 'ayuda', 'hablar con alguien'];
-  if (palabrasAsesor.some(p => mensajeNormalizado.includes(p))) {
+  const palabrasContacto = [
+    'contactar finca', 'contactar', 'asesor', 'ayuda',
+    'hablar con alguien', 'hablar con la finca', 'persona',
+    'humano', 'equipo', 'finca'
+  ];
+  if (palabrasContacto.some(p => mensajeNormalizado.includes(p))) {
     if (hasFeature('asesorHumano') && asesorService) {
       const resultado = await asesorService.activarModoAsesor(from, context);
       await whatsapp.sendMessage(from, resultado.mensaje);
       return;
     } else {
-      await whatsapp.sendMessage(from, 
-        negocio.nombre + '\n\n' +
-        'Escribe tu consulta y te responderemos pronto.'
+      await whatsapp.sendMessage(from,
+        '📞 *Contacto con la Finca*\n\n' +
+        'Voy a conectarte con el equipo de ' + negocio.nombre + '.\n\n' +
+        'En breve alguien se comunicará contigo. 🌿'
       );
       return;
     }
@@ -141,14 +146,16 @@ async function handle(from, message, context) {
 }
 
 /**
- * Mostrar saludo simple (sin botones)
+ * Mostrar saludo simple identificando al bot y ofreciendo contacto con la finca
  */
 async function mostrarSaludoSimple(from, context) {
   const { whatsapp, negocio } = context;
   
   const saludo = getGreeting();
-  const mensaje = saludo + '\n\n' +
-    'Bienvenido a ' + negocio.nombre + '. ¿En qué puedo ayudarte?';
+  const mensaje =
+    saludo + ' Soy el asistente virtual de *' + negocio.nombre + '* 🤖\n\n' +
+    '¿En qué puedo ayudarte hoy?\n\n' +
+    '_Si prefieres hablar directamente con la finca, escribe *CONTACTAR FINCA*._';
   
   await whatsapp.sendMessage(from, mensaje);
 }
