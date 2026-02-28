@@ -1,16 +1,5 @@
 /**
- * APARTALO CORE - AI Muestra Service CON MEMORIA SIMULADA
- * 
- * Servicio de IA conversacional para flujo de muestras gratis.
- * Usa GROQ (Llama) para procesamiento natural y conversacional.
- * 
- * CARACTERÍSTICAS CON MEMORIA:
- * - Recupera información completa del cliente (Clientes, Pedidos, etc.)
- * - "Recuerda" si el cliente ya compró antes
- * - Personaliza la conversación basándose en el historial
- * - Conversación natural (no interrogatorio paso a paso)
- * - Extrae múltiples datos de un solo mensaje
- * - Valida datos (teléfono 9 dígitos, dirección con distrito)
+ * APARTALO CORE - AI Muestra Service
  */
 
 const axios = require('axios');
@@ -25,21 +14,16 @@ class AIMuestraService {
 
   initialize() {
     if (this.initialized) return true;
-
     this.apiKey = process.env.GROQ_API_KEY;
     if (!this.apiKey) {
-      console.log('⚠️ AIMuestraService: GROQ_API_KEY no configurada');
+      console.log('AIMuestraService: GROQ_API_KEY no configurada');
       return false;
     }
-
     this.initialized = true;
     console.log('✅ AIMuestraService inicializado con GROQ + RAG');
     return true;
   }
 
-  /**
-   * Procesar mensaje del cliente en flujo de muestra gratis CON MEMORIA
-   */
   async procesarMensajeMuestra(mensaje, context, historial = [], datosCliente = null) {
     if (!this.initialized && !this.initialize()) {
       return {
@@ -51,28 +35,19 @@ class AIMuestraService {
     }
 
     const { negocio } = context;
-
     const whatsapp = datosCliente?.whatsapp || context.from || null;
-    
+
     console.log('🧠 Recuperando memoria del cliente para muestra...');
-    const contextoCliente = await clienteContextService.obtenerContextoCompleto(
-      whatsapp, 
-      context
-    );
-
-    const systemPrompt = this.construirSystemPromptMuestraConMemoria(
-      negocio, 
-      contextoCliente
-    );
-
+    const contextoCliente = await clienteContextService.obtenerContextoCompleto(whatsapp, context);
+    const systemPrompt = this.construirSystemPromptMuestraConMemoria(negocio, contextoCliente);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 512,
-        temperature: 0.6
+        max_tokens: 200,
+        temperature: 0.3
       }, {
         headers: {
           'Authorization': 'Bearer ' + this.apiKey,
@@ -81,19 +56,13 @@ class AIMuestraService {
       });
 
       const respuestaTexto = response.data.choices[0].message.content;
-      
-      // Extraer datos estructurados del JSON (antes de limpiar)
       const datosExtraidos = this.extraerDatosEstructurados(respuestaTexto);
-      
-      // Limpiar respuesta eliminando CUALQUIER forma de JSON
       const respuestaLimpia = this.limpiarRespuesta(respuestaTexto);
 
-      // Validar que la respuesta limpia no tenga JSON expuesto
       if (this.tieneJSONExpuesto(respuestaLimpia)) {
-        console.error('⚠️ JSON detectado en respuesta limpia, aplicando limpieza de emergencia');
-        const respuestaEmergencia = this.limpiezaEmergencia(respuestaLimpia);
+        console.error('JSON detectado en respuesta limpia, aplicando limpieza de emergencia');
         return {
-          respuesta: respuestaEmergencia,
+          respuesta: this.limpiezaEmergencia(respuestaLimpia),
           datosExtraidos: datosExtraidos,
           muestraCompleta: datosExtraidos?.muestra_completa === true,
           error: false
@@ -108,7 +77,7 @@ class AIMuestraService {
       };
 
     } catch (error) {
-      console.error('❌ Error en AI Muestra:', error.response?.data || error.message);
+      console.error('Error en AI Muestra:', error.response?.data || error.message);
       return {
         respuesta: 'Ocurrió un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
@@ -118,150 +87,88 @@ class AIMuestraService {
     }
   }
 
-  /**
-   * Construir prompt del sistema para muestras CON memoria
-   */
   construirSystemPromptMuestraConMemoria(negocio, contextoCliente) {
-    return `Eres el asistente de ${negocio.nombre} para el programa de MUESTRAS GRATIS de café.
+    return `Eres el asistente virtual de ${negocio.nombre}, especializado UNICAMENTE en el programa de muestras gratis de café.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTEXTO DEL CLIENTE (Usa esta info para personalizar):
+CONTEXTO DEL CLIENTE:
 ${contextoCliente}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SOBRE EL PROGRAMA DE MUESTRAS:
-- Ofrecemos muestras GRATIS de 500g a cafeterías y negocios gastronómicos
-- Es para probar la calidad antes de comprar al por mayor
-- Solo 1 muestra por negocio (política estricta)
-- Somos productores de café premium de Villa Rica, Perú
+ROL Y LIMITES:
+- Eres un asistente virtual (bot), no una persona
+- SOLO puedes hablar de: muestras gratis, café de Finca Rosal, datos de entrega
+- Si el cliente pregunta algo fuera de este tema (política, recetas, otros productos, temas personales, etc.), responde: "Solo puedo ayudarte con el programa de muestras de cafe. Para otras consultas, escribe CONTACTAR FINCA."
+- En cada respuesta recuerda que eres un asistente virtual y que pueden escribir CONTACTAR FINCA para hablar con el equipo
+- Sin emojis
+- Respuestas MUY CORTAS: maxima 2 oraciones. De frente al punto, sin relleno
 
-TU ROL:
-- Habla de forma natural, cálida y profesional
-- NO uses emojis
-- Si el cliente YA compró antes, menciona que conoce nuestro café
-- Si tiene datos registrados, úsalos para agilizar el proceso
-- Explica brevemente el beneficio de la muestra
-- Recopila datos de forma conversacional (no interrogatorio)
+SOBRE EL PROGRAMA:
+- Muestra gratis de 500g para cafeterias y negocios gastronómicos
+- Solo 1 muestra por negocio
+- Café premium de Villa Rica, Perú
 
-DATOS NECESARIOS:
-1. Nombre del negocio/cafetería (campo: empresa)
-2. Nombre completo del contacto (campo: nombre_contacto)
-3. Dirección completa de entrega - DEBE incluir distrito (campo: direccion)
-4. Teléfono de contacto - 9 dígitos (campo: telefono)
+DATOS A RECOPILAR:
+1. empresa: nombre del negocio
+2. nombre_contacto: nombre completo del contacto
+3. direccion: dirección con distrito (ej: Av. Larco 123, Miraflores)
+4. telefono: 9 dígitos
 
-REGLAS DE CONVERSACIÓN:
-- Si el cliente da varios datos en un solo mensaje, extráelos todos
-- Si ya tiene datos en el sistema, úsalos (pero confirma siempre)
-- Si falta algún dato, pregunta solo por lo que falta
-- Sé flexible: el cliente puede dar los datos en cualquier orden
-- Valida que la dirección incluya distrito (Lima, Miraflores, San Isidro, etc.)
-- Valida que el teléfono tenga 9 dígitos
-- Si el cliente pregunta algo sobre el café, responde brevemente
+REGLAS:
+- Extrae todos los datos que el cliente dé en un mensaje
+- Si ya tiene datos registrados, úsalos
+- Pregunta solo por lo que falta
+- Valida: dirección debe tener distrito, teléfono exactamente 9 dígitos
 
-PERSONALIZACIÓN SEGÚN HISTORIAL:
-- Si el cliente ya compró: "Qué bueno que quieras probar más de nuestro café antes de tu próximo pedido"
-- Si es cliente nuevo: "Perfecto para conocer la calidad de nuestro café de Villa Rica"
-- Si tiene empresa registrada: Úsala como sugerencia
+FORMATO - responde en DOS bloques separados por ---DATA---
 
-FORMATO DE RESPUESTA - MUY IMPORTANTE:
-Responde en DOS bloques separados por ---DATA---
-
-Bloque 1: El mensaje conversacional para el cliente (solo texto natural, sin llaves ni corchetes).
+Bloque 1: mensaje corto para el cliente (solo texto, sin llaves ni corchetes).
 ---DATA---
-Bloque 2: Solo el JSON con los datos, sin backticks ni markdown.
+Bloque 2: JSON sin backticks.
 
 Ejemplo:
-Hola María, qué bueno que Café Gourmet quiera probar nuestro café. Para enviarte la muestra de 500g, ¿cuál es tu dirección con distrito?
+Perfecto. ¿Cuál es la dirección con distrito? Soy el asistente virtual de Finca Rosal, puedes escribir CONTACTAR FINCA si tienes otras consultas.
 ---DATA---
-{"intent":"solicitar_muestra","empresa":"Café Gourmet","nombre_contacto":"María","direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["direccion","telefono"]}
-
-VALIDACIONES:
-- direccion debe incluir distrito (ej: "Av. Larco 123, Miraflores")
-- telefono debe tener exactamente 9 dígitos (sin espacios ni guiones)
-- muestra_completa debe ser true SOLO si tienes los 4 campos completos Y válidos`;
+{"intent":"solicitar_muestra","empresa":"Café Gourmet","nombre_contacto":"Maria","direccion":null,"telefono":null,"muestra_completa":false,"datos_faltantes":["direccion","telefono"]}`;
   }
 
-  /**
-   * Construir array de mensajes para la API
-   */
   construirMensajes(systemPrompt, historial, mensajeActual) {
-    const messages = [
-      { role: 'system', content: systemPrompt }
-    ];
-
+    const messages = [{ role: 'system', content: systemPrompt }];
     for (const msg of historial) {
       messages.push({
         role: msg.rol === 'cliente' ? 'user' : 'assistant',
         content: msg.texto
       });
     }
-
-    messages.push({
-      role: 'user',
-      content: mensajeActual
-    });
-
+    messages.push({ role: 'user', content: mensajeActual });
     return messages;
   }
 
-  /**
-   * Extraer datos estructurados - soporta múltiples formatos de respuesta
-   */
   extraerDatosEstructurados(respuesta) {
     try {
-      // Formato nuevo: separador ---DATA---
       if (respuesta.includes('---DATA---')) {
         const partes = respuesta.split('---DATA---');
-        if (partes[1]) {
-          return JSON.parse(partes[1].trim());
-        }
+        if (partes[1]) return JSON.parse(partes[1].trim());
       }
-
-      // Formato legacy con backticks: ```json ... ```
       const jsonConBackticks = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonConBackticks && jsonConBackticks[1]) {
-        return JSON.parse(jsonConBackticks[1]);
-      }
-
-      // Formato legacy sin backticks: buscar objeto JSON al final
+      if (jsonConBackticks && jsonConBackticks[1]) return JSON.parse(jsonConBackticks[1]);
       const jsonMatch = respuesta.match(/\{[\s\S]*"muestra_completa"[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
+      if (jsonMatch) return JSON.parse(jsonMatch[0]);
     } catch (error) {
-      console.log('⚠️ Error parseando JSON de respuesta:', error.message);
+      console.log('Error parseando JSON de respuesta:', error.message);
     }
     return null;
   }
 
-  /**
-   * Limpiar respuesta - elimina el bloque de datos del mensaje al cliente
-   */
   limpiarRespuesta(respuesta) {
     let limpia = respuesta;
-
-    // Eliminar formato nuevo con separador
-    if (limpia.includes('---DATA---')) {
-      limpia = limpia.split('---DATA---')[0];
-    }
-
-    // Eliminar bloques ```json ... ```
+    if (limpia.includes('---DATA---')) limpia = limpia.split('---DATA---')[0];
     limpia = limpia.replace(/```json[\s\S]*?```/g, '');
-
-    // Eliminar bloques ``` ... ``` genéricos
     limpia = limpia.replace(/```[\s\S]*?```/g, '');
-
-    // Eliminar objetos JSON crudos que contengan campos del formulario
     limpia = limpia.replace(/\{[\s\S]*?"muestra_completa"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"datos_faltantes"[\s\S]*?\}/g, '');
-
     return limpia.trim();
   }
 
-  /**
-   * Verificar si la respuesta limpia todavía contiene JSON expuesto
-   */
   tieneJSONExpuesto(respuesta) {
     return (
       respuesta.includes('"intent"') ||
@@ -272,15 +179,9 @@ VALIDACIONES:
     );
   }
 
-  /**
-   * Limpieza de emergencia: quitar todo a partir del primer { que parezca JSON
-   */
   limpiezaEmergencia(respuesta) {
     const indiceJson = respuesta.search(/\{[\s\S]*"[a-z_]+"/);
-    if (indiceJson > 0) {
-      return respuesta.substring(0, indiceJson).trim();
-    }
-    // Si todo es JSON, devolver mensaje genérico
+    if (indiceJson > 0) return respuesta.substring(0, indiceJson).trim();
     return 'Gracias por la información. En breve te contactamos para coordinar el envío.';
   }
 }

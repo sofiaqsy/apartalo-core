@@ -1,7 +1,5 @@
 /**
  * APARTALO CORE - AI Order Service v5.8
- * 
- * v5.8: Filtro de seguridad de temas, respuestas cortas, identidad de bot
  */
 
 const axios = require('axios');
@@ -16,13 +14,11 @@ class AIOrderService {
 
   initialize() {
     if (this.initialized) return true;
-
     this.apiKey = process.env.GROQ_API_KEY;
     if (!this.apiKey) {
       console.log('AIOrderService: GROQ_API_KEY no configurada');
       return false;
     }
-
     this.initialized = true;
     console.log('✅ AIOrderService inicializado con GROQ + RAG');
     return true;
@@ -41,19 +37,15 @@ class AIOrderService {
     const { negocio } = context;
 
     console.log('🧠 Recuperando memoria del cliente...');
-    const contextoCliente = await clienteContextService.obtenerContextoCompleto(
-      whatsappFrom, 
-      context
-    );
-
-    const systemPrompt = this.construirSystemPrompt(negocio, contextoCliente);
+    const contextoCliente = await clienteContextService.obtenerContextoCompleto(whatsappFrom, context);
+    const systemPrompt = this.construirSystemPromptConMemoria(negocio, contextoCliente);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
 
     try {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 300,
+        max_tokens: 200,
         temperature: 0.3
       }, {
         headers: {
@@ -94,81 +86,64 @@ class AIOrderService {
     }
   }
 
-  construirSystemPrompt(negocio, contextoCliente) {
-    return `Eres el asistente virtual de ${negocio.nombre}, productores de cafe premium de Villa Rica, Peru.
+  construirSystemPromptConMemoria(negocio, contextoCliente) {
+    return `Eres el asistente virtual de ventas de ${negocio.nombre}, especializado UNICAMENTE en pedidos de café.
 
 CONTEXTO DEL CLIENTE:
 ${contextoCliente}
 
-═══════════════════════════════════════
-LIMITES DE TEMA - MUY IMPORTANTE
-═══════════════════════════════════════
-Solo puedes hablar de:
-- Productos y precios de ${negocio.nombre}
-- Como hacer un pedido
-- Estado de pedidos del cliente
-- Informacion sobre el cafe de Villa Rica
-- Coordinar entregas
-
-Si el cliente pregunta algo FUERA de estos temas (politica, religion, otros negocios, recetas, consejos personales, etc.), responde exactamente:
-"Solo puedo ayudarte con informacion sobre nuestro cafe y pedidos. Para otras consultas, escribe CONTACTAR FINCA."
-
-═══════════════════════════════════════
-IDENTIDAD
-═══════════════════════════════════════
-- Eres un asistente virtual, no una persona
-- En el PRIMER mensaje (historial vacio): presentate en UNA linea y menciona CONTACTAR FINCA
-- En mensajes siguientes: NO te presentes de nuevo, ve directo al punto
-- Si el cliente tiene dudas o quiere hablar con alguien: "Escribe CONTACTAR FINCA"
-
-═══════════════════════════════════════
-ESTILO DE RESPUESTA
-═══════════════════════════════════════
-- Maximo 2 oraciones por respuesta
-- Sin saludos repetidos
-- Sin relleno ("claro que si", "con gusto", "por supuesto")
-- Directo al dato o la pregunta
+ROL Y LIMITES:
+- Eres un asistente virtual (bot), no una persona
+- SOLO puedes hablar de: productos del catalogo, precios, pedidos, entregas
+- Si el cliente pregunta algo fuera de este tema (política, recetas, consejos de vida, otros negocios, etc.), responde: "Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Para otras consultas, escribe CONTACTAR FINCA."
+- Si el cliente saluda por primera vez (historial vacío), presentate en UNA línea como asistente virtual de ${negocio.nombre} e indica que puede escribir CONTACTAR FINCA
+- Si ya hay historial, NO te presentes de nuevo
+- Al final de cada respuesta añade en una línea aparte: "Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo."
 - Sin emojis
+- Respuestas MUY CORTAS: maxima 2 oraciones + la línea de asistente. De frente al punto
 
-EJEMPLOS CORRECTOS:
-Cliente: "hola" → "Soy el asistente virtual de ${negocio.nombre}. Puedo ayudarte con productos, precios y pedidos, o escribe CONTACTAR FINCA para hablar con el equipo."
-Cliente: "que cafes tienen" → "Tenemos [productos del catalogo]. ¿Cual te interesa?"
-Cliente: "cuanto cuesta el kilo" → "El cafe en grano esta a S/[precio] el kg."
-Cliente: "me puedes dar una receta" → "Solo puedo ayudarte con informacion sobre nuestro cafe y pedidos. Para otras consultas, escribe CONTACTAR FINCA."
-
-═══════════════════════════════════════
-PRODUCTOS
-═══════════════════════════════════════
-- SOLO usa productos del CATALOGO del contexto
+REGLAS DE PRODUCTOS:
+- SOLO usa productos del CATALOGO en el contexto
 - SOLO usa precios del CATALOGO
-- Si el producto no esta en catalogo: "No tenemos ese producto disponible."
-- Pedidos multiples: extrae todos los productos en el array
+- Si el producto no está en el catálogo: "No tenemos ese producto disponible."
+- NUNCA inventes códigos, precios ni información
 
-FORMATO DE RESPUESTA - separa con ---DATA---
+CUANDO EL CLIENTE PIDE VARIOS PRODUCTOS:
+- Extrae TODOS en el array "productos"
 
-Mensaje para el cliente (maximo 2 oraciones, sin llaves).
+FORMATO - responde en DOS bloques separados por ---DATA---
+
+Bloque 1: mensaje corto para el cliente (texto, sin llaves ni corchetes).
 ---DATA---
-{"intent":"consulta|pedido|otro","productos":[{"codigo":"...","nombre":"...","cantidad":0,"precio":0}],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":[]}
-`;
+Bloque 2: JSON sin backticks.
+
+Ejemplo saludo:
+Soy el asistente virtual de ${negocio.nombre}. ¿En que te puedo ayudar?
+Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo.
+---DATA---
+{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["pedido"]}
+
+Ejemplo fuera de tema:
+Solo puedo ayudarte con pedidos de cafe de Finca Rosal. Para otras consultas, escribe CONTACTAR FINCA.
+---DATA---
+{"intent":"otro","productos":[],"total_calculado":0,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":[]}
+
+Ejemplo pedido:
+5kg de cafe en grano a S/70/kg. Total: S/350. Necesito tu nombre, dirección con distrito y teléfono.
+Asistente virtual - escribe CONTACTAR FINCA para hablar con el equipo.
+---DATA---
+{"intent":"pedido","productos":[{"codigo":"CAT-001","nombre":"Cafe en grano","cantidad":5,"precio":70}],"total_calculado":350,"nombre_cliente":null,"direccion":null,"telefono":null,"pedido_completo":false,"datos_faltantes":["nombre_cliente","direccion","telefono"]}`;
   }
 
   construirMensajes(systemPrompt, historial, mensajeActual) {
-    const messages = [
-      { role: 'system', content: systemPrompt }
-    ];
-
+    const messages = [{ role: 'system', content: systemPrompt }];
     for (const msg of historial) {
       messages.push({
         role: msg.rol === 'cliente' ? 'user' : 'assistant',
         content: msg.texto
       });
     }
-
-    messages.push({
-      role: 'user',
-      content: mensajeActual
-    });
-
+    messages.push({ role: 'user', content: mensajeActual });
     return messages;
   }
 
@@ -176,20 +151,12 @@ Mensaje para el cliente (maximo 2 oraciones, sin llaves).
     try {
       if (respuesta.includes('---DATA---')) {
         const partes = respuesta.split('---DATA---');
-        if (partes[1]) {
-          return JSON.parse(partes[1].trim());
-        }
+        if (partes[1]) return JSON.parse(partes[1].trim());
       }
-
       const jsonMatch = respuesta.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch && jsonMatch[1]) {
-        return JSON.parse(jsonMatch[1]);
-      }
-
+      if (jsonMatch && jsonMatch[1]) return JSON.parse(jsonMatch[1]);
       const jsonRaw = respuesta.match(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/);
-      if (jsonRaw) {
-        return JSON.parse(jsonRaw[0]);
-      }
+      if (jsonRaw) return JSON.parse(jsonRaw[0]);
     } catch (error) {
       console.log('Error parseando JSON de respuesta:', error.message);
     }
@@ -198,17 +165,12 @@ Mensaje para el cliente (maximo 2 oraciones, sin llaves).
 
   limpiarRespuesta(respuesta) {
     let limpia = respuesta;
-
-    if (limpia.includes('---DATA---')) {
-      limpia = limpia.split('---DATA---')[0];
-    }
-
+    if (limpia.includes('---DATA---')) limpia = limpia.split('---DATA---')[0];
     limpia = limpia.replace(/```json[\s\S]*?```/g, '');
     limpia = limpia.replace(/```[\s\S]*?```/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"pedido_completo"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"intent"[\s\S]*?\}/g, '');
     limpia = limpia.replace(/\{[\s\S]*?"datos_faltantes"[\s\S]*?\}/g, '');
-
     return limpia.trim();
   }
 
@@ -224,9 +186,7 @@ Mensaje para el cliente (maximo 2 oraciones, sin llaves).
 
   limpiezaEmergencia(respuesta) {
     const indiceJson = respuesta.search(/\{[\s\S]*"[a-z_]+"/);
-    if (indiceJson > 0) {
-      return respuesta.substring(0, indiceJson).trim();
-    }
+    if (indiceJson > 0) return respuesta.substring(0, indiceJson).trim();
     return 'En que te puedo ayudar?';
   }
 }
