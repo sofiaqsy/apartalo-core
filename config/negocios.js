@@ -1,15 +1,20 @@
 /**
  * APARTALO CORE - Servicio de Negocios
- * 
- * Gestiona la configuración de cada negocio:
- * - Carga desde Google Sheets (Master)
- * - Cache en memoria
- * - Validación de credenciales
- * 
- * FLUJOS DISPONIBLES:
- * - UNIFICADO: Handler unificado configurable (nuevo, recomendado)
- * - CUSTOM: Handler específico en /handlers/{negocioId}
- * - ESTANDAR: Handler legacy con IA
+ *
+ * Columnas del Spreadsheet Maestro (Negocios!A:N):
+ * A: ID
+ * B: Nombre
+ * C: WhatsappTipo  → PROPIO | COMPARTIDO
+ * D: PhoneId       → phoneId del número propio (vacío si COMPARTIDO)
+ * E: Token         → token del número propio (vacío si COMPARTIDO)
+ * F: SpreadsheetId → ID del spreadsheet del negocio
+ * G: WebhookPath   → ej: /webhook/BIZ-002
+ * H: WhatsappAdmin → número admin para notificaciones
+ * I: Flujo         → CUSTOM | ESTANDAR | UNIFICADO
+ * J: Features      → lista separada por comas
+ * K: Prefijo       → ej: ROSAL, CAFE, FINCA
+ * L: Estado        → ACTIVO | INACTIVO
+ * M: ConfigExtra   → JSON con configuración adicional
  */
 
 const config = require('./index');
@@ -21,9 +26,6 @@ class NegociosService {
     this.initialized = false;
   }
 
-  /**
-   * Inicializar servicio cargando negocios desde Sheets
-   */
   async initialize() {
     try {
       console.log('📊 Cargando negocios...');
@@ -36,50 +38,37 @@ class NegociosService {
 
       this.initialized = true;
       console.log(`✅ ${this.negocios.size} negocio(s) cargado(s)`);
-
       return true;
     } catch (error) {
       console.error('❌ Error cargando negocios:', error.message);
-      // Cargar local como fallback
       this.loadFromLocal();
       return false;
     }
   }
 
-  /**
-   * Cargar negocios desde Google Sheets Master
-   */
   async loadFromSheets() {
     try {
       const credentials = JSON.parse(config.google.serviceAccountKey);
-
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
-      });
-
+      const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
       const sheets = google.sheets({ version: 'v4', auth });
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: config.google.masterSpreadsheetId,
-        range: 'Negocios!A:M'
+        range: 'Negocios!A:N'
       });
 
       const rows = response.data.values || [];
-
       if (rows.length <= 1) {
         console.log('⚠️ No hay negocios en el Master Spreadsheet');
         return;
       }
 
-      // Procesar cada fila (saltar header)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const negocio = this.parseNegocioRow(row);
-
         if (negocio && negocio.estado === 'ACTIVO') {
           this.negocios.set(negocio.id, negocio);
-          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo}`);
+          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo} [WhatsApp: ${negocio.whatsapp.tipo}]`);
         }
       }
     } catch (error) {
@@ -89,71 +78,66 @@ class NegociosService {
   }
 
   /**
-   * Parsear fila de Sheets a objeto negocio
-   * Columnas esperadas:
-   * A: ID, B: Nombre, C: WhatsappTipo, D: PhoneId, E: Token,
-   * F: SpreadsheetId, G: WebhookPath, H: WhatsappAdmin, I: Flujo,
-   * J: Features, K: Prefijo, L: Estado, M: ConfigExtra (JSON)
+   * Parsear fila del Maestro.
+   *
+   * Lógica de WhatsApp:
+   * - COMPARTIDO: siempre usa las credenciales compartidas (config.whatsappShared)
+   * - PROPIO con phoneId+token: usa sus propias credenciales Y su propio webhook /webhook/:id
+   * - PROPIO sin credenciales: degradado a COMPARTIDO automáticamente
    */
   parseNegocioRow(row) {
     if (!row[0]) return null;
 
-    const whatsappTipo = row[2] || 'COMPARTIDO';
-    const phoneIdFromSheet = row[3] || '';
-    const tokenFromSheet = row[4] || '';
+    const id           = (row[0] || '').trim();
+    const nombre       = (row[1] || id).trim();
+    const whatsappTipo = (row[2] || 'COMPARTIDO').trim().toUpperCase();
+    const phoneId      = (row[3] || '').trim();
+    const token        = (row[4] || '').trim();
+    const spreadsheetId= (row[5] || '').trim();
+    const webhookPath  = (row[6] || `/webhook/${id}`).trim();
+    const admin        = (row[7] || '').trim() || null;
+    const flujo        = (row[8] || 'UNIFICADO').trim().toUpperCase();
+    const featuresStr  = (row[9] || '').trim();
+    const prefijo      = (row[10] || id.substring(0, 4)).trim().toUpperCase();
+    const estado       = (row[11] || 'ACTIVO').trim().toUpperCase();
+    const configExtra  = this.parseJSON(row[12]);
 
-    // IMPORTANTE: Si es PROPIO pero no tiene credenciales, usar las compartidas
-    // También usar compartidas si el tipo es COMPARTIDO
-    const useShared = whatsappTipo === 'COMPARTIDO' || !phoneIdFromSheet || !tokenFromSheet;
+    // Determinar si realmente puede usar número propio
+    const esPropio = whatsappTipo === 'PROPIO' && phoneId && token;
 
     return {
-      id: row[0],
-      nombre: row[1] || row[0],
-
+      id,
+      nombre,
       whatsapp: {
-        tipo: useShared ? 'COMPARTIDO' : 'PROPIO',
-        phoneId: useShared ? config.whatsappShared.phoneId : phoneIdFromSheet,
-        token: useShared ? config.whatsappShared.token : tokenFromSheet,
-        webhookPath: row[6] || `/webhook/${row[0]}`,
-        admin: row[7] || null,
-        prefijo: row[10] || row[0].substring(0, 4).toUpperCase()
+        tipo: esPropio ? 'PROPIO' : 'COMPARTIDO',
+        phoneId: esPropio ? phoneId : config.whatsappShared.phoneId,
+        token:   esPropio ? token   : config.whatsappShared.token,
+        webhookPath,
+        admin,
+        prefijo
       },
-
-      spreadsheetId: row[5],
-      flujo: row[8] || 'UNIFICADO',  // Default cambiado a UNIFICADO
-      features: this.parseFeatures(row[9]),
-      estado: row[11] || 'ACTIVO',
-      configExtra: this.parseJSON(row[12])
+      spreadsheetId,
+      flujo,
+      features: this.parseFeatures(featuresStr),
+      estado,
+      configExtra
     };
   }
 
-  /**
-   * Parsear features desde string separado por comas
-   */
   parseFeatures(featuresStr) {
     if (!featuresStr) return [];
     return featuresStr.split(',').map(f => f.trim()).filter(f => f);
   }
 
-  /**
-   * Parsear JSON de forma segura
-   */
   parseJSON(jsonStr) {
     if (!jsonStr) return {};
-    try {
-      return JSON.parse(jsonStr);
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(jsonStr); }
+    catch { return {}; }
   }
 
-  /**
-   * Cargar negocios desde configuración local (desarrollo/fallback)
-   */
   loadFromLocal() {
     console.log('📦 Cargando negocios desde configuración local...');
     
-    // Negocio: Finca Rosal (B2B - café)
     if (process.env.FINCA_ROSAL_SPREADSHEET_ID) {
       this.negocios.set('BIZ-002', {
         id: 'BIZ-002',
@@ -166,78 +150,42 @@ class NegociosService {
           prefijo: 'ROSAL'
         },
         spreadsheetId: process.env.FINCA_ROSAL_SPREADSHEET_ID,
-        flujo: 'UNIFICADO',  // Ahora usa handler unificado
+        flujo: 'CUSTOM',
         features: ['asesorHumano', 'preciosVIP', 'cafeGratis', 'muestras'],
         estado: 'ACTIVO',
-        configExtra: {
-          // Configuración específica para café B2B
-          unidad: 'kg',
-          minimoCompra: 5,
-          flujoPago: 'contacto',  // No usa voucher, contactan después
-          mostrarFotos: true,
-          prefijoPedido: 'CAF'
-        }
+        configExtra: { unidad: 'kg', minimoCompra: 5, flujoPago: 'contacto', mostrarFotos: true, prefijoPedido: 'CAF' }
       });
-      console.log('   ✅ Finca Rosal (BIZ-002) - UNIFICADO [kg, min:5, pago:contacto]');
+      console.log('   ✅ Finca Rosal (BIZ-002) - CUSTOM');
     }
-
-    // Negocio demo: Tienda genérica (B2C - productos)
-    this.negocios.set('demo-tienda', {
-      id: 'demo-tienda',
-      nombre: 'Demo Tienda',
-      whatsapp: {
-        tipo: 'COMPARTIDO',
-        phoneId: config.whatsappShared.phoneId,
-        token: config.whatsappShared.token,
-        webhookPath: '/webhook/apartalo',
-        prefijo: 'DEMO'
-      },
-      spreadsheetId: process.env.DEMO_SPREADSHEET_ID || config.google.masterSpreadsheetId,
-      flujo: 'UNIFICADO',
-      features: ['liveCommerce', 'catalogoWeb'],
-      estado: 'ACTIVO',
-      configExtra: {
-        // Configuración estándar B2C
-        unidad: 'unidad',
-        minimoCompra: 1,
-        flujoPago: 'voucher',  // Pide voucher
-        mostrarFotos: true,
-        prefijoPedido: 'PED'
-      }
-    });
-    console.log('   ✅ Demo Tienda (demo-tienda) - UNIFICADO [unidad, min:1, pago:voucher]');
   }
 
   // ============================================
   // GETTERS
   // ============================================
 
-  getById(id) {
-    return this.negocios.get(id) || null;
-  }
+  getById(id) { return this.negocios.get(id) || null; }
 
   getByPhoneId(phoneId) {
     for (const negocio of this.negocios.values()) {
-      if (negocio.whatsapp.phoneId === phoneId) {
-        return negocio;
-      }
+      if (negocio.whatsapp.phoneId === phoneId) return negocio;
     }
     return null;
   }
 
   getByWebhookPath(path) {
     for (const negocio of this.negocios.values()) {
-      if (negocio.whatsapp.webhookPath === path) {
-        return negocio;
-      }
+      if (negocio.whatsapp.webhookPath === path) return negocio;
     }
     return null;
   }
 
-  getAll() {
-    return Array.from(this.negocios.values());
-  }
+  getAll() { return Array.from(this.negocios.values()); }
 
+  /**
+   * Negocios que usan el número compartido.
+   * Un negocio PROPIO también puede recibir mensajes por el número compartido
+   * si el usuario llega por ahí (multi-tenant) — se incluyen todos.
+   */
   getSharedNegocios() {
     return this.getAll().filter(n => n.whatsapp.tipo === 'COMPARTIDO');
   }
