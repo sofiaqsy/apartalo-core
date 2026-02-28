@@ -2,6 +2,10 @@
  * APARTALO CORE - Handler Unificado - Muestras
  * 
  * Módulo para flujo de muestras gratis con IA + Memoria Simulada (RAG)
+ * 
+ * GUARDADO DE CLIENTE:
+ * - Se guarda/actualiza en Sheets cada vez que llegan datos nuevos
+ * - No espera a que el pedido esté completo para registrar al cliente
  */
 
 const { generateId } = require('../../core/utils/formatters');
@@ -15,7 +19,7 @@ const { mergeDatasSinNull } = require('./utils');
 async function iniciarMuestraConversacional(from, mensajeInicial, context, cfg) {
   const { whatsapp, sheets, stateManager, negocio } = context;
 
-  console.log('🎁 Iniciando flujo de muestra conversacional con IA + RAG');
+  console.log('Iniciando flujo de muestra conversacional con IA + RAG');
 
   // Validar: ¿Ya tiene una muestra registrada?
   let muestraPrev = null;
@@ -26,10 +30,9 @@ async function iniciarMuestraConversacional(from, mensajeInicial, context, cfg) 
       !['CANCELADO'].includes(p.estado)
     );
   } catch (e) {
-    console.log('⚠️ Error verificando muestras previas:', e.message);
+    console.log('Error verificando muestras previas:', e.message);
   }
 
-  // Si ya tiene una muestra, rechazar
   if (muestraPrev) {
     const estadoTexto = muestraPrev.estado === 'ENTREGADO' 
       ? 'ya recibiste una muestra' 
@@ -38,14 +41,14 @@ async function iniciarMuestraConversacional(from, mensajeInicial, context, cfg) 
     await whatsapp.sendMessage(from, 
       `Veo que ${estadoTexto} (código ${muestraPrev.id}).\n\n` +
       `Nuestro programa permite solo 1 muestra por negocio para que más personas puedan conocer nuestro café.\n\n` +
-      `Si quedaste satisfecho con la calidad, ¡nos encantaría que hagas tu primer pedido!\n\n` +
+      `Si quedaste satisfecho con la calidad, nos encantaría que hagas tu primer pedido.\n\n` +
       `Escribe lo que necesites.`
     );
     stateManager.resetState(from, negocio.id);
     return;
   }
 
-  // Buscar datos del cliente
+  // Buscar datos del cliente ya registrado
   let cliente = null;
   try {
     cliente = await sheets.buscarCliente(from);
@@ -62,7 +65,6 @@ async function iniciarMuestraConversacional(from, mensajeInicial, context, cfg) 
     }
   });
 
-  // Procesar mensaje inicial con IA
   return await continuarMuestraConversacional(from, mensajeInicial, context, cfg);
 }
 
@@ -77,7 +79,6 @@ async function continuarMuestraConversacional(from, mensaje, context, cfg) {
   const datosCliente = state.data?.datosCliente || null;
   let datosAcumulados = state.data?.datosExtraidos || {};
 
-  // Llamar a IA especializada en muestras con memoria
   const resultado = await aiMuestraService.procesarMensajeMuestra(
     mensaje,
     context,
@@ -90,18 +91,23 @@ async function continuarMuestraConversacional(from, mensaje, context, cfg) {
     return;
   }
 
-  // Merge inteligente de datos
+  // Merge inteligente de datos nuevos
   if (resultado.datosExtraidos) {
     datosAcumulados = mergeDatasSinNull(datosAcumulados, resultado.datosExtraidos);
   }
 
-  console.log('📊 Datos muestra acumulados:', JSON.stringify(datosAcumulados));
+  console.log('Datos muestra acumulados:', JSON.stringify(datosAcumulados));
 
-  // Actualizar historial
+  // ============================================
+  // GUARDAR CLIENTE PROGRESIVAMENTE
+  // Cada vez que llegan datos nuevos, actualizar en Sheets
+  // ============================================
+  await guardarClienteParcial(from, datosAcumulados, sheets);
+
   historial.push({ rol: 'cliente', texto: mensaje });
   historial.push({ rol: 'asistente', texto: resultado.respuesta });
 
-  // Si la muestra está completa, crear pedido
+  // Si la muestra está completa, crear el pedido
   if (resultado.muestraCompleta && 
       datosAcumulados.empresa && 
       datosAcumulados.nombre_contacto &&
@@ -111,14 +117,34 @@ async function continuarMuestraConversacional(from, mensaje, context, cfg) {
     return await confirmarMuestraGratis(from, context, cfg, datosAcumulados);
   }
 
-  // Actualizar estado
   stateManager.updateData(from, negocio.id, {
     historial,
     datosExtraidos: datosAcumulados
   });
 
-  // Enviar respuesta
   await whatsapp.sendMessage(from, resultado.respuesta);
+}
+
+/**
+ * Guardar o actualizar cliente en Sheets con los datos que ya se tienen
+ * Solo guarda si hay al menos un dato nuevo útil
+ */
+async function guardarClienteParcial(from, datos, sheets) {
+  const tieneDatos = datos.nombre_contacto || datos.empresa || datos.telefono || datos.direccion;
+  if (!tieneDatos) return;
+
+  try {
+    await sheets.upsertCliente({
+      whatsapp: from,
+      nombre: datos.nombre_contacto || '',
+      empresa: datos.empresa || '',
+      telefono: datos.telefono || '',
+      direccion: datos.direccion || ''
+    });
+    console.log('Cliente actualizado en Sheets con datos parciales:', from);
+  } catch (e) {
+    console.log('Error guardando cliente parcial:', e.message);
+  }
 }
 
 /**
@@ -130,10 +156,10 @@ async function confirmarMuestraGratis(from, context, cfg, datos) {
   const pedidoId = generateId('MUE');
   const estadoMuestra = config.orderStates?.PENDING_SHIPMENT || 'PENDIENTE_ENVIO';
 
-  console.log(`✅ Creando muestra ${pedidoId} para ${datos.empresa}`);
+  console.log(`Creando muestra ${pedidoId} para ${datos.empresa}`);
 
   try {
-    // Crear o actualizar cliente
+    // Guardar cliente completo (upsert final con todos los datos confirmados)
     await sheets.upsertCliente({
       whatsapp: from,
       nombre: datos.nombre_contacto,
@@ -141,6 +167,8 @@ async function confirmarMuestraGratis(from, context, cfg, datos) {
       direccion: datos.direccion,
       empresa: datos.empresa
     });
+
+    console.log(`Cliente guardado/actualizado: ${datos.nombre_contacto} - ${datos.empresa}`);
 
     // Crear pedido de muestra
     await sheets.crearPedido({
@@ -155,13 +183,13 @@ async function confirmarMuestraGratis(from, context, cfg, datos) {
       observaciones: `MUESTRA GRATIS 500g - Contacto: ${datos.nombre_contacto} - WhatsApp Bot IA + RAG`
     });
 
-    console.log(`✅ Muestra creada: ${pedidoId} para ${datos.empresa}`);
+    console.log(`Muestra creada: ${pedidoId} para ${datos.empresa}`);
 
     // Notificar al negocio
     if (firebaseService) {
       try {
         await firebaseService.enviarNotificacion(negocio.id, {
-          title: '🎁 Nueva Solicitud de Muestra',
+          title: 'Nueva Solicitud de Muestra',
           body: `${datos.empresa} - ${datos.nombre_contacto}`,
           data: {
             type: 'muestra_gratis',
@@ -170,17 +198,16 @@ async function confirmarMuestraGratis(from, context, cfg, datos) {
           }
         });
       } catch (e) {
-        console.log('⚠️ Error enviando notificación:', e.message);
+        console.log('Error enviando notificación:', e.message);
       }
     }
 
   } catch (e) {
-    console.error('❌ Error creando muestra:', e.message);
+    console.error('Error creando muestra:', e.message);
   }
 
-  // Mensaje de confirmación
   const mensajeConfirmacion = 
-    '✅ MUESTRA CONFIRMADA\n\n' +
+    'Muestra confirmada\n\n' +
     `Código: ${pedidoId}\n` +
     `Negocio: ${datos.empresa}\n` +
     `Contacto: ${datos.nombre_contacto}\n` +
@@ -188,7 +215,7 @@ async function confirmarMuestraGratis(from, context, cfg, datos) {
     `Teléfono: ${datos.telefono}\n\n` +
     `Te enviaremos 500g de nuestro café premium de Villa Rica.\n\n` +
     `Te contactaremos pronto para coordinar la entrega.\n\n` +
-    `¡Gracias por tu interés en ${negocio.nombre}!`;
+    `Gracias por tu interés en ${negocio.nombre}.`;
 
   await whatsapp.sendMessage(from, mensajeConfirmacion);
   
