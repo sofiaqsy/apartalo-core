@@ -1,5 +1,6 @@
 /**
  * CLIENTES ROUTER - Estructura completa
+ * ACTUALIZACIÓN: Enriquecimiento con stats reales de pedidos, ordenar=actividad
  * FIX: getRows() solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
  */
 
@@ -8,6 +9,148 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
+
+// ==================== HELPER: Determinar estado de pago ====================
+
+function determinarEstadoPago(pedido) {
+  const estadoPagoExplicito = (pedido.estadoPago || '').toUpperCase();
+  if (estadoPagoExplicito === 'PAGADO' || estadoPagoExplicito === 'PARCIAL') {
+    return estadoPagoExplicito;
+  }
+
+  const total = pedido.total || 0;
+  const montoPagado = pedido.montoPagado || 0;
+
+  if (montoPagado >= total && total > 0) return 'PAGADO';
+  if (montoPagado > 0 && montoPagado < total) return 'PARCIAL';
+
+  const evidencias = pedido.evidencias || [];
+  if (Array.isArray(evidencias) && evidencias.length > 0) return 'PAGADO';
+
+  return 'PENDIENTE_PAGO';
+}
+
+// ==================== HELPER: Parsear evidencias ====================
+
+function parseEvidencias(raw) {
+  if (!raw || raw.trim() === '') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch (e) {
+    return raw.split(/[,\n]/).map(u => u.trim()).filter(u => u).map((url, i) => ({
+      id: `ev_legacy_${i}`, url, tipo: 'WHATSAPP', fecha: new Date().toISOString()
+    }));
+  }
+}
+
+// ==================== HELPER: Build pedidos index by whatsapp ====================
+
+function buildPedidosIndex(pedidosRows) {
+  const index = {}; // whatsapp -> [pedido, pedido, ...]
+  
+  for (let i = 1; i < pedidosRows.length; i++) {
+    const row = pedidosRows[i];
+    if (!row[0] || row[0].includes('_DELETED')) continue;
+
+    const whatsapp = (row[3] || '').replace(/[^0-9]/g, '');
+    if (!whatsapp) continue;
+
+    const pedido = {
+      id: row[0] || '',
+      fecha: row[1] || '',
+      cliente: row[4] || '',
+      productos: row[7] || '',
+      total: parseFloat(row[8]) || 0,
+      estado: (row[9] || 'PENDIENTE').toUpperCase(),
+      evidencias: parseEvidencias(row[10]),
+      estadoPago: row[15] || 'PENDIENTE_PAGO',
+      montoPagado: parseFloat(row[16]) || 0,
+      fechaPago: row[17] || ''
+    };
+
+    if (!index[whatsapp]) index[whatsapp] = [];
+    index[whatsapp].push(pedido);
+  }
+
+  return index;
+}
+
+// ==================== HELPER: Calcular stats de un cliente ====================
+
+function calcularStats(pedidos) {
+  const stats = {
+    totalPedidos: pedidos.length,
+    totalComprado: 0,
+    totalCobrado: 0,
+    totalPorCobrar: 0,
+    totalKg: 0,
+    pedidosActivos: 0,
+    pedidosPorCobrar: 0,
+    pedidosPagados: 0,
+    ultimaCompra: '',
+    ultimoPedidoEstado: ''
+  };
+
+  if (pedidos.length === 0) return stats;
+
+  // Ordenar por fecha desc para obtener última compra
+  const pedidosOrdenados = [...pedidos].sort((a, b) => {
+    // Formato fecha: dd/mm/yyyy
+    const parseDate = (f) => {
+      if (!f) return 0;
+      const parts = f.split('/');
+      if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+      return new Date(f).getTime() || 0;
+    };
+    return parseDate(b.fecha) - parseDate(a.fecha);
+  });
+
+  stats.ultimaCompra = pedidosOrdenados[0].fecha;
+  stats.ultimoPedidoEstado = pedidosOrdenados[0].estado;
+
+  for (const p of pedidos) {
+    const estadoUpper = p.estado;
+
+    // Pedidos activos (no completados ni cancelados)
+    if (estadoUpper !== 'COMPLETADO' && estadoUpper !== 'CANCELADO') {
+      stats.pedidosActivos++;
+    }
+
+    // Solo sumar totales de pedidos completados (ventas reales)
+    if (estadoUpper === 'COMPLETADO') {
+      stats.totalComprado += p.total;
+
+      const estadoPagoEfectivo = determinarEstadoPago(p);
+      if (estadoPagoEfectivo === 'PAGADO') {
+        stats.totalCobrado += p.total;
+        stats.pedidosPagados++;
+      } else if (estadoPagoEfectivo === 'PARCIAL') {
+        stats.totalCobrado += p.montoPagado;
+        stats.totalPorCobrar += (p.total - p.montoPagado);
+        stats.pedidosPorCobrar++;
+      } else {
+        stats.totalPorCobrar += p.total;
+        stats.pedidosPorCobrar++;
+      }
+    }
+
+    // Calcular Kg desde productos
+    const productos = p.productos || '';
+    const kgMatch = productos.match(/(\d+(?:\.\d+)?)\s*kg/gi);
+    if (kgMatch) {
+      for (const match of kgMatch) {
+        const kg = parseFloat(match);
+        if (!isNaN(kg)) stats.totalKg += kg;
+      }
+    }
+  }
+
+  return stats;
+}
+
+// ==================== GET CLIENTES (LISTA) ====================
 
 router.get('/:businessId', async (req, res) => {
   try {
@@ -20,18 +163,36 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Clientes!A:V');
+    // Cargar clientes Y pedidos en paralelo
+    const [clientesRows, pedidosRows] = await Promise.all([
+      sheets.getRows('Clientes!A:V'),
+      sheets.getRows('Pedidos!A:R')
+    ]);
+
+    // Indexar pedidos por whatsapp
+    const pedidosIndex = buildPedidosIndex(pedidosRows);
 
     let clientes = [];
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
+    for (let i = 1; i < clientesRows.length; i++) {
+      const row = clientesRows[i];
       if (!row[0] || row[0].includes('_DELETED')) continue;
+
+      const whatsapp = (row[1] || '').replace(/[^0-9]/g, '');
+      const pedidosCliente = pedidosIndex[whatsapp] || [];
+      const stats = calcularStats(pedidosCliente);
 
       const cliente = {
         id: row[0] || '', whatsapp: row[1] || '', nombreNegocio: row[2] || '', nombreResponsable: row[3] || '',
         telefono: row[4] || '', email: row[5] || '', direccion: row[6] || '', departamento: row[7] || '',
-        distrito: row[8] || '', fechaRegistro: row[9] || '', ultimaCompra: row[10] || '',
-        totalPedidos: parseInt(row[11]) || 0, totalComprado: parseFloat(row[12]) || 0, totalKg: parseFloat(row[13]) || 0,
+        distrito: row[8] || '', fechaRegistro: row[9] || '',
+        // Stats calculados en tiempo real desde pedidos
+        ultimaCompra: stats.ultimaCompra,
+        totalPedidos: stats.totalPedidos,
+        totalComprado: stats.totalComprado,
+        totalKg: stats.totalKg,
+        totalPorCobrar: stats.totalPorCobrar,
+        pedidosActivos: stats.pedidosActivos,
+        pedidosPorCobrar: stats.pedidosPorCobrar,
         estado: row[14] || 'ACTIVO', tipoEnvio: row[15] || '', empresaEnvio: row[16] || '', localEnvio: row[17] || '',
         direccionEnvio: row[18] || '', distritoEnvio: row[19] || '', departamentoEnvio: row[20] || '', notas: row[21] || '', rowIndex: i + 1
       };
@@ -46,11 +207,66 @@ router.get('/:businessId', async (req, res) => {
       clientes.push(cliente);
     }
 
-    if (ordenar === 'nombre') clientes.sort((a, b) => a.nombreNegocio.localeCompare(b.nombreNegocio));
-    else if (ordenar === 'reciente') clientes.sort((a, b) => new Date(b.fechaRegistro) - new Date(a.fechaRegistro));
-    else if (ordenar === 'ultima_compra') clientes.sort((a, b) => new Date(b.ultimaCompra || 0) - new Date(a.ultimaCompra || 0));
-    else if (ordenar === 'total_comprado') clientes.sort((a, b) => b.totalComprado - a.totalComprado);
-    else clientes.reverse();
+    // Ordenamiento
+    if (ordenar === 'nombre') {
+      clientes.sort((a, b) => (a.nombreNegocio || a.nombreResponsable).localeCompare(b.nombreNegocio || b.nombreResponsable));
+    } else if (ordenar === 'reciente') {
+      clientes.sort((a, b) => new Date(b.fechaRegistro) - new Date(a.fechaRegistro));
+    } else if (ordenar === 'ultima_compra') {
+      clientes.sort((a, b) => {
+        const parseDate = (f) => {
+          if (!f) return 0;
+          const parts = f.split('/');
+          if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+          return new Date(f).getTime() || 0;
+        };
+        return parseDate(b.ultimaCompra) - parseDate(a.ultimaCompra);
+      });
+    } else if (ordenar === 'total_comprado') {
+      clientes.sort((a, b) => b.totalComprado - a.totalComprado);
+    } else if (ordenar === 'actividad') {
+      // Primero: pedidos activos (pendientes), luego por cobrar, luego última compra
+      clientes.sort((a, b) => {
+        // Prioridad 1: los que tienen pedidos activos van primero
+        if (a.pedidosActivos > 0 && b.pedidosActivos === 0) return -1;
+        if (b.pedidosActivos > 0 && a.pedidosActivos === 0) return 1;
+        if (a.pedidosActivos > 0 && b.pedidosActivos > 0) return b.pedidosActivos - a.pedidosActivos;
+
+        // Prioridad 2: los que tienen pagos pendientes
+        if (a.pedidosPorCobrar > 0 && b.pedidosPorCobrar === 0) return -1;
+        if (b.pedidosPorCobrar > 0 && a.pedidosPorCobrar === 0) return 1;
+
+        // Prioridad 3: los que tienen pedidos vs los que no
+        if (a.totalPedidos > 0 && b.totalPedidos === 0) return -1;
+        if (b.totalPedidos > 0 && a.totalPedidos === 0) return 1;
+
+        // Prioridad 4: última compra más reciente
+        const parseDate = (f) => {
+          if (!f) return 0;
+          const parts = f.split('/');
+          if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+          return new Date(f).getTime() || 0;
+        };
+        return parseDate(b.ultimaCompra) - parseDate(a.ultimaCompra);
+      });
+    } else {
+      // Default: actividad (mismo que arriba)
+      clientes.sort((a, b) => {
+        if (a.pedidosActivos > 0 && b.pedidosActivos === 0) return -1;
+        if (b.pedidosActivos > 0 && a.pedidosActivos === 0) return 1;
+        if (a.pedidosPorCobrar > 0 && b.pedidosPorCobrar === 0) return -1;
+        if (b.pedidosPorCobrar > 0 && a.pedidosPorCobrar === 0) return 1;
+        if (a.totalPedidos > 0 && b.totalPedidos === 0) return -1;
+        if (b.totalPedidos > 0 && a.totalPedidos === 0) return 1;
+        const parseDate = (f) => {
+          if (!f) return 0;
+          const parts = f.split('/');
+          if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+          return new Date(f).getTime() || 0;
+        };
+        return parseDate(b.ultimaCompra) - parseDate(a.ultimaCompra);
+      });
+    }
 
     const total = clientes.length;
     const paginaNum = parseInt(pagina) || 1;
@@ -64,6 +280,8 @@ router.get('/:businessId', async (req, res) => {
   }
 });
 
+// ==================== GET CLIENTE DETALLE ====================
+
 router.get('/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -73,18 +291,21 @@ router.get('/:businessId/:clienteId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Clientes!A:V');
-    let cliente = null;
+    const [clientesRows, pedidosRows] = await Promise.all([
+      sheets.getRows('Clientes!A:V'),
+      sheets.getRows('Pedidos!A:R')
+    ]);
 
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === clienteId) {
+    let cliente = null;
+    for (let i = 1; i < clientesRows.length; i++) {
+      if (clientesRows[i][0] === clienteId) {
         cliente = {
-          id: rows[i][0], whatsapp: rows[i][1] || '', nombreNegocio: rows[i][2] || '', nombreResponsable: rows[i][3] || '',
-          telefono: rows[i][4] || '', email: rows[i][5] || '', direccion: rows[i][6] || '', departamento: rows[i][7] || '',
-          distrito: rows[i][8] || '', fechaRegistro: rows[i][9] || '', ultimaCompra: rows[i][10] || '',
-          totalPedidos: parseInt(rows[i][11]) || 0, totalComprado: parseFloat(rows[i][12]) || 0, totalKg: parseFloat(rows[i][13]) || 0,
-          estado: rows[i][14] || 'ACTIVO', tipoEnvio: rows[i][15] || '', empresaEnvio: rows[i][16] || '', localEnvio: rows[i][17] || '',
-          direccionEnvio: rows[i][18] || '', distritoEnvio: rows[i][19] || '', departamentoEnvio: rows[i][20] || '', notas: rows[i][21] || '', rowIndex: i + 1
+          id: clientesRows[i][0], whatsapp: clientesRows[i][1] || '', nombreNegocio: clientesRows[i][2] || '', nombreResponsable: clientesRows[i][3] || '',
+          telefono: clientesRows[i][4] || '', email: clientesRows[i][5] || '', direccion: clientesRows[i][6] || '', departamento: clientesRows[i][7] || '',
+          distrito: clientesRows[i][8] || '', fechaRegistro: clientesRows[i][9] || '', ultimaCompra: clientesRows[i][10] || '',
+          totalPedidos: parseInt(clientesRows[i][11]) || 0, totalComprado: parseFloat(clientesRows[i][12]) || 0, totalKg: parseFloat(clientesRows[i][13]) || 0,
+          estado: clientesRows[i][14] || 'ACTIVO', tipoEnvio: clientesRows[i][15] || '', empresaEnvio: clientesRows[i][16] || '', localEnvio: clientesRows[i][17] || '',
+          direccionEnvio: clientesRows[i][18] || '', distritoEnvio: clientesRows[i][19] || '', departamentoEnvio: clientesRows[i][20] || '', notas: clientesRows[i][21] || '', rowIndex: i + 1
         };
         break;
       }
@@ -92,17 +313,36 @@ router.get('/:businessId/:clienteId', async (req, res) => {
 
     if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-    let pedidos = [];
-    try { pedidos = await sheets.getPedidosByWhatsapp(cliente.whatsapp); } catch (e) {}
+    // Buscar pedidos del cliente por whatsapp
+    const whatsappLimpio = (cliente.whatsapp || '').replace(/[^0-9]/g, '');
+    const pedidosIndex = buildPedidosIndex(pedidosRows);
+    const pedidosCliente = pedidosIndex[whatsappLimpio] || [];
+
+    // Calcular stats reales
+    const stats = calcularStats(pedidosCliente);
+
+    // Ordenar pedidos por fecha desc
+    pedidosCliente.sort((a, b) => {
+      const parseDate = (f) => {
+        if (!f) return 0;
+        const parts = f.split('/');
+        if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+        return new Date(f).getTime() || 0;
+      };
+      return parseDate(b.fecha) - parseDate(a.fecha);
+    });
 
     res.json({
-      cliente, pedidos: pedidos.slice(0, 50),
-      estadisticas: { totalPedidos: pedidos.length, totalComprado: pedidos.reduce((sum, p) => sum + (p.total || 0), 0), pedidosActivos: pedidos.filter(p => !['ENTREGADO', 'CANCELADO'].includes(p.estado)).length }
+      cliente,
+      pedidos: pedidosCliente.slice(0, 50),
+      estadisticas: stats
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== CREAR CLIENTE ====================
 
 router.post('/:businessId', async (req, res) => {
   try {
@@ -144,6 +384,8 @@ router.post('/:businessId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== ACTUALIZAR CLIENTE ====================
 
 router.put('/:businessId/:clienteId', async (req, res) => {
   try {
@@ -191,6 +433,8 @@ router.put('/:businessId/:clienteId', async (req, res) => {
   }
 });
 
+// ==================== ELIMINAR CLIENTE ====================
+
 router.delete('/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -214,6 +458,8 @@ router.delete('/:businessId/:clienteId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ==================== IMPORTAR CLIENTES ====================
 
 router.post('/:businessId/importar', async (req, res) => {
   try {
@@ -266,6 +512,8 @@ router.post('/:businessId/importar', async (req, res) => {
   }
 });
 
+// ==================== ENVIAR MENSAJE ====================
+
 router.post('/:businessId/:clienteId/mensaje', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -295,6 +543,8 @@ router.post('/:businessId/:clienteId/mensaje', async (req, res) => {
   }
 });
 
+// ==================== ACTUALIZAR STATS (manual) ====================
+
 router.post('/:businessId/:clienteId/actualizar-stats', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
@@ -304,36 +554,30 @@ router.post('/:businessId/:clienteId/actualizar-stats', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Clientes!A:V');
-    let clienteRow = -1, whatsapp = '';
+    const [clientesRows, pedidosRows] = await Promise.all([
+      sheets.getRows('Clientes!A:V'),
+      sheets.getRows('Pedidos!A:R')
+    ]);
 
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === clienteId) { clienteRow = i + 1; whatsapp = rows[i][1]; break; }
+    let clienteRow = -1, whatsapp = '';
+    for (let i = 1; i < clientesRows.length; i++) {
+      if (clientesRows[i][0] === clienteId) { clienteRow = i + 1; whatsapp = (clientesRows[i][1] || '').replace(/[^0-9]/g, ''); break; }
     }
 
     if (clienteRow === -1) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-    let pedidos = [];
-    try { pedidos = await sheets.getPedidosByWhatsapp(whatsapp); } catch (e) {}
-
-    const totalPedidos = pedidos.length;
-    const totalComprado = pedidos.reduce((sum, p) => sum + (p.total || 0), 0);
-    let totalKg = 0;
-    for (const pedido of pedidos) {
-      const productos = pedido.productos || '';
-      const kgMatch = productos.match(/(\d+(?:\.\d+)?)\s*kg/gi);
-      if (kgMatch) for (const match of kgMatch) { const kg = parseFloat(match); if (!isNaN(kg)) totalKg += kg; }
-    }
-    const ultimaCompra = pedidos.length > 0 ? pedidos[0].fecha : '';
+    const pedidosIndex = buildPedidosIndex(pedidosRows);
+    const pedidosCliente = pedidosIndex[whatsapp] || [];
+    const stats = calcularStats(pedidosCliente);
 
     await sheets.batchUpdate([
-      { range: `Clientes!K${clienteRow}`, value: ultimaCompra },
-      { range: `Clientes!L${clienteRow}`, value: totalPedidos },
-      { range: `Clientes!M${clienteRow}`, value: totalComprado },
-      { range: `Clientes!N${clienteRow}`, value: totalKg }
+      { range: `Clientes!K${clienteRow}`, value: stats.ultimaCompra },
+      { range: `Clientes!L${clienteRow}`, value: stats.totalPedidos },
+      { range: `Clientes!M${clienteRow}`, value: stats.totalComprado },
+      { range: `Clientes!N${clienteRow}`, value: stats.totalKg }
     ]);
 
-    res.json({ success: true, stats: { totalPedidos, totalComprado, totalKg, ultimaCompra } });
+    res.json({ success: true, stats });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
