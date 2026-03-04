@@ -1,6 +1,6 @@
 /**
  * PEDIDOS ROUTER - Gestión completa de pedidos
- * ACTUALIZACIÓN: Eliminación física de pedidos PENDIENTES
+ * ACTUALIZACIÓN: Filtro 'vista' para paginación eficiente desde la app
  * FIX: getRows() solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
  */
 
@@ -44,12 +44,51 @@ function serializeEvidencias(evidencias) {
   return JSON.stringify(evidencias);
 }
 
+/**
+ * Determina el estado de pago efectivo de un pedido
+ * (misma lógica que EstadoPagoHelper en Flutter)
+ */
+function determinarEstadoPago(pedido) {
+  // Si tiene estadoPago explícito, usarlo
+  const estadoPagoExplicito = (pedido.estadoPago || '').toUpperCase();
+  if (estadoPagoExplicito && estadoPagoExplicito !== '' && estadoPagoExplicito !== 'PENDIENTE_PAGO') {
+    // Si es PAGADO o PARCIAL, respetar
+    if (estadoPagoExplicito === 'PAGADO' || estadoPagoExplicito === 'PARCIAL') {
+      return estadoPagoExplicito;
+    }
+  }
+
+  const total = pedido.total || 0;
+  const montoPagado = pedido.montoPagado || 0;
+
+  if (montoPagado >= total && total > 0) return 'PAGADO';
+  if (montoPagado > 0 && montoPagado < total) return 'PARCIAL';
+
+  // Inferir de evidencias (compatibilidad hacia atrás)
+  const evidencias = pedido.evidencias || [];
+  if (evidencias.length > 0) return 'PAGADO';
+
+  return 'PENDIENTE_PAGO';
+}
+
 // ==================== GET PEDIDOS ====================
 
+/**
+ * GET /:businessId
+ * 
+ * Query params:
+ *   - vista: PENDIENTES | HISTORIAL | POR_COBRAR | PAGADOS (filtro compuesto)
+ *   - estado: filtro directo por estado del pedido
+ *   - estadoPago: filtro directo por estado de pago
+ *   - cliente: búsqueda por nombre de cliente
+ *   - fecha: filtro por fecha exacta
+ *   - pagina: número de página (default 1)
+ *   - limite: pedidos por página (default 50)
+ */
 router.get('/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado, cliente, fecha, pagina = 1, limite = 50 } = req.query;
+    const { estado, estadoPago, cliente, fecha, vista, pagina = 1, limite = 50 } = req.query;
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
@@ -81,14 +120,49 @@ router.get('/:businessId', async (req, res) => {
         tipoEnvio: row[12] || '',
         empresaEnvio: row[13] || '',
         origen: row[14] || 'BOT',
-        // NUEVOS CAMPOS DE PAGO
+        // CAMPOS DE PAGO
         estadoPago: row[15] || 'PENDIENTE_PAGO',
         montoPagado: parseFloat(row[16]) || 0,
         fechaPago: row[17] || '',
         rowIndex: i + 1
       };
 
+      // ========== FILTRO POR VISTA (compuesto) ==========
+      if (vista) {
+        const estadoUpper = pedido.estado.toUpperCase();
+        const estadoPagoEfectivo = determinarEstadoPago(pedido);
+
+        switch (vista.toUpperCase()) {
+          case 'PENDIENTES':
+            // Pedidos activos (no completados ni cancelados)
+            if (estadoUpper === 'COMPLETADO' || estadoUpper === 'CANCELADO') continue;
+            break;
+
+          case 'HISTORIAL':
+            // Pedidos terminados
+            if (estadoUpper !== 'COMPLETADO' && estadoUpper !== 'CANCELADO') continue;
+            break;
+
+          case 'POR_COBRAR':
+            // Completados que NO están pagados (excluye cancelados)
+            if (estadoUpper !== 'COMPLETADO') continue;
+            if (estadoPagoEfectivo === 'PAGADO') continue;
+            break;
+
+          case 'PAGADOS':
+            // Completados/Cancelados que SÍ están pagados
+            if (estadoUpper !== 'COMPLETADO' && estadoUpper !== 'CANCELADO') continue;
+            if (estadoPagoEfectivo !== 'PAGADO') continue;
+            break;
+        }
+      }
+
+      // ========== FILTROS DIRECTOS (compatibilidad) ==========
       if (estado && pedido.estado !== estado) continue;
+      if (estadoPago) {
+        const estadoPagoEfectivo = determinarEstadoPago(pedido);
+        if (estadoPagoEfectivo !== estadoPago.toUpperCase()) continue;
+      }
       if (cliente && !pedido.cliente.toLowerCase().includes(cliente.toLowerCase())) continue;
       if (fecha && pedido.fecha !== fecha) continue;
 
