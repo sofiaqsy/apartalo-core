@@ -577,11 +577,32 @@ async function cerrarConversacionAsesor(from, context) {
 }
 
 // ============================================
-// CAFÉ GRATIS (placeholder)
+// CAFÉ GRATIS
 // ============================================
+
+/**
+ * Returns the re-prompt question for the current muestra step.
+ */
+function getPreguntaActualMuestra(step) {
+  switch (step) {
+    case 'cafe_gratis_empresa':   return '¿Cuál es el nombre de tu cafetería o negocio?';
+    case 'cafe_gratis_nombre':    return '¿Cuál es tu nombre completo?';
+    case 'cafe_gratis_direccion': return '¿Cuál es tu dirección completa para el envío?\n_Incluye distrito_';
+    case 'cafe_gratis_telefono':  return '¿Cuál es tu número de teléfono?';
+    default: return '¿En qué te puedo ayudar?';
+  }
+}
 
 async function procesarCafeGratis(from, context) {
   const { whatsapp, stateManager, negocio } = context;
+  const state = stateManager.getState(from, negocio.id);
+
+  // Already collecting muestra data — just re-prompt the current question
+  // instead of sending the intro again (prevents duplicate intro messages).
+  if (state.step.startsWith('cafe_gratis_')) {
+    await whatsapp.sendMessage(from, getPreguntaActualMuestra(state.step));
+    return;
+  }
 
   await whatsapp.sendMessage(from,
     `🎁 *¡MUESTRA GRATIS!*\n\n` +
@@ -599,6 +620,40 @@ async function procesarCafeGratis(from, context) {
 async function continuarFlujoCafeGratis(from, text, context) {
   const { whatsapp, sheets, stateManager, negocio } = context;
   const state = stateManager.getState(from, negocio.id);
+
+  // ── Context-switch detection ──────────────────────────────────────────────
+  // If the user asks about prices or the catalog while we're collecting muestra
+  // data, show the info briefly and then re-ask the current question.
+  const esConsultaPrecios = /precio|costo|cuanto|catálogo|catalogo|tarifas?/i.test(text);
+  const esContactar = /contactar|asesor|hablar con|persona/i.test(text);
+
+  if (esConsultaPrecios) {
+    try {
+      const productos = await sheets.getProductos('ACTIVO');
+      let respuesta = `*PRECIOS FINCA ROSAL*\n\n`;
+      productos.forEach(p => {
+        respuesta += `• ${p.nombre}: S/${p.precio}/kg\n`;
+      });
+      respuesta += `\nPedido mínimo: 5kg\n`;
+      respuesta += `\n---\n${getPreguntaActualMuestra(state.step)}`;
+      await whatsapp.sendMessage(from, respuesta);
+    } catch (e) {
+      await whatsapp.sendMessage(from,
+        `Para consultar precios completos escribe *CONTACTAR FINCA*.\n\n` +
+        getPreguntaActualMuestra(state.step)
+      );
+    }
+    return;
+  }
+
+  if (esContactar) {
+    await whatsapp.sendMessage(from,
+      `Para hablar con un asesor escribe *CONTACTAR FINCA*.\n\n` +
+      getPreguntaActualMuestra(state.step)
+    );
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   switch (state.step) {
     case 'cafe_gratis_empresa':
