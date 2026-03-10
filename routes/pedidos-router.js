@@ -1,6 +1,7 @@
 /**
  * PEDIDOS ROUTER - Gestión completa de pedidos
  * ACTUALIZACIÓN: Filtro 'vista' para paginación eficiente desde la app
+ * ACTUALIZACIÓN: Pagos parciales acumulados (col S = JSON array de pagos)
  * FIX: getRows() solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
  */
 
@@ -10,7 +11,7 @@ const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 
-// ==================== HELPER PARA PARSEAR EVIDENCIAS ====================
+// ==================== HELPERS ====================
 
 /**
  * Parsea el campo de evidencias desde string JSON o formato antiguo
@@ -19,12 +20,10 @@ function parseEvidencias(voucherUrlsRaw) {
   if (!voucherUrlsRaw || voucherUrlsRaw.trim() === '') return [];
   
   try {
-    // Intentar parsear como JSON
     const parsed = JSON.parse(voucherUrlsRaw);
     if (Array.isArray(parsed)) return parsed;
     return [];
   } catch (e) {
-    // Formato antiguo: URLs separadas por coma o salto de línea
     const urls = voucherUrlsRaw.split(/[,\n]/).map(u => u.trim()).filter(u => u);
     return urls.map((url, index) => ({
       id: `ev_legacy_${index}`,
@@ -45,14 +44,33 @@ function serializeEvidencias(evidencias) {
 }
 
 /**
+ * Parsea el historial de pagos parciales (col S) desde string JSON
+ */
+function parsePagos(pagosRaw) {
+  if (!pagosRaw || pagosRaw.trim() === '') return [];
+  try {
+    const parsed = JSON.parse(pagosRaw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Serializa el array de pagos a JSON para guardar en la hoja
+ */
+function serializePagos(pagos) {
+  if (!pagos || pagos.length === 0) return '';
+  return JSON.stringify(pagos);
+}
+
+/**
  * Determina el estado de pago efectivo de un pedido
  * (misma lógica que EstadoPagoHelper en Flutter)
  */
 function determinarEstadoPago(pedido) {
-  // Si tiene estadoPago explícito, usarlo
   const estadoPagoExplicito = (pedido.estadoPago || '').toUpperCase();
   if (estadoPagoExplicito && estadoPagoExplicito !== '' && estadoPagoExplicito !== 'PENDIENTE_PAGO') {
-    // Si es PAGADO o PARCIAL, respetar
     if (estadoPagoExplicito === 'PAGADO' || estadoPagoExplicito === 'PARCIAL') {
       return estadoPagoExplicito;
     }
@@ -64,7 +82,6 @@ function determinarEstadoPago(pedido) {
   if (montoPagado >= total && total > 0) return 'PAGADO';
   if (montoPagado > 0 && montoPagado < total) return 'PARCIAL';
 
-  // Inferir de evidencias (compatibilidad hacia atrás)
   const evidencias = pedido.evidencias || [];
   if (evidencias.length > 0) return 'PAGADO';
 
@@ -75,7 +92,7 @@ function determinarEstadoPago(pedido) {
 
 /**
  * GET /:businessId
- * 
+ *
  * Query params:
  *   - vista: PENDIENTES | HISTORIAL | POR_COBRAR | PAGADOS (filtro compuesto)
  *   - estado: filtro directo por estado del pedido
@@ -96,8 +113,8 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Actualizado: A:R para incluir estadoPago, montoPagado, fechaPago
-    const rows = await sheets.getRows('Pedidos!A:R');
+    // A:S incluye estadoPago (P), montoPagado (Q), fechaPago (R), pagos (S)
+    const rows = await sheets.getRows('Pedidos!A:S');
 
     let pedidos = [];
     for (let i = 1; i < rows.length; i++) {
@@ -124,6 +141,8 @@ router.get('/:businessId', async (req, res) => {
         estadoPago: row[15] || 'PENDIENTE_PAGO',
         montoPagado: parseFloat(row[16]) || 0,
         fechaPago: row[17] || '',
+        // HISTORIAL DE PAGOS PARCIALES (col S)
+        pagos: parsePagos(row[18]),
         rowIndex: i + 1
       };
 
@@ -134,23 +153,19 @@ router.get('/:businessId', async (req, res) => {
 
         switch (vista.toUpperCase()) {
           case 'PENDIENTES':
-            // Pedidos activos (no completados ni cancelados)
             if (estadoUpper === 'COMPLETADO' || estadoUpper === 'CANCELADO') continue;
             break;
 
           case 'HISTORIAL':
-            // Pedidos terminados
             if (estadoUpper !== 'COMPLETADO' && estadoUpper !== 'CANCELADO') continue;
             break;
 
           case 'POR_COBRAR':
-            // Completados que NO están pagados (excluye cancelados)
             if (estadoUpper !== 'COMPLETADO') continue;
             if (estadoPagoEfectivo === 'PAGADO') continue;
             break;
 
           case 'PAGADOS':
-            // Completados/Cancelados que SÍ están pagados
             if (estadoUpper !== 'COMPLETADO' && estadoUpper !== 'CANCELADO') continue;
             if (estadoPagoEfectivo !== 'PAGADO') continue;
             break;
@@ -201,7 +216,7 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:R');
+    const rows = await sheets.getRows('Pedidos!A:S');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
@@ -224,6 +239,7 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
           estadoPago: rows[i][15] || 'PENDIENTE_PAGO',
           montoPagado: parseFloat(rows[i][16]) || 0,
           fechaPago: rows[i][17] || '',
+          pagos: parsePagos(rows[i][18]),
           rowIndex: i + 1
         });
       }
@@ -260,10 +276,8 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
-        // Obtener evidencias actuales
         const evidenciasActuales = parseEvidencias(rows[i][10]);
         
-        // Crear nueva evidencia
         const nuevaEvidencia = {
           id: `ev_${Date.now()}`,
           url,
@@ -272,10 +286,8 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
           descripcion: descripcion || ''
         };
         
-        // Agregar a la lista
         evidenciasActuales.push(nuevaEvidencia);
         
-        // Guardar en la hoja
         await sheets.updateCell(`Pedidos!K${i + 1}`, serializeEvidencias(evidenciasActuales));
         
         console.log(`✅ Evidencia agregada al pedido ${pedidoId}`);
@@ -343,17 +355,14 @@ router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res)
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
-        // Obtener evidencias actuales
         let evidencias = parseEvidencias(rows[i][10]);
         
-        // Filtrar la evidencia a eliminar
         const evidenciasFiltradas = evidencias.filter(e => e.id !== evidenciaId);
         
         if (evidencias.length === evidenciasFiltradas.length) {
           return res.status(404).json({ error: 'Evidencia no encontrada' });
         }
         
-        // Guardar en la hoja
         await sheets.updateCell(`Pedidos!K${i + 1}`, serializeEvidencias(evidenciasFiltradas));
         
         console.log(`🗑️ Evidencia ${evidenciaId} eliminada del pedido ${pedidoId}`);
@@ -388,7 +397,6 @@ router.post('/:businessId', async (req, res) => {
       tipoEnvio,
       empresaEnvio,
       notificarCliente,
-      // Nuevos campos de pago
       estadoPago,
       montoPagado
     } = req.body;
@@ -425,7 +433,6 @@ router.post('/:businessId', async (req, res) => {
 
     const totalFinal = total || totalCalculado;
 
-    // Valores actualizados con campos de pago
     const valores = [
       pedidoId,
       fecha,
@@ -436,20 +443,20 @@ router.post('/:businessId', async (req, res) => {
       direccion || '',
       productosTexto,
       totalFinal,
-      'PENDIENTE', // estado
-      '', // evidencias (vacío inicialmente)
+      'PENDIENTE',
+      '',
       observaciones || '',
       tipoEnvio || '',
       empresaEnvio || '',
-      'APP', // origen
+      'APP',
       estadoPago || 'PENDIENTE_PAGO', // P - estadoPago
-      montoPagado || 0, // Q - montoPagado
-      '' // R - fechaPago (vacío inicialmente)
+      montoPagado || 0,               // Q - montoPagado
+      '',                             // R - fechaPago
+      ''                              // S - pagos (historial, vacío al inicio)
     ];
 
     await sheets.appendRow('Pedidos', valores);
 
-    // Actualizar stock si hay productos con código
     if (Array.isArray(productos)) {
       for (const p of productos) {
         if (p.codigo) {
@@ -470,7 +477,6 @@ router.post('/:businessId', async (req, res) => {
       }
     }
 
-    // Notificar al cliente si se solicita
     if (notificarCliente) {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
@@ -497,7 +503,8 @@ router.post('/:businessId', async (req, res) => {
         evidencias: [],
         estadoPago: estadoPago || 'PENDIENTE_PAGO',
         montoPagado: montoPagado || 0,
-        fechaPago: ''
+        fechaPago: '',
+        pagos: []
       }
     });
   } catch (error) {
@@ -519,10 +526,13 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
       empresaEnvio,
       voucherUrls,
       notificarCliente,
-      // NUEVOS: campos de pago
+      // Campos de pago
       estadoPago,
       montoPagado,
-      fechaPago
+      fechaPago,
+      // NUEVO: pago parcial a acumular
+      nuevoPago,
+      notaPago
     } = req.body;
 
     const negocio = negociosService.getById(businessId);
@@ -531,14 +541,14 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:R');
+    const rows = await sheets.getRows('Pedidos!A:S');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         const updates = [];
         const rowNum = i + 1;
 
-        // Campos existentes
+        // Campos generales
         if (estado !== undefined) updates.push({ range: `Pedidos!J${rowNum}`, value: estado });
         if (observaciones !== undefined) updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones });
         if (direccion !== undefined) updates.push({ range: `Pedidos!G${rowNum}`, value: direccion });
@@ -546,23 +556,38 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
         if (empresaEnvio !== undefined) updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio });
         if (voucherUrls !== undefined) updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls });
 
-        // NUEVOS: campos de pago
+        // Estado de pago
         if (estadoPago !== undefined) {
           updates.push({ range: `Pedidos!P${rowNum}`, value: estadoPago });
-          
-          // Si se marca como PAGADO, registrar fecha automáticamente
           if (estadoPago === 'PAGADO' && !fechaPago) {
-            updates.push({ 
-              range: `Pedidos!R${rowNum}`, 
-              value: new Date().toISOString() 
-            });
+            updates.push({ range: `Pedidos!R${rowNum}`, value: new Date().toISOString() });
           }
         }
-        
-        if (montoPagado !== undefined) {
+
+        // NUEVO: acumular pago parcial en historial (col S)
+        if (nuevoPago !== undefined && parseFloat(nuevoPago) > 0) {
+          const pagosActuales = parsePagos(rows[i][18]); // col S
+          pagosActuales.push({
+            id: `pago_${Date.now()}`,
+            monto: parseFloat(nuevoPago),
+            fecha: new Date().toISOString(),
+            nota: notaPago || ''
+          });
+          const nuevoMontoPagadoTotal = pagosActuales.reduce(
+            (sum, p) => sum + (parseFloat(p.monto) || 0), 0
+          );
+          updates.push({ range: `Pedidos!Q${rowNum}`, value: nuevoMontoPagadoTotal });
+          updates.push({ range: `Pedidos!S${rowNum}`, value: serializePagos(pagosActuales) });
+          console.log(`   → Nuevo pago: S/ ${nuevoPago} | Total acumulado: S/ ${nuevoMontoPagadoTotal}`);
+        } else if (montoPagado !== undefined) {
+          // Reemplazo directo (usado para revertir: montoPagado=0)
           updates.push({ range: `Pedidos!Q${rowNum}`, value: montoPagado });
+          if (parseFloat(montoPagado) === 0) {
+            // Limpiar historial al revertir
+            updates.push({ range: `Pedidos!S${rowNum}`, value: '' });
+          }
         }
-        
+
         if (fechaPago !== undefined) {
           updates.push({ range: `Pedidos!R${rowNum}`, value: fechaPago });
         }
@@ -571,7 +596,6 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
           await sheets.batchUpdate(updates);
         }
 
-        // Notificación al cliente por cambio de estado
         if (notificarCliente && estado) {
           try {
             const whatsappService = new WhatsAppService(negocio.whatsapp);
@@ -596,7 +620,6 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
 
         console.log(`✅ Pedido ${pedidoId} actualizado`);
         if (estadoPago) console.log(`   → Estado de pago: ${estadoPago}`);
-        if (montoPagado !== undefined) console.log(`   → Monto pagado: S/ ${montoPagado}`);
 
         return res.json({
           success: true,
@@ -624,14 +647,12 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // Obtener el pedido completo para verificar su estado
     const rows = await sheets.getRows('Pedidos!A:J');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         const estado = (rows[i][9] || 'PENDIENTE').toString().toUpperCase();
         
-        // VALIDAR: Solo permitir eliminar pedidos PENDIENTES
         if (estado !== 'PENDIENTE') {
           return res.status(403).json({ 
             error: 'Solo se pueden eliminar pedidos en estado PENDIENTE',
@@ -640,11 +661,9 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
           });
         }
 
-        // ELIMINACIÓN FÍSICA: Borrar la fila usando Google Sheets API
-        const rowNumber = i + 1; // +1 porque las filas empiezan en 1
+        const rowNumber = i + 1;
         
         try {
-          // Obtener el sheetId de la hoja "Pedidos"
           const spreadsheetData = await sheets.sheets.spreadsheets.get({
             spreadsheetId: sheets.spreadsheetId
           });
@@ -659,7 +678,6 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
           
           const sheetId = pedidosSheet.properties.sheetId;
           
-          // Eliminar la fila físicamente
           await sheets.sheets.spreadsheets.batchUpdate({
             spreadsheetId: sheets.spreadsheetId,
             resource: {
@@ -668,8 +686,8 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
                   range: {
                     sheetId: sheetId,
                     dimension: 'ROWS',
-                    startIndex: rowNumber - 1, // 0-indexed
-                    endIndex: rowNumber // exclusive
+                    startIndex: rowNumber - 1,
+                    endIndex: rowNumber
                   }
                 }
               }]
