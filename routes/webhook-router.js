@@ -31,6 +31,26 @@ const PREFIJOS_NEGOCIOS = {
 
 const DEFAULT_BUSINESS_ID = 'BIZ-002';
 
+// ============================================
+// DEDUPLICACIÓN DE MENSAJES
+// ============================================
+
+// WhatsApp a veces re-envía el mismo webhook. Guardamos IDs procesados por 5 min.
+const processedMessageIds = new Map(); // messageId -> timestamp
+const DEDUP_TTL_MS = 5 * 60 * 1000;
+
+function isDuplicateMessage(messageId) {
+  if (!messageId) return false;
+  const now = Date.now();
+  // Limpiar IDs viejos
+  for (const [id, ts] of processedMessageIds.entries()) {
+    if (now - ts > DEDUP_TTL_MS) processedMessageIds.delete(id);
+  }
+  if (processedMessageIds.has(messageId)) return true;
+  processedMessageIds.set(messageId, now);
+  return false;
+}
+
 async function initializeHandlers() {
   await negociosService.initialize();
   
@@ -215,6 +235,14 @@ async function processWebhook(body, negocio, useSharedCredentials = false) {
  */
 function enqueueMessage(message, negocio, useSharedCredentials) {
   const from = message.from;
+  const messageId = message.id;
+
+  // Dedup: ignorar si este message ID ya fue procesado (WhatsApp re-envía webhooks)
+  if (isDuplicateMessage(messageId)) {
+    console.log(`   ⚡ Mensaje duplicado ignorado: ${messageId}`);
+    return;
+  }
+
   const { text, mediaId, type, interactiveData } = extractMessageContent(message);
 
   // Para mensajes no-texto (imagen, audio, botón) procesamos sin esperar debounce adicional
