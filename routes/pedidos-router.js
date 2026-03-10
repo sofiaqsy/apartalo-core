@@ -133,7 +133,8 @@ router.get('/:businessId', async (req, res) => {
         const estadoUpper = pedido.estado.toUpperCase();
         const estadoPagoEfectivo = determinarEstadoPago(pedido);
         const observacionesUpper = pedido.observaciones.toUpperCase();
-        const esMuestra = observacionesUpper.includes('MUESTRA');
+        // Muestra = tiene 'MUESTRA' en observaciones O total es 0
+        const esMuestra = observacionesUpper.includes('MUESTRA') || pedido.total === 0;
 
         switch (vista.toUpperCase()) {
           case 'PENDIENTES':
@@ -157,7 +158,7 @@ router.get('/:businessId', async (req, res) => {
             break;
 
           case 'MUESTRAS':
-            // Only orders marked as muestra gratis
+            // Pedidos de muestra: con 'MUESTRA' en observaciones o total = 0
             if (!esMuestra) continue;
             break;
         }
