@@ -20,14 +20,23 @@ class AIMuestraService {
       return false;
     }
     this.initialized = true;
-    console.log('\u2705 AIMuestraService inicializado con GROQ + RAG');
+    console.log('✅ AIMuestraService inicializado con GROQ + RAG');
     return true;
   }
 
-  async procesarMensajeMuestra(mensaje, context, historial = [], datosCliente = null) {
+  /**
+   * @param {string} mensaje - Current user message
+   * @param {object} context - Handler context (must include context.from and context.negocio)
+   * @param {Array}  historial - Optional chat history array
+   * @param {object} datosCliente - Optional pre-fetched client data
+   * @param {boolean} yaSePresento - Whether the bot has already introduced itself this session.
+   *                                 Use stateManager data, NOT historial.length, to avoid
+   *                                 re-introducing when Firestore lags and historial appears empty.
+   */
+  async procesarMensajeMuestra(mensaje, context, historial = [], datosCliente = null, yaSePresento = false) {
     if (!this.initialized && !this.initialize()) {
       return {
-        respuesta: 'El servicio no est\u00e1 disponible en este momento.',
+        respuesta: 'El servicio no está disponible en este momento.',
         datosExtraidos: null,
         muestraCompleta: false,
         error: true
@@ -36,9 +45,14 @@ class AIMuestraService {
 
     const { negocio } = context;
     const whatsapp = datosCliente?.whatsapp || context.from || null;
-    const esPrimerMensaje = historial.length === 0;
 
-    console.log('\ud83e\udde0 Recuperando memoria del cliente para muestra...');
+    // Use yaSePresento (from stateManager) instead of historial.length to decide
+    // whether to include the self-introduction in the prompt.
+    // historial.length === 0 was unreliable because Firestore writes from a prior
+    // message might not have completed before the next message reads history.
+    const esPrimerMensaje = !yaSePresento;
+
+    console.log('🧠 Recuperando memoria del cliente para muestra...');
     const contextoCliente = await clienteContextService.obtenerContextoCompleto(whatsapp, context);
     const systemPrompt = this.construirSystemPromptMuestraConMemoria(negocio, contextoCliente, esPrimerMensaje);
     const messages = this.construirMensajes(systemPrompt, historial, mensaje);
@@ -47,7 +61,7 @@ class AIMuestraService {
       const response = await axios.post(this.baseUrl, {
         model: 'llama-3.3-70b-versatile',
         messages: messages,
-        max_tokens: 200,
+        max_tokens: 250,
         temperature: 0.3
       }, {
         headers: {
@@ -80,7 +94,7 @@ class AIMuestraService {
     } catch (error) {
       console.error('Error en AI Muestra:', error.response?.data || error.message);
       return {
-        respuesta: 'Ocurri\u00f3 un error. Por favor intenta de nuevo.',
+        respuesta: 'Ocurrió un error. Por favor intenta de nuevo.',
         datosExtraidos: null,
         muestraCompleta: false,
         error: true
@@ -91,20 +105,24 @@ class AIMuestraService {
   construirSystemPromptMuestraConMemoria(negocio, contextoCliente, esPrimerMensaje) {
     const instruccionContacto = esPrimerMensaje
       ? `- Es el primer mensaje: menciona brevemente que eres el asistente virtual de ${negocio.nombre} y que pueden escribir CONTACTAR FINCA si tienen otras consultas.`
-      : `- NO te presentes ni repitas que eres asistente. Ya se dijo.\n- Solo menciona CONTACTAR FINCA si el cliente pregunta algo fuera del programa de muestras.`;
+      : `- NO te presentes ni repitas que eres asistente. Ya se dijo.\n- Solo menciona CONTACTAR FINCA si el cliente pregunta algo completamente fuera del café o las muestras.`;
 
-    return `Eres el asistente virtual de ${negocio.nombre}, especializado UNICAMENTE en el programa de muestras gratis de cafe.
+    return `Eres el asistente virtual de ${negocio.nombre}, especializado en el programa de muestras gratis de cafe.
 
 CONTEXTO DEL CLIENTE:
 ${contextoCliente}
 
 ROL Y LIMITES:
 - Eres un asistente virtual (bot), no una persona
-- SOLO puedes hablar de: muestras gratis, cafe de Finca Rosal, datos de entrega
-- Si el cliente pregunta algo fuera de este tema, responde: "Solo puedo ayudarte con el programa de muestras. Escribe CONTACTAR FINCA para otras consultas."
-${instruccionContacto}
+- Tu objetivo principal: recopilar los datos de entrega para enviar la muestra gratis
 - Sin emojis
 - Respuestas MUY CORTAS: maxima 2 oraciones. De frente al punto, sin relleno
+${instruccionContacto}
+
+SOBRE PREGUNTAS DE PRECIOS O PRODUCTOS:
+- Si el cliente pregunta por precios o catalogo: da una respuesta muy breve (1 oracion) mencionando que el cafe es premium de Villa Rica, Peru, y luego pide el dato que falta para la muestra.
+- Ejemplo: "Nuestro cafe premium de Villa Rica esta desde S/35/kg. Para enviarte la muestra necesito el nombre de tu negocio."
+- Si pregunta sobre un tema completamente ajeno al cafe, responde: "Solo puedo ayudarte con el programa de muestras. Escribe CONTACTAR FINCA para otras consultas."
 
 SOBRE EL PROGRAMA:
 - Muestra gratis de 500g para cafeterias y negocios gastronomicos
@@ -112,16 +130,17 @@ SOBRE EL PROGRAMA:
 - Cafe premium de Villa Rica, Peru
 
 DATOS A RECOPILAR:
-1. empresa: nombre del negocio
+1. empresa: nombre del negocio o cafeteria
 2. nombre_contacto: nombre completo del contacto
 3. direccion: direccion con distrito (ej: Av. Larco 123, Miraflores)
 4. telefono: 9 digitos
 
 REGLAS:
-- Extrae todos los datos que el cliente de en un mensaje
+- Extrae TODOS los datos que el cliente mencione en el mensaje, aunque sea de forma conversacional
 - Si ya tiene datos registrados, usalos
 - Pregunta solo por lo que falta
 - Valida: direccion debe tener distrito, telefono exactamente 9 digitos
+- Si el cliente ya dio su nombre y empresa en el mensaje inicial, no los pidas de nuevo
 
 FORMATO - responde en DOS bloques separados por ---DATA---
 
