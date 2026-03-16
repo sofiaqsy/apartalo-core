@@ -44,8 +44,16 @@ function getPeruDateTime() {
  * @param {Object} negociosService - Instancia del servicio de negocios para obtener BIZ-005
  */
 async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
+  // ── DEBUG: siempre loguear para diagnóstico ───────────────────────────────
+  console.log(`[Delivery] 🔍 Hook disparado para negocio: ${negocioOrigen?.id} (${negocioOrigen?.nombre})`);
+  console.log(`[Delivery] 🔍 configExtra:`, JSON.stringify(negocioOrigen?.configExtra));
+
   const deliveryBizId = negocioOrigen?.configExtra?.deliveryBizId;
-  if (!deliveryBizId) return; // Este negocio no usa delivery
+  if (!deliveryBizId) {
+    console.log(`[Delivery] ⏭️ Sin deliveryBizId en configExtra → se omite`);
+    return;
+  }
+  console.log(`[Delivery] ✅ deliveryBizId encontrado: ${deliveryBizId}`);
 
   const negocioDelivery = negociosService.getById(deliveryBizId);
   if (!negocioDelivery) {
