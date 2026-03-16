@@ -8,6 +8,8 @@ const { formatPrice, getGreeting, generateId, formatOrderStatus } = require('../
 const { detectarDepartamento } = require('../../core/utils/ciudades');
 const aiService = require('../../core/services/ai-service');
 const config = require('../../config');
+const negociosService = require('../../config/negocios');
+const deliveryService = require('../../core/services/delivery-service');
 
 // Inicializar IA al cargar
 aiService.initialize().catch(console.error);
@@ -766,6 +768,14 @@ async function crearPedido(from, context, cliente) {
 
   stateManager.updateData(from, negocio.id, { pedidoId: pedido.id });
   stateManager.setStep(from, negocio.id, 'esperando_voucher');
+
+  // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
+  const productosStr = `${productoSeleccionado.nombre} x${cantidad}`;
+  deliveryService.notificarNuevoDelivery(
+    { id: pedido.id, whatsapp: from, cliente: cliente.nombre || '', telefono: cliente.telefono || '', direccion: cliente.direccion || '', productos: productosStr, total },
+    negocio,
+    negociosService
+  ).catch(e => console.error('⚠️ [Delivery] Error en hook estandar:', e.message));
 }
 
 // ============================================

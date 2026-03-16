@@ -10,6 +10,8 @@ const { getGreeting, generateId } = require('../../core/utils/formatters');
 const aiOrderService = require('../../core/services/ai-order-service');
 const config = require('../../config');
 const { mergeDatasSinNull, formatearProductosParaSheets } = require('./utils');
+const negociosService = require('../../config/negocios');
+const deliveryService = require('../../core/services/delivery-service');
 
 async function iniciarPedidoConversacionalDirecto(from, mensaje, context, cfg) {
   const { whatsapp, stateManager, negocio } = context;
@@ -302,6 +304,15 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     });
     
     console.log('Order created:', pedidoId);
+
+    // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
+    const productosStr = productosParaPedido.map(p => `${p.nombre} x${p.cantidad}`).join(', ');
+    deliveryService.notificarNuevoDelivery(
+      { id: pedidoId, whatsapp: from, cliente: nombreCliente || '', telefono: telefono || '', direccion: direccion || '', productos: productosStr, total },
+      negocio,
+      negociosService
+    ).catch(e => console.error('⚠️ [Delivery] Error en hook unificado:', e.message));
+
   } catch (e) {
     console.error('Error guardando pedido:', e.message);
   }

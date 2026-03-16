@@ -10,6 +10,7 @@ const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
 const firebaseService = require('../core/services/firebase-service');
+const deliveryService = require('../core/services/delivery-service');
 
 function parseDecimal(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -375,6 +376,13 @@ router.post('/pedidos/:businessId', async (req, res) => {
     } catch (e) {
       console.log('⚠️ Error enviando push notification:', e.message);
     }
+
+    // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
+    deliveryService.notificarNuevoDelivery(
+      { id: pedidoId, whatsapp: (whatsapp || '').replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', productos: productosStr, total: totalNumero },
+      negocio,
+      negociosService
+    ).catch(e => console.error('⚠️ [Delivery] Error en hook API:', e.message));
 
     console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal}`);
     res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha: fechaPeru, hora: horaPeru, whatsapp, cliente, productos: productosStr, total: totalNumero, estado: estadoFinal, origen: origenFinal } });
