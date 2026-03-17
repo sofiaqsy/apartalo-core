@@ -192,7 +192,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       `Tienda: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
       `Origen: ${originLabel}\n` +
       `Destino: ${destination}\n` +
-      `Productos: ${pedido.productos || ''}\n\n` +
+      `Productos: ${(pedido.productos || '').replace(/ - S\/[\d.]+/g, '')}\n\n` +
       `Ruta: ${mapsUrl}`;
 
     const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'Si, lo tomo' }];
