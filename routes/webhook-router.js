@@ -367,6 +367,17 @@ async function processMessage(message, negocio, useSharedCredentials = false, te
     return;
   }
 
+  // ── Delivery business: handle courier messages ────────────────────────────
+  if (context.negocio?.configExtra?.isDeliveryBusiness) {
+    const deliveryHandler = require('../handlers/delivery/index');
+    try {
+      await deliveryHandler.handle(from, text, context);
+    } catch (e) {
+      console.error('❌ Error en delivery handler:', e.message);
+    }
+    return;
+  }
+
   try {
     await handler.handle(from, { text, mediaId, type, interactiveData, raw: message }, context);
   } catch (error) {
