@@ -429,6 +429,7 @@ router.post('/:businessId', async (req, res) => {
     }
 
     // 🚚 Notify delivery business if applicable (fire-and-forget)
+    console.log(`[Pedido] ciudad="${ciudad || ''}" departamento="${departamento || ''}" direccion="${direccion || ''}"`);
     deliveryService.notificarNuevoDelivery(
       { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', ciudad: ciudad || '', departamento: departamento || '', productos: productosTexto, total: totalFinal },
       negocio,
