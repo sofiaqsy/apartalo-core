@@ -99,17 +99,21 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   try {
     const clientSheets = new SheetsService(negocioOrigen.spreadsheetId);
     await clientSheets.initialize();
-    const clientRows = await clientSheets.getRows('Clientes!A:I');
+    const clientRows = await clientSheets.getRows('Clientes!A:V');
     const waClean = (pedido.whatsapp || '').replace(/[^0-9]/g, '');
     for (let i = 1; i < clientRows.length; i++) {
       const rowWa = (clientRows[i][1] || '').replace(/[^0-9]/g, '');
       if (rowWa && rowWa === waClean) {
-        const clientDireccion = (clientRows[i][6] || '').trim();   // col G
-        const clientDepartamento = (clientRows[i][7] || '').trim(); // col H
-        const clientDistrito = (clientRows[i][8] || '').trim();     // col I
+        const r = clientRows[i];
+        // Prefer delivery-specific fields, fall back to main fields
+        const clientDireccion    = (r[18] || r[6]  || '').trim(); // direccionEnvio   > direccion      (col S > G)
+        const clientDistrito     = (r[19] || r[8]  || '').trim(); // distritoEnvio    > distrito       (col T > I)
+        const clientDepartamento = (r[20] || r[7]  || '').trim(); // departamentoEnvio > departamento  (col U > H)
+        const clientNombre       = (r[2]  || r[3]  || '').trim(); // nombreNegocio    > nombreResponsable
+
         if (clientDireccion) destination = clientDistrito ? `${clientDireccion}, ${clientDistrito}` : clientDireccion;
         if (clientDepartamento) customerCity = clientDepartamento.toLowerCase().trim();
-        console.log(`[Delivery] Client found — direccion="${clientDireccion}" departamento="${clientDepartamento}" distrito="${clientDistrito}"`);
+        console.log(`[Delivery] Client found — nombre="${clientNombre}" direccion="${clientDireccion}" distrito="${clientDistrito}" departamento="${clientDepartamento}"`);
         break;
       }
     }
