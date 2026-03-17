@@ -91,10 +91,11 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   console.log(`[Delivery] Store config — departamento="${bizConfig['departamento'] || ''}" direccion_tienda="${bizConfig['direccion_tienda'] || ''}"`);
   const originDireccion    = bizConfig['direccion_tienda'] || '';
   const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
-  const originForMap = [bizConfig['direccion_tienda'], bizConfig['departamento'], 'Peru'].filter(Boolean).join(', ');
+  const originForMap = `${bizConfig['direccion_tienda'] || ''}, Peru`;
 
   // ── Look up client record from origin business spreadsheet ───────────────
   let destination = (pedido.direccion || '').trim();
+  let rawDireccion = destination; // plain street address for map URL (no district/dept)
   let customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
 
   try {
@@ -112,7 +113,10 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
         const clientDepartamento = (r[20] || r[7]  || '').trim(); // departamentoEnvio > departamento  (col U > H)
         const clientNombre       = (r[2]  || r[3]  || '').trim(); // nombreNegocio    > nombreResponsable
 
-        if (clientDireccion) destination = [clientDireccion, clientDistrito].filter(Boolean).join(', ');
+        if (clientDireccion) {
+          rawDireccion = clientDireccion;
+          destination = [clientDireccion, clientDistrito].filter(Boolean).join(', ');
+        }
         if (clientDepartamento) customerCity = clientDepartamento.toLowerCase().trim();
         console.log(`[Delivery] Client found — nombre="${clientNombre}" direccion="${clientDireccion}" distrito="${clientDistrito}" departamento="${clientDepartamento}"`);
         break;
@@ -180,7 +184,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       return;
     }
 
-    const destinationForMap = [destination, 'Peru'].filter(Boolean).join(', ');
+    const destinationForMap = `${rawDireccion}, Peru`;
     const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originForMap)}/${encodeURIComponent(destinationForMap)}`;
 
     const body =
