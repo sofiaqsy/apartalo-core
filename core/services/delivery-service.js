@@ -1,12 +1,12 @@
 /**
  * DELIVERY SERVICE
  *
- * Cuando se crea un pedido en un negocio con `configExtra.deliveryBizId`,
- * este servicio:
- *   1. Registra el pedido como delivery en el spreadsheet del negocio delivery
- *   2. Hace broadcast por WhatsApp a todos los repartidores (clientes de delivery)
+ * When an order is created in a business with `configExtra.deliveryBizId`,
+ * this service:
+ *   1. Registers the order as a delivery in the delivery business spreadsheet
+ *   2. Broadcasts a WhatsApp message to all couriers (clients of the delivery business)
  *
- * Configuración en configExtra del negocio origen:
+ * Configuration in the origin business configExtra:
  *   { "deliveryBizId": "BIZ-005" }
  */
 
@@ -14,7 +14,7 @@ const SheetsService = require('./sheets-service');
 const WhatsAppService = require('./whatsapp-service');
 
 /**
- * Obtener hora actual en zona horaria Perú (UTC-5)
+ * Get current date/time in Peru timezone (UTC-5)
  */
 function getPeruDateTime() {
   const now = new Date();
@@ -30,47 +30,76 @@ function getPeruDateTime() {
 }
 
 /**
- * Notificar al negocio delivery cuando se crea un pedido en un negocio origen.
+ * Read key-value config from the origin business Configuracion sheet.
+ * Returns an object like { departamento: 'Lima', direccion_tienda: 'Av. ...' }
+ */
+async function getBusinessConfig(spreadsheetId) {
+  try {
+    const sheets = new SheetsService(spreadsheetId);
+    await sheets.initialize();
+    const rows = await sheets.getRows('Configuracion!A:B');
+    const config = {};
+    for (let i = 1; i < rows.length; i++) {
+      const key = (rows[i][0] || '').trim();
+      const val = (rows[i][1] || '').toString().trim();
+      if (key) config[key] = val;
+    }
+    return config;
+  } catch (e) {
+    console.error('[Delivery] Could not read Configuracion sheet:', e.message);
+    return {};
+  }
+}
+
+/**
+ * Notify the delivery business when an order is created in an origin business.
  *
- * @param {Object} pedido         - Datos del pedido recién creado
- * @param {string} pedido.id      - ID del pedido (ej. PED-12345678)
+ * @param {Object} pedido           - Order data
+ * @param {string} pedido.id        - Order ID (e.g. PED-12345678)
  * @param {string} pedido.whatsapp
  * @param {string} pedido.cliente
  * @param {string} pedido.telefono
- * @param {string} pedido.direccion
- * @param {string} pedido.productos - String ya formateado
+ * @param {string} pedido.direccion - Delivery destination (customer address)
+ * @param {string} pedido.productos - Pre-formatted products string
  * @param {number} pedido.total
- * @param {Object} negocioOrigen  - Objeto negocio completo (con configExtra, nombre, whatsapp, etc.)
- * @param {Object} negociosService - Instancia del servicio de negocios para obtener BIZ-005
+ * @param {Object} negocioOrigen    - Full origin business object
+ * @param {Object} negociosService  - Negocios service to look up BIZ-005
  */
 async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
-  // ── DEBUG: siempre loguear para diagnóstico ───────────────────────────────
-  console.log(`[Delivery] 🔍 Hook disparado para negocio: ${negocioOrigen?.id} (${negocioOrigen?.nombre})`);
-  console.log(`[Delivery] 🔍 configExtra:`, JSON.stringify(negocioOrigen?.configExtra));
+  console.log(`[Delivery] Hook triggered for business: ${negocioOrigen?.id} (${negocioOrigen?.nombre})`);
+  console.log(`[Delivery] configExtra:`, JSON.stringify(negocioOrigen?.configExtra));
 
   const deliveryBizId = negocioOrigen?.configExtra?.deliveryBizId;
   if (!deliveryBizId) {
-    console.log(`[Delivery] ⏭️ Sin deliveryBizId en configExtra → se omite`);
+    console.log(`[Delivery] No deliveryBizId in configExtra — skipping`);
     return;
   }
-  console.log(`[Delivery] ✅ deliveryBizId encontrado: ${deliveryBizId}`);
+  console.log(`[Delivery] deliveryBizId found: ${deliveryBizId}`);
 
   const negocioDelivery = negociosService.getById(deliveryBizId);
   if (!negocioDelivery) {
-    console.error(`[Delivery] No se encontró el negocio delivery: ${deliveryBizId}`);
+    console.error(`[Delivery] Delivery business not found: ${deliveryBizId}`);
     return;
   }
 
   const { fecha, hora } = getPeruDateTime();
   const deliveryId = `DEL-${Date.now().toString().slice(-8)}`;
 
-  // ── 1. Registrar en el spreadsheet del negocio delivery ──────────────────
+  // ── Read origin address from Configuracion sheet ─────────────────────────
+  const bizConfig = await getBusinessConfig(negocioOrigen.spreadsheetId);
+  const originDepartamento = bizConfig['departamento'] || '';
+  const originDireccion    = bizConfig['direccion_tienda'] || '';
+  const originLabel = [originDireccion, originDepartamento].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
+
+  const destination = pedido.direccion || 'No address provided';
+
+  // ── 1. Register in the delivery business spreadsheet ─────────────────────
   try {
     const sheets = new SheetsService(negocioDelivery.spreadsheetId);
     await sheets.initialize();
 
-    // Columnas: ID, Fecha, Hora, WhatsApp, Cliente, Teléfono, Dirección,
-    //           Productos, Total, Estado, Observaciones, Origen, PedidoOrigenId
+    // Columns: ID, Date, Time, WhatsApp, Client, Phone, Destination,
+    //          Products, Total, Status, Notes, Origin, OriginOrderId
     const valores = [
       deliveryId,
       fecha,
@@ -78,67 +107,63 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       (pedido.whatsapp || '').replace(/[^0-9]/g, ''),
       pedido.cliente || '',
       pedido.telefono || '',
-      pedido.direccion || '',
+      destination,
       pedido.productos || '',
       pedido.total || 0,
-      'PENDIENTE',
+      'PENDING',
       '',
       negocioOrigen.nombre || negocioOrigen.id,
       pedido.id || '',
     ];
 
     await sheets.appendRow('Pedidos', valores);
-    console.log(`[Delivery] ✅ Delivery registrado: ${deliveryId} (origen: ${pedido.id})`);
+    console.log(`[Delivery] Delivery registered: ${deliveryId} (origin: ${pedido.id})`);
   } catch (err) {
-    console.error(`[Delivery] ❌ Error registrando en sheets:`, err.message);
-    return; // Si no se pudo registrar, no continuar con el broadcast
+    console.error(`[Delivery] Error registering in sheets:`, err.message);
+    return;
   }
 
-  // ── 2. Broadcast a todos los repartidores (clientes de BIZ-005) ──────────
+  // ── 2. Broadcast to all couriers (clients of the delivery business) ───────
   try {
     const sheetsDelivery = new SheetsService(negocioDelivery.spreadsheetId);
     await sheetsDelivery.initialize();
 
-    // La hoja Clientes tiene: WhatsApp en col A (o D según configuración)
-    // Usamos getRows para obtener todos y buscar la columna de WhatsApp
     const filas = await sheetsDelivery.getRows('Clientes!A:I');
     if (!filas || filas.length <= 1) {
-      console.log('[Delivery] Sin repartidores registrados en Clientes');
+      console.log('[Delivery] No couriers registered in Clients sheet');
       return;
     }
 
-    const cuerpo =
-      `*Nuevo delivery disponible*\n\n` +
-      `De: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
-      `Cliente: ${pedido.cliente || 'Sin nombre'}\n` +
-      `Direccion: ${pedido.direccion || 'Sin direccion'}\n` +
-      `Productos: ${pedido.productos || ''}\n` +
+    const body =
+      `*New delivery available*\n\n` +
+      `Store: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
+      `Origin: ${originLabel}\n` +
+      `Destination: ${destination}\n` +
+      `Items: ${pedido.productos || ''}\n` +
       `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*`;
 
-    const botones = [{ id: `delivery_si_${pedido.id}`, title: 'SI, lo tomo' }];
+    const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'YES, I take it' }];
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
-    // Fila 0 = encabezados, fila 1+ = datos
-    // Por convención en apartalo-core, col B (index 1) es el número WhatsApp
     const envios = [];
     for (let i = 1; i < filas.length; i++) {
       const fila = filas[i];
       const numero = (fila[1] || fila[0] || '').toString().replace(/[^0-9]/g, '');
       if (numero.length >= 9) {
         envios.push(
-          whatsappService.sendButtonMessage(numero, cuerpo, botones)
-            .catch(() => whatsappService.sendMessage(numero, cuerpo + '\n\nTe interesa? Responde *SI* para confirmarlo.'))
-            .then(() => console.log(`[Delivery] 📲 Notificado repartidor: ${numero}`))
-            .catch(e => console.error(`[Delivery] ⚠️ Error enviando a ${numero}:`, e.message))
+          whatsappService.sendButtonMessage(numero, body, buttons)
+            .catch(() => whatsappService.sendMessage(numero, body + '\n\nInterested? Reply *YES* to confirm.'))
+            .then(() => console.log(`[Delivery] Notified courier: ${numero}`))
+            .catch(e => console.error(`[Delivery] Error sending to ${numero}:`, e.message))
         );
       }
     }
 
     await Promise.allSettled(envios);
-    console.log(`[Delivery] ✅ Broadcast completado: ${envios.length} repartidores`);
+    console.log(`[Delivery] Broadcast complete: ${envios.length} courier(s)`);
   } catch (err) {
-    console.error(`[Delivery] ❌ Error en broadcast:`, err.message);
+    console.error(`[Delivery] Error in broadcast:`, err.message);
   }
 }
 
