@@ -10,8 +10,19 @@
  *   { "deliveryBizId": "BIZ-005" }
  */
 
+const https = require('https');
 const SheetsService = require('./sheets-service');
 const WhatsAppService = require('./whatsapp-service');
+
+function shortenUrl(url) {
+  return new Promise((resolve) => {
+    https.get(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data.trim() || url));
+    }).on('error', () => resolve(url));
+  });
+}
 
 /**
  * Get current date/time in Peru timezone (UTC-5)
@@ -180,15 +191,15 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
     }
 
     const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originLabel)}/${encodeURIComponent(destination)}`;
+    const shortUrl = await shortenUrl(mapsUrl);
 
     const body =
       `*New delivery available*\n\n` +
       `Store: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
       `Origin: ${originLabel}\n` +
       `Destination: ${destination}\n` +
-      `Items: ${pedido.productos || ''}\n` +
-      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*\n\n` +
-      `Route: ${mapsUrl}`;
+      `Items: ${pedido.productos || ''}\n\n` +
+      `Route: ${shortUrl}`;
 
     const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'YES, I take it' }];
 
