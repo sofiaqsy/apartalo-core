@@ -194,14 +194,14 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
     const shortUrl = await shortenUrl(mapsUrl);
 
     const body =
-      `*New delivery available*\n\n` +
-      `Store: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
-      `Origin: ${originLabel}\n` +
-      `Destination: ${destination}\n` +
-      `Items: ${pedido.productos || ''}\n\n` +
-      `Route: ${shortUrl}`;
+      `*Nuevo delivery disponible*\n\n` +
+      `Tienda: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
+      `Origen: ${originLabel}\n` +
+      `Destino: ${destination}\n` +
+      `Productos: ${pedido.productos || ''}\n\n` +
+      `Ruta: ${shortUrl}`;
 
-    const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'YES, I take it' }];
+    const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'Si, lo tomo' }];
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
@@ -212,7 +212,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       if (numero.length >= 9) {
         envios.push(
           whatsappService.sendButtonMessage(numero, body, buttons)
-            .catch(() => whatsappService.sendMessage(numero, body + '\n\nInterested? Reply *YES* to confirm.'))
+            .catch(() => whatsappService.sendMessage(numero, body + '\n\n¿Te interesa? Responde *SI* para confirmar.'))
             .then(() => console.log(`[Delivery] Notified courier: ${numero}`))
             .catch(e => console.error(`[Delivery] Error sending to ${numero}:`, e.message))
         );
