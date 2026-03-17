@@ -107,19 +107,19 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       return;
     }
 
-    const mensaje =
+    const cuerpo =
       `*Nuevo delivery disponible*\n\n` +
       `De: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
       `Cliente: ${pedido.cliente || 'Sin nombre'}\n` +
       `Direccion: ${pedido.direccion || 'Sin direccion'}\n` +
       `Productos: ${pedido.productos || ''}\n` +
-      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*\n\n` +
-      `Te interesa tomarlo? Responde *SI* para confirmarlo.`;
+      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*`;
+
+    const botones = [{ id: `delivery_si_${pedido.id}`, title: 'SI, lo tomo' }];
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
     // Fila 0 = encabezados, fila 1+ = datos
-    // Detectar columna de WhatsApp (col B = index 1, pero puede variar)
     // Por convención en apartalo-core, col B (index 1) es el número WhatsApp
     const envios = [];
     for (let i = 1; i < filas.length; i++) {
@@ -127,7 +127,8 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       const numero = (fila[1] || fila[0] || '').toString().replace(/[^0-9]/g, '');
       if (numero.length >= 9) {
         envios.push(
-          whatsappService.sendMessage(numero, mensaje)
+          whatsappService.sendButtonMessage(numero, cuerpo, botones)
+            .catch(() => whatsappService.sendMessage(numero, cuerpo + '\n\nTe interesa? Responde *SI* para confirmarlo.'))
             .then(() => console.log(`[Delivery] 📲 Notificado repartidor: ${numero}`))
             .catch(e => console.error(`[Delivery] ⚠️ Error enviando a ${numero}:`, e.message))
         );
