@@ -220,4 +220,67 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   }
 }
 
-module.exports = { notificarNuevoDelivery };
+/**
+ * Handle a courier claiming a delivery order via WhatsApp button reply.
+ * - If PENDING: assign to this courier and confirm
+ * - If already ASSIGNED: tell them it was already taken
+ *
+ * @param {string} from        - Courier's WhatsApp number
+ * @param {string} buttonId    - e.g. "delivery_yes_PED-12345678"
+ * @param {Object} context     - { whatsapp, sheets, negocio }
+ */
+async function asignarDelivery(from, buttonId, context) {
+  const { whatsapp, sheets } = context;
+  const pedidoId = buttonId.replace('delivery_yes_', '');
+
+  console.log(`[Delivery] Courier ${from} trying to claim order ${pedidoId}`);
+
+  // Columns: ID(0) Date(1) Time(2) WhatsApp(3) Client(4) Phone(5)
+  //          Destination(6) Products(7) Total(8) Status(9) Notes(10)
+  //          Origin(11) OriginOrderId(12)
+  const rows = await sheets.getRows('Pedidos!A:M');
+
+  let rowIndex = -1;
+  let deliveryId = '';
+  let status = '';
+  let destination = '';
+  let origin = '';
+
+  for (let i = 1; i < rows.length; i++) {
+    if ((rows[i][12] || '') === pedidoId) {
+      rowIndex = i + 1; // 1-indexed for sheet range
+      deliveryId = rows[i][0] || '';
+      status     = (rows[i][9] || '').toUpperCase();
+      destination = rows[i][6] || '';
+      origin      = rows[i][11] || '';
+      break;
+    }
+  }
+
+  if (rowIndex === -1) {
+    await whatsapp.sendMessage(from, 'No se encontró el pedido de delivery.');
+    return;
+  }
+
+  if (status !== 'PENDING') {
+    await whatsapp.sendMessage(from, '⚠️ Este delivery ya fue tomado por otro repartidor. Espera el siguiente.');
+    return;
+  }
+
+  // Assign: update Status → ASSIGNED, Notes → courier phone
+  await sheets.batchUpdate([
+    { range: `Pedidos!J${rowIndex}`, value: 'ASSIGNED' },
+    { range: `Pedidos!K${rowIndex}`, value: from },
+  ]);
+
+  console.log(`[Delivery] Order ${deliveryId} assigned to courier ${from}`);
+
+  await whatsapp.sendMessage(from,
+    `✅ ¡Delivery asignado!\n\n` +
+    `Recoge en: *${origin}*\n` +
+    `Entrega en: *${destination}*\n\n` +
+    `ID: ${deliveryId}`
+  );
+}
+
+module.exports = { notificarNuevoDelivery, asignarDelivery };

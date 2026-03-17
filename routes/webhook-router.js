@@ -356,6 +356,17 @@ async function processMessage(message, negocio, useSharedCredentials = false, te
     return;
   }
 
+  // ── Delivery button reply intercept ─────────────────────────────────────
+  if (interactiveData?.id?.startsWith('delivery_yes_')) {
+    const deliveryService = require('../core/services/delivery-service');
+    try {
+      await deliveryService.asignarDelivery(from, interactiveData.id, context);
+    } catch (e) {
+      console.error('❌ Error en asignarDelivery:', e.message);
+    }
+    return;
+  }
+
   try {
     await handler.handle(from, { text, mediaId, type, interactiveData, raw: message }, context);
   } catch (error) {
