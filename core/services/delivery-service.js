@@ -179,13 +179,16 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       return;
     }
 
+    const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originLabel)}/${encodeURIComponent(destination)}`;
+
     const body =
       `*New delivery available*\n\n` +
       `Store: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
       `Origin: ${originLabel}\n` +
       `Destination: ${destination}\n` +
       `Items: ${pedido.productos || ''}\n` +
-      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*`;
+      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*\n\n` +
+      `Route: ${mapsUrl}`;
 
     const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'YES, I take it' }];
 
