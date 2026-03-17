@@ -101,14 +101,14 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   // ── Filter 2: customer city must match origin city ────────────────────────
   const customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
   if (!customerCity) {
-    console.log(`[Delivery] Skipped — customer city/department unknown (cannot verify match)`);
+    console.log(`[Delivery] Skipped — customer city unknown`);
     return;
   }
-  if (!customerCity.includes(originDepartamento) && !originDepartamento.includes(customerCity)) {
+  if (customerCity !== originDepartamento) {
     console.log(`[Delivery] Skipped — city mismatch: customer="${customerCity}" vs store="${originDepartamento}"`);
     return;
   }
-  console.log(`[Delivery] City match OK: "${customerCity}" matches "${originDepartamento}"`);
+  console.log(`[Delivery] City match OK: "${customerCity}"`);
 
   // ── 1. Register in the delivery business spreadsheet ─────────────────────
   try {
