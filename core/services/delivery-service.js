@@ -10,19 +10,8 @@
  *   { "deliveryBizId": "BIZ-005" }
  */
 
-const https = require('https');
 const SheetsService = require('./sheets-service');
 const WhatsAppService = require('./whatsapp-service');
-
-function shortenUrl(url) {
-  return new Promise((resolve) => {
-    https.get(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(data.trim() || url));
-    }).on('error', () => resolve(url));
-  });
-}
 
 /**
  * Get current date/time in Peru timezone (UTC-5)
@@ -102,6 +91,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   console.log(`[Delivery] Store config — departamento="${bizConfig['departamento'] || ''}" direccion_tienda="${bizConfig['direccion_tienda'] || ''}"`);
   const originDireccion    = bizConfig['direccion_tienda'] || '';
   const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
+  const originForMap = [bizConfig['direccion_tienda'], bizConfig['departamento'], 'Peru'].filter(Boolean).join(', ');
 
   // ── Look up client record from origin business spreadsheet ───────────────
   let destination = (pedido.direccion || '').trim();
@@ -122,7 +112,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
         const clientDepartamento = (r[20] || r[7]  || '').trim(); // departamentoEnvio > departamento  (col U > H)
         const clientNombre       = (r[2]  || r[3]  || '').trim(); // nombreNegocio    > nombreResponsable
 
-        if (clientDireccion) destination = clientDistrito ? `${clientDireccion}, ${clientDistrito}` : clientDireccion;
+        if (clientDireccion) destination = [clientDireccion, clientDistrito].filter(Boolean).join(', ');
         if (clientDepartamento) customerCity = clientDepartamento.toLowerCase().trim();
         console.log(`[Delivery] Client found — nombre="${clientNombre}" direccion="${clientDireccion}" distrito="${clientDistrito}" departamento="${clientDepartamento}"`);
         break;
@@ -190,8 +180,8 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       return;
     }
 
-    const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originLabel)}/${encodeURIComponent(destination)}`;
-    const shortUrl = await shortenUrl(mapsUrl);
+    const destinationForMap = [destination, 'Peru'].filter(Boolean).join(', ');
+    const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originForMap)}/${encodeURIComponent(destinationForMap)}`;
 
     const body =
       `*Nuevo delivery disponible*\n\n` +
@@ -199,7 +189,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       `Origen: ${originLabel}\n` +
       `Destino: ${destination}\n` +
       `Productos: ${pedido.productos || ''}\n\n` +
-      `Ruta: ${shortUrl}`;
+      `Ruta: ${mapsUrl}`;
 
     const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'Si, lo tomo' }];
 
