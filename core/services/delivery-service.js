@@ -91,7 +91,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   console.log(`[Delivery] Store config — departamento="${bizConfig['departamento'] || ''}" direccion_tienda="${bizConfig['direccion_tienda'] || ''}"`);
   const originDireccion    = bizConfig['direccion_tienda'] || '';
   const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
-  const originForMap = `${bizConfig['direccion_tienda'] || ''}, Peru`;
+  const originForMap = bizConfig['direccion_tienda'] || '';
 
   // ── Look up client record from origin business spreadsheet ───────────────
   let destination = (pedido.direccion || '').trim();
@@ -184,7 +184,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       return;
     }
 
-    const destinationForMap = `${rawDireccion}, Peru`;
+    const destinationForMap = rawDireccion;
     const mapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(originForMap)}/${encodeURIComponent(destinationForMap)}`;
 
     const body =
