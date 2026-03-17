@@ -108,13 +108,13 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
     }
 
     const mensaje =
-      `🚚 *Nuevo delivery disponible*\n\n` +
-      `📦 De: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
-      `👤 Cliente: ${pedido.cliente || 'Sin nombre'}\n` +
-      `📍 Dirección: ${pedido.direccion || 'Sin dirección'}\n` +
-      `🛍️ Productos: ${pedido.productos || ''}\n` +
-      `💰 Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*\n\n` +
-      `¿Te interesa tomarlo? Responde *SÍ* para confirmarlo.`;
+      `*Nuevo delivery disponible*\n\n` +
+      `De: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
+      `Cliente: ${pedido.cliente || 'Sin nombre'}\n` +
+      `Direccion: ${pedido.direccion || 'Sin direccion'}\n` +
+      `Productos: ${pedido.productos || ''}\n` +
+      `Total: *S/ ${Number(pedido.total || 0).toFixed(2)}*\n\n` +
+      `Te interesa tomarlo? Responde *SI* para confirmarlo.`;
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
