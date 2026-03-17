@@ -92,18 +92,40 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   const originDireccion    = bizConfig['direccion_tienda'] || '';
   const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
 
+  // ── Look up client record from origin business spreadsheet ───────────────
+  let destination = (pedido.direccion || '').trim();
+  let customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
+
+  try {
+    const clientSheets = new SheetsService(negocioOrigen.spreadsheetId);
+    await clientSheets.initialize();
+    const clientRows = await clientSheets.getRows('Clientes!A:I');
+    const waClean = (pedido.whatsapp || '').replace(/[^0-9]/g, '');
+    for (let i = 1; i < clientRows.length; i++) {
+      const rowWa = (clientRows[i][1] || '').replace(/[^0-9]/g, '');
+      if (rowWa && rowWa === waClean) {
+        const clientDireccion = (clientRows[i][6] || '').trim();   // col G
+        const clientDepartamento = (clientRows[i][7] || '').trim(); // col H
+        const clientDistrito = (clientRows[i][8] || '').trim();     // col I
+        if (clientDireccion) destination = clientDistrito ? `${clientDireccion}, ${clientDistrito}` : clientDireccion;
+        if (clientDepartamento) customerCity = clientDepartamento.toLowerCase().trim();
+        console.log(`[Delivery] Client found — direccion="${clientDireccion}" departamento="${clientDepartamento}" distrito="${clientDistrito}"`);
+        break;
+      }
+    }
+  } catch (e) {
+    console.warn(`[Delivery] Could not look up client record: ${e.message}`);
+  }
+
   // ── Filter 1: customer must have a delivery address ───────────────────────
-  const destination = (pedido.direccion || '').trim();
   if (!destination) {
     console.log(`[Delivery] Skipped — customer has no delivery address`);
     return;
   }
 
   // ── Filter 2: customer city must match origin city ────────────────────────
-  console.log(`[Delivery] City fields received — departamento="${pedido.departamento ?? ''}" ciudad="${pedido.ciudad ?? ''}"`);
-  const customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
   if (!customerCity) {
-    console.log(`[Delivery] Skipped — customer city unknown (both fields empty)`);
+    console.log(`[Delivery] Skipped — customer city unknown`);
     return;
   }
   if (customerCity !== originDepartamento) {
