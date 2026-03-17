@@ -11,6 +11,7 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
+const deliveryService = require('../core/services/delivery-service');
 
 // ==================== HELPERS ====================
 
@@ -426,6 +427,13 @@ router.post('/:businessId', async (req, res) => {
         console.error('⚠️ Error notificando cliente:', e.message);
       }
     }
+
+    // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
+    deliveryService.notificarNuevoDelivery(
+      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', productos: productosTexto, total: totalFinal },
+      negocio,
+      negociosService
+    ).catch(e => console.error('⚠️ [Delivery] Error en hook pedidos-router:', e.message));
 
     res.status(201).json({
       success: true,
