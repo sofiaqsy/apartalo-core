@@ -772,10 +772,10 @@ async function crearPedido(from, context, cliente) {
   // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
   const productosStr = `${productoSeleccionado.nombre} x${cantidad}`;
   deliveryService.notificarNuevoDelivery(
-    { id: pedido.id, whatsapp: from, cliente: cliente.nombre || '', telefono: cliente.telefono || '', direccion: cliente.direccion || '', productos: productosStr, total },
+    { id: pedido.id, whatsapp: from, cliente: cliente.nombre || '', telefono: cliente.telefono || '', direccion: cliente.direccion || '', ciudad: cliente.ciudad || '', departamento: cliente.departamento || '', productos: productosStr, total },
     negocio,
     negociosService
-  ).catch(e => console.error('⚠️ [Delivery] Error en hook estandar:', e.message));
+  ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook (estandar):', e.message));
 }
 
 // ============================================

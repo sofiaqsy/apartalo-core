@@ -87,11 +87,28 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
 
   // ── Read origin address from Configuracion sheet ─────────────────────────
   const bizConfig = await getBusinessConfig(negocioOrigen.spreadsheetId);
-  const originDepartamento = bizConfig['departamento'] || '';
+  const originDepartamento = (bizConfig['departamento'] || '').toLowerCase().trim();
   const originDireccion    = bizConfig['direccion_tienda'] || '';
-  const originLabel = [originDireccion, originDepartamento].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
+  const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
 
-  const destination = pedido.direccion || 'No address provided';
+  // ── Filter 1: customer must have a delivery address ───────────────────────
+  const destination = (pedido.direccion || '').trim();
+  if (!destination) {
+    console.log(`[Delivery] Skipped — customer has no delivery address`);
+    return;
+  }
+
+  // ── Filter 2: customer city must match origin city ────────────────────────
+  const customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
+  if (!customerCity) {
+    console.log(`[Delivery] Skipped — customer city/department unknown (cannot verify match)`);
+    return;
+  }
+  if (!customerCity.includes(originDepartamento) && !originDepartamento.includes(customerCity)) {
+    console.log(`[Delivery] Skipped — city mismatch: customer="${customerCity}" vs store="${originDepartamento}"`);
+    return;
+  }
+  console.log(`[Delivery] City match OK: "${customerCity}" matches "${originDepartamento}"`);
 
   // ── 1. Register in the delivery business spreadsheet ─────────────────────
   try {

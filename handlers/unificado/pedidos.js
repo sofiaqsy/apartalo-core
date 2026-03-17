@@ -308,10 +308,10 @@ async function manejarConfirmacion(from, text, interactiveData, context, cfg) {
     // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
     const productosStr = productosParaPedido.map(p => `${p.nombre} x${p.cantidad}`).join(', ');
     deliveryService.notificarNuevoDelivery(
-      { id: pedidoId, whatsapp: from, cliente: nombreCliente || '', telefono: telefono || '', direccion: direccion || '', productos: productosStr, total },
+      { id: pedidoId, whatsapp: from, cliente: nombreCliente || '', telefono: telefono || '', direccion: direccion || '', ciudad: '', departamento: '', productos: productosStr, total },
       negocio,
       negociosService
-    ).catch(e => console.error('⚠️ [Delivery] Error en hook unificado:', e.message));
+    ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook (unificado):', e.message));
 
   } catch (e) {
     console.error('Error guardando pedido:', e.message);

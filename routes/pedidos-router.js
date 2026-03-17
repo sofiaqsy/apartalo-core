@@ -350,7 +350,7 @@ router.post('/:businessId', async (req, res) => {
     const {
       whatsapp, cliente, telefono, direccion, productos, total,
       observaciones, tipoEnvio, empresaEnvio, notificarCliente,
-      estadoPago, montoPagado
+      estadoPago, montoPagado, ciudad, departamento
     } = req.body;
 
     if (!whatsapp) return res.status(400).json({ error: 'Campo requerido: whatsapp' });
@@ -428,12 +428,12 @@ router.post('/:businessId', async (req, res) => {
       }
     }
 
-    // 🚚 Notificar al negocio delivery si aplica (fire-and-forget)
+    // 🚚 Notify delivery business if applicable (fire-and-forget)
     deliveryService.notificarNuevoDelivery(
-      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', productos: productosTexto, total: totalFinal },
+      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', ciudad: ciudad || '', departamento: departamento || '', productos: productosTexto, total: totalFinal },
       negocio,
       negociosService
-    ).catch(e => console.error('⚠️ [Delivery] Error en hook pedidos-router:', e.message));
+    ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook:', e.message));
 
     res.status(201).json({
       success: true,
