@@ -88,6 +88,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   // ── Read origin address from Configuracion sheet ─────────────────────────
   const bizConfig = await getBusinessConfig(negocioOrigen.spreadsheetId);
   const originDepartamento = (bizConfig['departamento'] || '').toLowerCase().trim();
+  console.log(`[Delivery] Store config — departamento="${bizConfig['departamento'] || ''}" direccion_tienda="${bizConfig['direccion_tienda'] || ''}"`);
   const originDireccion    = bizConfig['direccion_tienda'] || '';
   const originLabel = [bizConfig['direccion_tienda'], bizConfig['departamento']].filter(Boolean).join(', ') || negocioOrigen.nombre || negocioOrigen.id;
 
