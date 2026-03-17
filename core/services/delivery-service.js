@@ -99,9 +99,10 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   }
 
   // ── Filter 2: customer city must match origin city ────────────────────────
+  console.log(`[Delivery] City fields received — departamento="${pedido.departamento ?? ''}" ciudad="${pedido.ciudad ?? ''}"`);
   const customerCity = (pedido.departamento || pedido.ciudad || '').toLowerCase().trim();
   if (!customerCity) {
-    console.log(`[Delivery] Skipped — customer city unknown`);
+    console.log(`[Delivery] Skipped — customer city unknown (both fields empty)`);
     return;
   }
   if (customerCity !== originDepartamento) {
