@@ -764,6 +764,13 @@ router.post('/negocios/reload', async (req, res) => {
   }
 });
 
+// DEBUG: Ver configExtra de un negocio en memoria
+router.get('/debug/negocio/:businessId', (req, res) => {
+  const negocio = negociosService.getById(req.params.businessId);
+  if (!negocio) return res.status(404).json({ error: 'No encontrado' });
+  res.json({ id: negocio.id, nombre: negocio.nombre, configExtra: negocio.configExtra });
+});
+
 // PRODUCTOS
 router.get('/productos/:businessId', async (req, res) => {
   try {
