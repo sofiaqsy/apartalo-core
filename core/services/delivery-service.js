@@ -143,42 +143,34 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   }
   console.log(`[Delivery] City match OK: "${customerCity}"`);
 
-  // ── 1. Register in the delivery business spreadsheet ─────────────────────
+  // ── 1. Register as a product in BIZ-005 Inventario ───────────────────────
+  const sheetsDelivery = new SheetsService(negocioDelivery.spreadsheetId);
+  await sheetsDelivery.initialize();
+
   try {
-    const sheets = new SheetsService(negocioDelivery.spreadsheetId);
-    await sheets.initialize();
-
-    // Columns: ID, Date, Time, WhatsApp, Client, Phone, Destination,
-    //          Products, Total, Status, Notes, Origin, OriginOrderId
-    const valores = [
+    // Inventario cols: codigo, nombre, descripcion, precio, stock, stockReservado, imagenUrl, estado, categoria
+    const detalle = JSON.stringify({
+      originLabel, destination, rawDireccion,
+      productos: pedido.productos || '',
+      originPedidoId: pedido.id || '',
+      tienda: negocioOrigen.nombre || negocioOrigen.id,
+    });
+    await sheetsDelivery.appendRow('Inventario', [
       deliveryId,
-      fecha,
-      hora,
-      (pedido.whatsapp || '').replace(/[^0-9]/g, ''),
-      pedido.cliente || '',
-      pedido.telefono || '',
-      destination,
-      pedido.productos || '',
-      pedido.total || 0,
-      'PENDING',
-      '',
-      negocioOrigen.nombre || negocioOrigen.id,
-      pedido.id || '',
-    ];
-
-    await sheets.appendRow('Pedidos', valores);
-    console.log(`[Delivery] Delivery registered: ${deliveryId} (origin: ${pedido.id})`);
+      `Delivery: ${negocioOrigen.nombre || negocioOrigen.id} → ${destination}`,
+      detalle,
+      0, 1, 0, '', 'ACTIVO', 'DELIVERY',
+    ]);
+    console.log(`[Delivery] Product registered in Inventario: ${deliveryId}`);
   } catch (err) {
-    console.error(`[Delivery] Error registering in sheets:`, err.message);
+    console.error(`[Delivery] Error registering product:`, err.message);
     return;
   }
 
   // ── 2. Broadcast to all couriers (clients of the delivery business) ───────
   try {
-    const sheetsDelivery = new SheetsService(negocioDelivery.spreadsheetId);
-    await sheetsDelivery.initialize();
 
-    const filas = await sheetsDelivery.getRows('Clientes!A:I');
+    const filas = await sheetsDelivery.getRows('Clientes!A:B');
     if (!filas || filas.length <= 1) {
       console.log('[Delivery] No couriers registered in Clients sheet');
       return;
@@ -195,7 +187,7 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       `Productos: ${(pedido.productos || '').replace(/ - S\/[\d.]+/g, '')}\n\n` +
       `Ruta: ${mapsUrl}`;
 
-    const buttons = [{ id: `delivery_yes_${pedido.id}`, title: 'Si, lo tomo' }];
+    const buttons = [{ id: `delivery_yes_${deliveryId}`, title: 'Si, lo tomo' }];
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
@@ -231,55 +223,89 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
  */
 async function asignarDelivery(from, buttonId, context) {
   const { whatsapp, sheets } = context;
-  const pedidoId = buttonId.replace('delivery_yes_', '');
+  const deliveryId = buttonId.replace('delivery_yes_', '');
 
-  console.log(`[Delivery] Courier ${from} trying to claim order ${pedidoId}`);
+  console.log(`[Delivery] Courier ${from} trying to claim ${deliveryId}`);
 
-  // Columns: ID(0) Date(1) Time(2) WhatsApp(3) Client(4) Phone(5)
-  //          Destination(6) Products(7) Total(8) Status(9) Notes(10)
-  //          Origin(11) OriginOrderId(12)
-  const rows = await sheets.getRows('Pedidos!A:M');
+  // ── Find product in Inventario ────────────────────────────────────────────
+  // Inventario cols: codigo(0), nombre(1), descripcion(2), precio(3),
+  //                 stock(4), stockReservado(5), imagenUrl(6), estado(7), categoria(8)
+  const invRows = await sheets.getRows('Inventario!A:I');
 
-  let rowIndex = -1;
-  let deliveryId = '';
-  let status = '';
-  let destination = '';
-  let origin = '';
+  let invRowIndex = -1;
+  let estado = '';
+  let detalle = {};
 
-  for (let i = 1; i < rows.length; i++) {
-    if ((rows[i][12] || '') === pedidoId) {
-      rowIndex = i + 1; // 1-indexed for sheet range
-      deliveryId = rows[i][0] || '';
-      status     = (rows[i][9] || '').toUpperCase();
-      destination = rows[i][6] || '';
-      origin      = rows[i][11] || '';
+  for (let i = 1; i < invRows.length; i++) {
+    if ((invRows[i][0] || '') === deliveryId) {
+      invRowIndex = i + 1;
+      estado = (invRows[i][7] || '').toUpperCase();
+      try { detalle = JSON.parse(invRows[i][2] || '{}'); } catch (e) { detalle = {}; }
       break;
     }
   }
 
-  if (rowIndex === -1) {
-    await whatsapp.sendMessage(from, 'No se encontró el pedido de delivery.');
+  if (invRowIndex === -1) {
+    await whatsapp.sendMessage(from, 'No se encontró este delivery.');
     return;
   }
 
-  if (status !== 'PENDING') {
+  if (estado !== 'ACTIVO') {
     await whatsapp.sendMessage(from, '⚠️ Este delivery ya fue tomado por otro repartidor. Espera el siguiente.');
     return;
   }
 
-  // Assign: update Status → ASSIGNED, Notes → courier phone
-  await sheets.batchUpdate([
-    { range: `Pedidos!J${rowIndex}`, value: 'ASSIGNED' },
-    { range: `Pedidos!K${rowIndex}`, value: from },
-  ]);
+  // ── Mark product as INACTIVO (claimed) ───────────────────────────────────
+  await sheets.updateCell(`Inventario!H${invRowIndex}`, 'INACTIVO');
 
-  console.log(`[Delivery] Order ${deliveryId} assigned to courier ${from}`);
+  // ── Look up courier name in BIZ-005 Clientes ─────────────────────────────
+  const waClean = from.replace(/[^0-9]/g, '');
+  let courierNombre = from;
+  try {
+    const clientRows = await sheets.getRows('Clientes!A:D');
+    for (let i = 1; i < clientRows.length; i++) {
+      if ((clientRows[i][1] || '').replace(/[^0-9]/g, '') === waClean) {
+        courierNombre = clientRows[i][2] || clientRows[i][3] || from;
+        break;
+      }
+    }
+  } catch (e) { /* fallback to phone number */ }
+
+  // ── Create a standard Pedido in BIZ-005 for this courier ─────────────────
+  const { fecha, hora } = getPeruDateTime();
+  const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
+  const productosTexto = detalle.productos
+    ? detalle.productos.replace(/ - S\/[\d.]+/g, '')
+    : deliveryId;
+
+  const pedidoValues = [
+    pedidoId, fecha, hora,
+    waClean,
+    courierNombre,
+    waClean,
+    detalle.originLabel || '',          // direccion = pickup address
+    productosTexto,                      // productos
+    0,                                   // total
+    'PENDIENTE',                         // estado
+    '',                                  // evidencias
+    `Destino: ${detalle.destination || ''}`, // observaciones
+    'DELIVERY',                          // tipoEnvio
+    '',                                  // empresaEnvio
+    'WHATSAPP',                          // origen
+    'PENDIENTE_PAGO',                    // estadoPago
+    0,                                   // montoPagado
+    '',                                  // fechaPago
+    '',                                  // pagos
+  ];
+
+  await sheets.appendRow('Pedidos', pedidoValues);
+  console.log(`[Delivery] Order ${pedidoId} created for courier ${from} (delivery: ${deliveryId})`);
 
   await whatsapp.sendMessage(from,
     `✅ ¡Delivery asignado!\n\n` +
-    `Recoge en: *${origin}*\n` +
-    `Entrega en: *${destination}*\n\n` +
-    `ID: ${deliveryId}`
+    `Recoge en: *${detalle.originLabel || ''}*\n` +
+    `Entrega en: *${detalle.destination || ''}*\n` +
+    `Pedido: *${pedidoId}*`
   );
 }
 
