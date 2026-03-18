@@ -22,11 +22,24 @@ const TEST_HEADERS = {
   'X-Test-Mode': '1',   // skips WhatsApp sends
 };
 
-const WAIT_MS = 6000;   // time for async delivery hook to finish
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Poll until the condition is true or timeout is reached.
+ * Retries every intervalMs up to timeoutMs total.
+ */
+async function waitUntil(conditionFn, { timeoutMs = 20000, intervalMs = 2000, label = '' } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const result = await conditionFn();
+    if (result) return result;
+    console.log(`[E2E] Waiting for: ${label} (${Math.round((Date.now() - start) / 1000)}s)`);
+    await sleep(intervalMs);
+  }
+  throw new Error(`Timeout waiting for: ${label} (${timeoutMs / 1000}s)`);
+}
 
 async function createOrder(overrides = {}) {
   const body = {
@@ -53,7 +66,7 @@ async function getDeliveryOrders() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('E2E — Delivery flow (real Heroku API)', () => {
-  jest.setTimeout(30000); // 30s timeout per test
+  jest.setTimeout(45000); // 45s timeout per test (Heroku + Sheets can be slow)
 
   let createdPedidoId;
   let createdDeliveryId;
@@ -66,12 +79,12 @@ describe('E2E — Delivery flow (real Heroku API)', () => {
     createdPedidoId = pedido.id;
     expect(pedido.id).toMatch(/^PED-/);
 
-    await sleep(WAIT_MS); // wait for async delivery hook
-
-    const deliverysAfter = await getDeliveryProducts();
-    const newDeliveries = deliverysAfter.filter(
-      d => !deliverysBefore.find(b => b.codigo === d.codigo)
-    );
+    // Poll until a new DELIVERY product appears (Heroku + Sheets can be slow)
+    const newDeliveries = await waitUntil(async () => {
+      const after = await getDeliveryProducts();
+      const fresh = after.filter(d => !deliverysBefore.find(b => b.codigo === d.codigo));
+      return fresh.length > 0 ? fresh : null;
+    }, { timeoutMs: 25000, intervalMs: 3000, label: 'new DELIVERY product in BIZ-005 Inventario' });
 
     expect(newDeliveries.length).toBeGreaterThanOrEqual(1);
     createdDeliveryId = newDeliveries[0].codigo;
@@ -97,7 +110,7 @@ describe('E2E — Delivery flow (real Heroku API)', () => {
     // → client lookup fails → city unknown → skipped
     await createOrder({ whatsapp: '51000000001' });
 
-    await sleep(WAIT_MS);
+    await sleep(12000); // fixed wait — we expect nothing to appear
 
     const deliverysAfter = await getDeliveryProducts();
     const newDeliveries = deliverysAfter.filter(
