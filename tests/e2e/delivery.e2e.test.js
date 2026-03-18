@@ -15,7 +15,7 @@ const axios = require('axios');
 const BASE_URL   = process.env.E2E_BASE_URL   || 'https://apartalo-core-9d633cdb9e1a.herokuapp.com';
 const BIZ_ID     = process.env.E2E_BIZ_ID     || 'BIZ-004';
 const DELIVERY   = process.env.E2E_DELIVERY_BIZ || 'BIZ-005';
-const CLI_PHONE  = process.env.E2E_CLIENT_PHONE || '51936934501';
+const CLI_PHONE  = process.env.E2E_CLIENT_PHONE || '936958201'; // CLI-931495 in BIZ-004 Clientes
 
 const TEST_HEADERS = {
   'Content-Type': 'application/json',

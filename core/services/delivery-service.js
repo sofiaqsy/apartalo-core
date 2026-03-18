@@ -103,9 +103,11 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
     await clientSheets.initialize();
     const clientRows = await clientSheets.getRows('Clientes!A:V');
     const waClean = (pedido.whatsapp || '').replace(/[^0-9]/g, '');
+    // Flexible phone match: handles country code (51xxxxxxxxx vs xxxxxxxxx)
+    const phonesMatch = (a, b) => a === b || a.endsWith(b) || b.endsWith(a);
     for (let i = 1; i < clientRows.length; i++) {
       const rowWa = (clientRows[i][1] || '').replace(/[^0-9]/g, '');
-      if (rowWa && rowWa === waClean) {
+      if (rowWa && phonesMatch(waClean, rowWa)) {
         const r = clientRows[i];
         // Prefer delivery-specific fields, fall back to main fields
         const clientDireccion    = (r[18] || r[6]  || '').trim(); // direccionEnvio   > direccion      (col S > G)
@@ -269,11 +271,13 @@ async function asignarDelivery(from, buttonId, context) {
 
   // ── Look up courier name in BIZ-005 Clientes ─────────────────────────────
   const waClean = from.replace(/[^0-9]/g, '');
+  const phonesMatch = (a, b) => a === b || a.endsWith(b) || b.endsWith(a);
   let courierNombre = from;
   try {
     const clientRows = await sheets.getRows('Clientes!A:D');
     for (let i = 1; i < clientRows.length; i++) {
-      if ((clientRows[i][1] || '').replace(/[^0-9]/g, '') === waClean) {
+      const rowWa = (clientRows[i][1] || '').replace(/[^0-9]/g, '');
+      if (rowWa && phonesMatch(waClean, rowWa)) {
         courierNombre = clientRows[i][2] || clientRows[i][3] || from;
         break;
       }
