@@ -429,9 +429,10 @@ router.post('/:businessId', async (req, res) => {
     }
 
     // 🚚 Notify delivery business if applicable (fire-and-forget)
-    console.log(`[Pedido] ciudad="${ciudad || ''}" departamento="${departamento || ''}" direccion="${direccion || ''}"`);
+    const testMode = req.headers['x-test-mode'] === '1';
+    console.log(`[Pedido] ciudad="${ciudad || ''}" departamento="${departamento || ''}" direccion="${direccion || ''}"${testMode ? ' [TEST MODE]' : ''}`);
     deliveryService.notificarNuevoDelivery(
-      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', ciudad: ciudad || '', departamento: departamento || '', productos: productosTexto, total: totalFinal },
+      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefono || '', direccion: direccion || '', ciudad: ciudad || '', departamento: departamento || '', productos: productosTexto, total: totalFinal, testMode },
       negocio,
       negociosService
     ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook:', e.message));

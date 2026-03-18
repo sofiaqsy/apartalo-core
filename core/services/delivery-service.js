@@ -197,22 +197,25 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
 
     const whatsappService = new WhatsAppService(negocioDelivery.whatsapp);
 
-    const envios = [];
-    for (let i = 1; i < filas.length; i++) {
-      const fila = filas[i];
-      const numero = (fila[1] || fila[0] || '').toString().replace(/[^0-9]/g, '');
-      if (numero.length >= 9) {
-        envios.push(
-          whatsappService.sendButtonMessage(numero, body, buttons)
-            .catch(() => whatsappService.sendMessage(numero, body + '\n\n¿Te interesa? Responde *SI* para confirmar.'))
-            .then(() => console.log(`[Delivery] Notified courier: ${numero}`))
-            .catch(e => console.error(`[Delivery] Error sending to ${numero}:`, e.message))
-        );
+    if (pedido.testMode) {
+      console.log(`[Delivery] TEST MODE — skipping WhatsApp broadcast (${filas.length - 1} couriers)`);
+    } else {
+      const envios = [];
+      for (let i = 1; i < filas.length; i++) {
+        const fila = filas[i];
+        const numero = (fila[1] || fila[0] || '').toString().replace(/[^0-9]/g, '');
+        if (numero.length >= 9) {
+          envios.push(
+            whatsappService.sendButtonMessage(numero, body, buttons)
+              .catch(() => whatsappService.sendMessage(numero, body + '\n\n¿Te interesa? Responde *SI* para confirmar.'))
+              .then(() => console.log(`[Delivery] Notified courier: ${numero}`))
+              .catch(e => console.error(`[Delivery] Error sending to ${numero}:`, e.message))
+          );
+        }
       }
+      await Promise.allSettled(envios);
+      console.log(`[Delivery] Broadcast complete: ${envios.length} courier(s)`);
     }
-
-    await Promise.allSettled(envios);
-    console.log(`[Delivery] Broadcast complete: ${envios.length} courier(s)`);
   } catch (err) {
     console.error(`[Delivery] Error in broadcast:`, err.message);
   }

@@ -7,6 +7,8 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "test": "jest --testPathPattern=tests/ --forceExit",
+    "test:unit": "jest --testPathPattern=tests/unit/ --forceExit",
+    "test:e2e": "jest --testPathPattern=tests/e2e/ --forceExit --runInBand",
     "test:watch": "jest --testPathPattern=tests/ --watch",
     "test:coverage": "jest --testPathPattern=tests/ --coverage --forceExit"
   },

@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:   # allows manual run from GitHub UI
+
+jobs:
+  # ── Job 1: Unit tests (no external calls, runs instantly) ──────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+  # ── Job 2: E2E tests (runs against real Heroku after unit tests pass) ───────
+  e2e-tests:
+    name: E2E Tests (Heroku)
+    runs-on: ubuntu-latest
+    needs: unit-tests          # only runs if unit tests pass
+    if: github.ref == 'refs/heads/main'   # only on main branch pushes
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Heroku deploy to finish
+        run: sleep 60   # give Heroku time to deploy the new release
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_BIZ_ID: ${{ secrets.E2E_BIZ_ID }}
+          E2E_DELIVERY_BIZ: ${{ secrets.E2E_DELIVERY_BIZ }}
+          E2E_CLIENT_PHONE: ${{ secrets.E2E_CLIENT_PHONE }}
