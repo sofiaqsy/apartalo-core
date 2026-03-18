@@ -147,6 +147,10 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
   const sheetsDelivery = new SheetsService(negocioDelivery.spreadsheetId);
   await sheetsDelivery.initialize();
 
+  // ── Read delivery price from origin business configExtra ─────────────────
+  const precioDelivery = parseFloat(negocioOrigen?.configExtra?.precioDelivery || 0);
+  console.log(`[Delivery] Precio delivery: S/ ${precioDelivery} (from ${negocioOrigen.id} configExtra)`);
+
   try {
     // Inventario cols: codigo, nombre, descripcion, precio, stock, stockReservado, imagenUrl, estado, categoria
     const detalle = JSON.stringify({
@@ -154,12 +158,13 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       productos: pedido.productos || '',
       originPedidoId: pedido.id || '',
       tienda: negocioOrigen.nombre || negocioOrigen.id,
+      precioDelivery,
     });
     await sheetsDelivery.appendRow('Inventario', [
       deliveryId,
       `Delivery: ${negocioOrigen.nombre || negocioOrigen.id} → ${destination}`,
       detalle,
-      0, 1, 0, '', 'ACTIVO', 'DELIVERY',
+      precioDelivery, 1, 0, '', 'ACTIVO', 'DELIVERY',
     ]);
     console.log(`[Delivery] Product registered in Inventario: ${deliveryId}`);
   } catch (err) {
@@ -184,8 +189,9 @@ async function notificarNuevoDelivery(pedido, negocioOrigen, negociosService) {
       `Tienda: *${negocioOrigen.nombre || negocioOrigen.id}*\n` +
       `Origen: ${originLabel}\n` +
       `Destino: ${destination}\n` +
-      `Productos: ${(pedido.productos || '').replace(/ - S\/[\d.]+/g, '')}\n\n` +
-      `Ruta: ${mapsUrl}`;
+      `Productos: ${(pedido.productos || '').replace(/ - S\/[\d.]+/g, '')}\n` +
+      (precioDelivery > 0 ? `Pago por delivery: *S/ ${precioDelivery.toFixed(2)}*\n` : '') +
+      `\nRuta: ${mapsUrl}`;
 
     const buttons = [{ id: `delivery_yes_${deliveryId}`, title: 'Si, lo tomo' }];
 
@@ -278,6 +284,8 @@ async function asignarDelivery(from, buttonId, context) {
     ? detalle.productos.replace(/ - S\/[\d.]+/g, '')
     : deliveryId;
 
+  const precio = parseFloat(detalle.precioDelivery || 0);
+
   const pedidoValues = [
     pedidoId, fecha, hora,
     waClean,
@@ -285,14 +293,14 @@ async function asignarDelivery(from, buttonId, context) {
     waClean,
     detalle.originLabel || '',          // direccion = pickup address
     productosTexto,                      // productos
-    0,                                   // total
+    precio,                              // total
     'PENDIENTE',                         // estado
     '',                                  // evidencias
     `Destino: ${detalle.destination || ''}`, // observaciones
     'DELIVERY',                          // tipoEnvio
     '',                                  // empresaEnvio
     'WHATSAPP',                          // origen
-    'PENDIENTE_PAGO',                    // estadoPago
+    precio > 0 ? 'PENDIENTE_PAGO' : 'PAGADO', // estadoPago
     0,                                   // montoPagado
     '',                                  // fechaPago
     '',                                  // pagos
@@ -305,6 +313,7 @@ async function asignarDelivery(from, buttonId, context) {
     `✅ ¡Delivery asignado!\n\n` +
     `Recoge en: *${detalle.originLabel || ''}*\n` +
     `Entrega en: *${detalle.destination || ''}*\n` +
+    (precio > 0 ? `Pago: *S/ ${precio.toFixed(2)}*\n` : '') +
     `Pedido: *${pedidoId}*`
   );
 }
