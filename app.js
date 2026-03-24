@@ -30,6 +30,7 @@ const uploadRouter = require('./routes/upload-router');
 const clientesRouter = require('./routes/clientes-router');
 const pedidosRouter = require('./routes/pedidos-router');
 const botConversationsRouter = require('./routes/bot-conversations-router');
+const ocrRouter = require('./routes/ocr-router');
 
 // Inicializar Express
 const app = express();
@@ -107,6 +108,9 @@ app.use('/api/pedidos', pedidosRouter);
 
 // API para conversaciones del bot WhatsApp
 app.use('/api/bot', botConversationsRouter);
+
+// OCR para comprobantes BCP (usado por extensión Chrome)
+app.use('/api/ocr', ocrRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
