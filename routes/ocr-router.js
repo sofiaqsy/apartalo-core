@@ -77,4 +77,37 @@ router.get('/voucher', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/ocr/image?url=<drive_url>
+ * Proxy para cargar imágenes de Google Drive desde la extensión Chrome.
+ */
+router.get('/image', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).end();
+
+  let imageUrl = url;
+  const driveMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (driveMatch && url.includes('drive.google.com')) {
+    imageUrl = `https://drive.usercontent.google.com/download?id=${driveMatch[1]}&export=view`;
+  }
+
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 15000,
+      maxRedirects: 5,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'image/*'
+      }
+    });
+    const contentType = response.headers['content-type'] || 'image/jpeg';
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(Buffer.from(response.data));
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
 module.exports = router;
