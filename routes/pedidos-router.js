@@ -311,9 +311,8 @@ router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
 });
 
 // ==================== VERIFICAR EVIDENCIA CONTRA BCP ====================
-// Marca una evidencia (voucher) como verificada contra el estado de cuenta BCP.
-// Si todas las evidencias del pedido quedan verificadas, actualiza estadoPago a VERIFICADO.
-
+// Marca una evidencia como VERIFICADO dentro de voucherUrls.
+// NO actualiza estadoPago del pedido.
 router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (req, res) => {
   try {
     const { businessId, pedidoId, evidenciaId } = req.params;
@@ -336,11 +335,9 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
       const evidencias = parseEvidencias(rows[i][10]);
       const evidenciaIdx = evidencias.findIndex(e => e.id === evidenciaId);
 
-      if (evidenciaIdx === -1) {
-        return res.status(404).json({ error: 'Evidencia no encontrada' });
-      }
+      if (evidenciaIdx === -1) return res.status(404).json({ error: 'Evidencia no encontrada' });
 
-      // Marcar esta evidencia como verificada
+      // Solo actualiza la verificación dentro de la evidencia — estadoPago no se toca
       evidencias[evidenciaIdx].verificacion = {
         estado: 'VERIFICADO',
         operacionBCP,
@@ -349,31 +346,10 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
         fechaOperacion: fechaOperacion || ''
       };
 
-      // Comprobar si TODAS las evidencias están verificadas
-      const todasVerificadas = evidencias.every(
-        e => e.verificacion && e.verificacion.estado === 'VERIFICADO'
-      );
+      await sheets.updateCell(`Pedidos!K${rowNum}`, serializeEvidencias(evidencias));
 
-      const updates = [
-        { range: `Pedidos!K${rowNum}`, value: serializeEvidencias(evidencias) }
-      ];
-
-      if (todasVerificadas) {
-        updates.push({ range: `Pedidos!P${rowNum}`, value: 'VERIFICADO' });
-        updates.push({ range: `Pedidos!R${rowNum}`, value: new Date().toISOString() });
-        console.log(`✅ Pedido ${pedidoId}: todas las evidencias verificadas → VERIFICADO`);
-      }
-
-      await sheets.batchUpdate(updates);
-
-      console.log(`✅ Evidencia ${evidenciaId} verificada con operación BCP: ${operacionBCP}`);
-      return res.json({
-        success: true,
-        evidenciaId,
-        operacionBCP,
-        todasVerificadas,
-        estadoPago: todasVerificadas ? 'VERIFICADO' : rows[i][15]
-      });
+      console.log(`✅ Evidencia ${evidenciaId} verificada con BCP op: ${operacionBCP}`);
+      return res.json({ success: true, evidenciaId, operacionBCP });
     }
 
     res.status(404).json({ error: 'Pedido no encontrado' });
