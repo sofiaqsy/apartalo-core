@@ -26,12 +26,32 @@ router.get('/voucher', async (req, res) => {
   }
 
   try {
-    // Descargar imagen
-    const response = await axios.get(url, {
+    // Convertir drive.google.com/uc?export=view&id=X
+    // → drive.usercontent.google.com/download?id=X&export=view (accesible sin auth)
+    let imageUrl = url;
+    const driveMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (driveMatch && url.includes('drive.google.com')) {
+      imageUrl = `https://drive.usercontent.google.com/download?id=${driveMatch[1]}&export=view`;
+    }
+
+    // Descargar imagen siguiendo redirecciones
+    const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
-      timeout: 15000,
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+      timeout: 20000,
+      maxRedirects: 5,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'image/webp,image/apng,image/*,*/*'
+      }
     });
+
+    // Verificar que sea una imagen real (no una página HTML de error)
+    const contentType = response.headers['content-type'] || '';
+    if (contentType.includes('text/html')) {
+      console.log(`⚠️ OCR: URL devolvió HTML (posible auth requerida): ${imageUrl}`);
+      return res.json({ operacion: null });
+    }
+
     const imageBuffer = Buffer.from(response.data);
 
     // OCR con Tesseract
