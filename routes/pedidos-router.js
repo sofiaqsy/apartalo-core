@@ -310,6 +310,79 @@ router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
   }
 });
 
+// ==================== VERIFICAR EVIDENCIA CONTRA BCP ====================
+// Marca una evidencia (voucher) como verificada contra el estado de cuenta BCP.
+// Si todas las evidencias del pedido quedan verificadas, actualiza estadoPago a VERIFICADO.
+
+router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (req, res) => {
+  try {
+    const { businessId, pedidoId, evidenciaId } = req.params;
+    const { operacionBCP, montoVerificado, fechaOperacion } = req.body;
+
+    if (!operacionBCP) return res.status(400).json({ error: 'Campo requerido: operacionBCP' });
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const rows = await sheets.getRows('Pedidos!A:S');
+
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] !== pedidoId) continue;
+
+      const rowNum = i + 1;
+      const evidencias = parseEvidencias(rows[i][10]);
+      const evidenciaIdx = evidencias.findIndex(e => e.id === evidenciaId);
+
+      if (evidenciaIdx === -1) {
+        return res.status(404).json({ error: 'Evidencia no encontrada' });
+      }
+
+      // Marcar esta evidencia como verificada
+      evidencias[evidenciaIdx].verificacion = {
+        estado: 'VERIFICADO',
+        operacionBCP,
+        montoVerificado: parseFloat(montoVerificado) || 0,
+        fechaVerificado: new Date().toISOString(),
+        fechaOperacion: fechaOperacion || ''
+      };
+
+      // Comprobar si TODAS las evidencias están verificadas
+      const todasVerificadas = evidencias.every(
+        e => e.verificacion && e.verificacion.estado === 'VERIFICADO'
+      );
+
+      const updates = [
+        { range: `Pedidos!K${rowNum}`, value: serializeEvidencias(evidencias) }
+      ];
+
+      if (todasVerificadas) {
+        updates.push({ range: `Pedidos!P${rowNum}`, value: 'VERIFICADO' });
+        updates.push({ range: `Pedidos!R${rowNum}`, value: new Date().toISOString() });
+        console.log(`✅ Pedido ${pedidoId}: todas las evidencias verificadas → VERIFICADO`);
+      }
+
+      await sheets.batchUpdate(updates);
+
+      console.log(`✅ Evidencia ${evidenciaId} verificada con operación BCP: ${operacionBCP}`);
+      return res.json({
+        success: true,
+        evidenciaId,
+        operacionBCP,
+        todasVerificadas,
+        estadoPago: todasVerificadas ? 'VERIFICADO' : rows[i][15]
+      });
+    }
+
+    res.status(404).json({ error: 'Pedido no encontrado' });
+  } catch (error) {
+    console.error('❌ Error verificando evidencia:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res) => {
   try {
     const { businessId, pedidoId, evidenciaId } = req.params;
