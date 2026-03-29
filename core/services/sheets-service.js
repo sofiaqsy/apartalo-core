@@ -138,6 +138,30 @@ class SheetsService {
     }
   }
 
+  async deleteSheetRow(sheetName, rowIndex) {
+    if (!this.initialized) return false;
+    try {
+      const meta = await this.sheets.spreadsheets.get({ spreadsheetId: this.spreadsheetId });
+      const sheet = meta.data.sheets.find(s => s.properties.title === sheetName);
+      if (!sheet) return false;
+      const sheetId = sheet.properties.sheetId;
+      await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        resource: {
+          requests: [{
+            deleteDimension: {
+              range: { sheetId, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex }
+            }
+          }]
+        }
+      });
+      return true;
+    } catch (error) {
+      console.error('Error borrando fila de ' + sheetName + ':', error.message);
+      return false;
+    }
+  }
+
   // ============================================
   // CLIENTES
   // ============================================
