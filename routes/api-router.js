@@ -726,6 +726,33 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
   }
 });
 
+router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (req, res) => {
+  try {
+    const { businessId, clienteId, codigoProducto } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    let rows = [];
+    try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { return res.status(404).json({ error: 'Precio no encontrado' }); }
+
+    let rowToDelete = null;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === clienteId && rows[i][1] === codigoProducto) { rowToDelete = i + 1; break; }
+    }
+
+    if (!rowToDelete) return res.status(404).json({ error: 'Precio personalizado no encontrado' });
+
+    const ok = await sheets.deleteSheetRow('PreciosClientes', rowToDelete);
+    if (ok) res.json({ success: true, mensaje: 'Precio eliminado', clienteId, codigoProducto });
+    else res.status(500).json({ error: 'Error eliminando fila' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // NEGOCIOS
 router.get('/negocios', (req, res) => {
   const negocios = negociosService.getAll().map(n => ({ id: n.id, nombre: n.nombre, tipo: n.whatsapp.tipo, flujo: n.flujo, features: n.features }));
