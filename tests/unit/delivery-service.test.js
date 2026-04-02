@@ -18,24 +18,24 @@ const { notificarNuevoDelivery, asignarDelivery } = require('../../core/services
 
 function makeNegocioOrigen(overrides = {}) {
   return {
-    id: 'BIZ-004',
-    nombre: 'Cafe Zuma',
-    spreadsheetId: 'sheet-biz004',
+    id: 'BIZ-000',
+    nombre: 'Tienda Test',
+    spreadsheetId: 'sheet-biz000',
     configExtra: {
-      deliveryBizId: 'BIZ-005',
+      deliveryBizId: 'BIZ-000',
       precioDelivery: 8,
     },
-    whatsapp: { phoneId: 'phone-004', token: 'tok-004', tipo: 'PROPIO' },
+    whatsapp: { phoneId: 'phone-000', token: 'tok-000', tipo: 'PROPIO' },
     ...overrides,
   };
 }
 
 function makeNegocioDelivery() {
   return {
-    id: 'BIZ-005',
-    nombre: 'Delivery Compartido',
-    spreadsheetId: 'sheet-biz005',
-    whatsapp: { phoneId: 'phone-005', token: 'tok-005', tipo: 'PROPIO' },
+    id: 'BIZ-000',
+    nombre: 'Delivery Test',
+    spreadsheetId: 'sheet-biz000',
+    whatsapp: { phoneId: 'phone-000', token: 'tok-000', tipo: 'PROPIO' },
     configExtra: { isDeliveryBusiness: true },
   };
 }
@@ -151,7 +151,7 @@ describe('notificarNuevoDelivery', () => {
       'Inventario',
       expect.arrayContaining([
         expect.stringMatching(/^DEL-/),   // deliveryId
-        expect.stringContaining('Cafe Zuma'), // product name
+        expect.stringContaining('Tienda Test'), // product name
       ])
     );
   });

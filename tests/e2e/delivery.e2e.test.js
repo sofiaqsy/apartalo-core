@@ -3,9 +3,9 @@
  *
  * Requires env vars:
  *   E2E_BASE_URL      = https://apartalo-core-xxxx.herokuapp.com
- *   E2E_BIZ_ID        = BIZ-004  (origin business, must have deliveryBizId in configExtra)
- *   E2E_DELIVERY_BIZ  = BIZ-005  (delivery business)
- *   E2E_CLIENT_PHONE  = phone registered in BIZ-004 Clientes with Lima departamento and address
+ *   E2E_BIZ_ID        = BIZ-000  (origin test business, must have deliveryBizId in configExtra)
+ *   E2E_DELIVERY_BIZ  = BIZ-000  (delivery test business)
+ *   E2E_CLIENT_PHONE  = phone registered in BIZ-000 Clientes with departamento and address
  *
  * Run with: npm run test:e2e
  */
@@ -13,9 +13,9 @@
 const axios = require('axios');
 
 const BASE_URL   = process.env.E2E_BASE_URL   || 'https://apartalo-core-9d633cdb9e1a.herokuapp.com';
-const BIZ_ID     = process.env.E2E_BIZ_ID     || 'BIZ-004';
-const DELIVERY   = process.env.E2E_DELIVERY_BIZ || 'BIZ-005';
-const CLI_PHONE  = process.env.E2E_CLIENT_PHONE || '936958201'; // CLI-931495 in BIZ-004 Clientes
+const BIZ_ID     = process.env.E2E_BIZ_ID     || 'BIZ-000';
+const DELIVERY   = process.env.E2E_DELIVERY_BIZ || 'BIZ-000';
+const CLI_PHONE  = process.env.E2E_CLIENT_PHONE || '936958201'; // registered client in BIZ-000 Clientes
 
 const TEST_HEADERS = {
   'Content-Type': 'application/json',
