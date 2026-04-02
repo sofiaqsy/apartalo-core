@@ -90,7 +90,7 @@ function determinarEstadoPago(pedido) {
 router.get('/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado, estadoPago, cliente, fecha, vista, pagina = 1, limite = 50 } = req.query;
+    const { estado, estadoPago, cliente, fecha, vista, tipo, negocioSolicitante, pagina = 1, limite = 50 } = req.query;
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
@@ -98,8 +98,8 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // A:S incluye estadoPago (P), montoPagado (Q), fechaPago (R), pagos (S)
-    const rows = await sheets.getRows('Pedidos!A:S');
+    // A:U incluye tipo (T) y negocioSolicitante (U) para pedidos B2B
+    const rows = await sheets.getRows('Pedidos!A:U');
 
     let pedidos = [];
     for (let i = 1; i < rows.length; i++) {
@@ -126,6 +126,8 @@ router.get('/:businessId', async (req, res) => {
         montoPagado: parseFloat(row[16]) || 0,
         fechaPago: row[17] || '',
         pagos: parsePagos(row[18]),
+        tipo: row[19] || '',
+        negocioSolicitante: row[20] || '',
         rowIndex: i + 1
       };
 
@@ -173,6 +175,8 @@ router.get('/:businessId', async (req, res) => {
       }
       if (cliente && !pedido.cliente.toLowerCase().includes(cliente.toLowerCase())) continue;
       if (fecha && pedido.fecha !== fecha) continue;
+      if (tipo && pedido.tipo !== tipo.toUpperCase()) continue;
+      if (negocioSolicitante && pedido.negocioSolicitante !== negocioSolicitante) continue;
 
       pedidos.push(pedido);
     }
@@ -399,7 +403,8 @@ router.post('/:businessId', async (req, res) => {
     const {
       whatsapp, cliente, telefono, direccion, productos, total,
       observaciones, tipoEnvio, empresaEnvio, notificarCliente,
-      estadoPago, montoPagado, ciudad, departamento
+      estadoPago, montoPagado, ciudad, departamento,
+      tipo, negocioSolicitante
     } = req.body;
 
     if (!whatsapp) return res.status(400).json({ error: 'Campo requerido: whatsapp' });
@@ -442,7 +447,9 @@ router.post('/:businessId', async (req, res) => {
       observaciones || '', tipoEnvio || '', empresaEnvio || '', 'APP',
       estadoPago || 'PENDIENTE_PAGO',
       montoPagado || 0,
-      '', ''
+      '', '',
+      tipo ? tipo.toUpperCase() : '',   // T: tipo (B2B or empty)
+      negocioSolicitante || ''          // U: businessId of requester
     ];
 
     await sheets.appendRow('Pedidos', valores);
@@ -501,7 +508,9 @@ router.post('/:businessId', async (req, res) => {
         estadoPago: estadoPago || 'PENDIENTE_PAGO',
         montoPagado: montoPagado || 0,
         fechaPago: '',
-        pagos: []
+        pagos: [],
+        tipo: tipo ? tipo.toUpperCase() : '',
+        negocioSolicitante: negocioSolicitante || ''
       }
     });
   } catch (error) {
