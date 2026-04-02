@@ -54,7 +54,8 @@ async function createOrder(overrides = {}) {
 }
 
 async function getDeliveryProducts() {
-  const res = await axios.get(`${BASE_URL}/api/productos/${DELIVERY}?estado=ACTIVO`);
+  // Use limite=100 to avoid pagination hiding freshly-created delivery products
+  const res = await axios.get(`${BASE_URL}/api/productos/${DELIVERY}?estado=ACTIVO&limite=100`);
   return (res.data.productos || []).filter(p => p.categoria === 'DELIVERY');
 }
 
@@ -66,7 +67,7 @@ async function getDeliveryOrders() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('E2E — Delivery flow (real Heroku API)', () => {
-  jest.setTimeout(45000); // 45s timeout per test (Heroku + Sheets can be slow)
+  jest.setTimeout(55000); // 55s timeout per test (Heroku + Sheets can be slow)
 
   let createdPedidoId;
   let createdDeliveryId;
@@ -84,7 +85,7 @@ describe('E2E — Delivery flow (real Heroku API)', () => {
       const after = await getDeliveryProducts();
       const fresh = after.filter(d => !deliverysBefore.find(b => b.codigo === d.codigo));
       return fresh.length > 0 ? fresh : null;
-    }, { timeoutMs: 25000, intervalMs: 3000, label: 'new DELIVERY product in BIZ-005 Inventario' });
+    }, { timeoutMs: 35000, intervalMs: 3000, label: `new DELIVERY product in ${DELIVERY} Inventario` });
 
     expect(newDeliveries.length).toBeGreaterThanOrEqual(1);
     createdDeliveryId = newDeliveries[0].codigo;

@@ -358,9 +358,6 @@ class SheetsService {
       const stock = this.parseInt(row[4]);
       const stockReservado = this.parseInt(row[5]);
 
-      // LOG DIAGNÓSTICO — ver exactamente qué llega de cada fila
-      console.log(`[Inventario row ${i+1}] codigo="${codigo}" nombre="${nombre}" precioRaw="${row[3]}" precioParseado=${precio} estado="${productoEstado}"`);
-
       productos.push({
         codigo: codigo || `PROD-${i}`,
         nombre,
