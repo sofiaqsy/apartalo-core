@@ -855,7 +855,7 @@ router.get('/productos/:businessId/:codigo', async (req, res) => {
 router.post('/productos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { codigo, nombre, descripcion, precio, stock, imagenUrl, estado, categoria, proveedorId } = req.body;
+    const { codigo, nombre, descripcion, precio, stock, imagenUrl, estado, categoria, proveedorId, proveedorProductoCodigo } = req.body;
     if (!codigo || !nombre || precio === undefined || stock === undefined) return res.status(400).json({ error: 'Campos requeridos: codigo, nombre, precio, stock' });
 
     const negocio = negociosService.getById(businessId);
@@ -870,7 +870,7 @@ router.post('/productos/:businessId', async (req, res) => {
     const precioNumero = parseDecimal(precio);
     const stockNumero = parseInt(stock) || 0;
 
-    await sheets.appendRow('Inventario', [codigo, nombre, descripcion || '', precioNumero, stockNumero, 0, imagenUrl || '', estado || 'ACTIVO', categoria || '', proveedorId || '']);
+    await sheets.appendRow('Inventario', [codigo, nombre, descripcion || '', precioNumero, stockNumero, 0, imagenUrl || '', estado || 'ACTIVO', categoria || '', proveedorId || '', proveedorProductoCodigo || '']);
 
     res.status(201).json({ success: true, mensaje: 'Producto creado', producto: { codigo, nombre, descripcion: descripcion || '', precio: precioNumero, stock: stockNumero, stockReservado: 0, imagenUrl: imagenUrl || '', estado: estado || 'ACTIVO', categoria: categoria || '', proveedorId: proveedorId || '', disponible: stockNumero } });
   } catch (error) {
@@ -881,13 +881,13 @@ router.post('/productos/:businessId', async (req, res) => {
 router.put('/productos/:businessId/:codigo', async (req, res) => {
   try {
     const { businessId, codigo } = req.params;
-    const { nombre, descripcion, precio, stock, imagenUrl, estado, categoria, proveedorId } = req.body;
+    const { nombre, descripcion, precio, stock, imagenUrl, estado, categoria, proveedorId, proveedorProductoCodigo } = req.body;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
-    const rows = await sheets.getRows('Inventario!A:J');
+    const rows = await sheets.getRows('Inventario!A:K');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === codigo) {
@@ -900,6 +900,7 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
         if (estado !== undefined) updates.push({ range: `Inventario!H${i + 1}`, value: estado });
         if (categoria !== undefined) updates.push({ range: `Inventario!I${i + 1}`, value: categoria });
         if (proveedorId !== undefined) updates.push({ range: `Inventario!J${i + 1}`, value: proveedorId });
+        if (proveedorProductoCodigo !== undefined) updates.push({ range: `Inventario!K${i + 1}`, value: proveedorProductoCodigo });
         if (updates.length > 0) await sheets.batchUpdate(updates);
 
         const productosActualizados = await sheets.getProductos();
