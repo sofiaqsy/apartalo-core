@@ -76,7 +76,12 @@ describe('E2E — Delivery flow (real Heroku API)', () => {
   test('creating an order with a valid Lima client registers a delivery product in BIZ-005', async () => {
     const deliverysBefore = await getDeliveryProducts();
 
-    const pedido = await createOrder();
+    // Pass direccion + departamento directly so the delivery hook proceeds
+    // regardless of whether the client phone exists in the Clientes sheet
+    const pedido = await createOrder({
+      direccion: 'Av. Test 123, Lince',
+      departamento: 'Lima',
+    });
     createdPedidoId = pedido.id;
     expect(pedido.id).toMatch(/^PED-/);
 
@@ -107,9 +112,8 @@ describe('E2E — Delivery flow (real Heroku API)', () => {
   test('order where client city does not match store city does NOT create a delivery product', async () => {
     const deliverysBefore = await getDeliveryProducts();
 
-    // Use a phone number not registered in BIZ-004 Clientes
-    // → client lookup fails → city unknown → skipped
-    await createOrder({ whatsapp: '51000000001' });
+    // Pass a non-Lima departamento → city mismatch filter blocks delivery
+    await createOrder({ whatsapp: '51000000001', departamento: 'Arequipa', direccion: 'Av. Test 123' });
 
     await sleep(12000); // fixed wait — we expect nothing to appear
 
