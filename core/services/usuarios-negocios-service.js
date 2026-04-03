@@ -250,6 +250,46 @@ class UsuariosNegociosService {
   }
 
   /**
+   * Validar KeyAprobacion contra la hoja UsuariosNegocios (col E)
+   * @param {string} key       - Código ingresado por el usuario
+   * @param {string} negocioId - ID del negocio que hace el pedido
+   * @returns {boolean}
+   */
+  async validarKeyAprobacion(key, negocioId) {
+    if (!key || !negocioId) return false;
+
+    if (!this.initialized) await this.initialize();
+    if (!this.sheets) return false;
+
+    try {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_MAESTRO_ID,
+        range: `${HOJA_USUARIOS}!A:E`,
+      });
+
+      const rows = response.data.values || [];
+      const keyLimpia = key.toString().trim().toLowerCase();
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNegocio = (row[1] || '').trim();
+        const rowKey = (row[4] || '').toString().trim().toLowerCase();
+
+        if (rowNegocio === negocioId && rowKey === keyLimpia && rowKey !== '') {
+          console.log(`[USUARIOS] KeyAprobacion válida para negocio ${negocioId}`);
+          return true;
+        }
+      }
+
+      console.log(`[USUARIOS] KeyAprobacion inválida para negocio ${negocioId}`);
+      return false;
+    } catch (error) {
+      console.error('[USUARIOS] Error validando key:', error.message);
+      return false;
+    }
+  }
+
+  /**
    * Desvincular usuario (para cambiar de tienda)
    */
   async desvincularUsuario(whatsapp) {

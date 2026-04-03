@@ -31,6 +31,7 @@ const clientesRouter = require('./routes/clientes-router');
 const pedidosRouter = require('./routes/pedidos-router');
 const botConversationsRouter = require('./routes/bot-conversations-router');
 const ocrRouter = require('./routes/ocr-router');
+const trackRouter = require('./routes/track-router');
 
 // Inicializar Express
 const app = express();
@@ -117,6 +118,14 @@ app.use('/api/upload', uploadRouter);
 
 // API general (productos, negocios, etc.) - DESPUÉS de las específicas
 app.use('/api', apiRouter);
+
+// Track API (public — no auth required)
+app.use('/api/track', trackRouter);
+
+// Tracking page — serves HTML; JS inside fetches /api/track/:businessId/:pedidoId
+app.get('/track/:businessId/:pedidoId', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'track', 'index.html'));
+});
 
 // Catálogo web público
 app.get('/catalogo/:businessId', (req, res) => {

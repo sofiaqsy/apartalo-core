@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Seguimiento de pedido</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand:   #1B5E20;
+      --brand-l: #E8F5E9;
+      --blue:    #1565C0;
+      --blue-l:  #E3F2FD;
+      --amber:   #E65100;
+      --amber-l: #FFF3E0;
+      --grey:    #78909C;
+      --grey-l:  #ECEFF1;
+      --ok:      #43A047;
+      --radius:  14px;
+    }
+
+    body {
+      background: #F0F2F5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+
+    /* ── Header ── */
+    .topbar {
+      background: #111;
+      color: #fff;
+      padding: 14px 16px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-logo {
+      width: 32px; height: 32px;
+      background: #fff;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .topbar-logo svg { width: 22px; height: 22px; fill: #111; }
+    .topbar-info { flex: 1; overflow: hidden; }
+    .topbar-title { font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+    .topbar-sub   { font-size: 10px; color: #aaa; margin-top: 1px; }
+
+    /* ── Body ── */
+    .content { padding: 16px; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+
+    /* ── Cards ── */
+    .card {
+      background: #fff;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    }
+    .card-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 10px;
+    }
+
+    /* ── Status pill ── */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .status-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+    }
+    .pill-pending  { background: var(--amber-l); color: var(--amber); }
+    .pill-pending .status-dot { background: var(--amber); animation: pulse 1.4s infinite; }
+    .pill-transit  { background: var(--blue-l);  color: var(--blue);  }
+    .pill-transit .status-dot { background: var(--blue);  animation: pulse 1.4s infinite; }
+    .pill-done     { background: var(--brand-l); color: var(--brand); }
+    .pill-done .status-dot { background: var(--ok); }
+    .pill-grey     { background: var(--grey-l);  color: var(--grey);  }
+    .pill-grey .status-dot { background: var(--grey); }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* ── Route ── */
+    .route-row { display: flex; align-items: flex-start; gap: 10px; }
+    .route-icon {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .route-icon svg { width: 18px; height: 18px; }
+    .icon-origin { background: var(--blue-l);  } .icon-origin svg  { fill: var(--blue);  }
+    .icon-dest   { background: var(--brand-l); } .icon-dest svg    { fill: var(--brand); }
+    .route-label { font-size: 9px; color: #999; text-transform: uppercase; letter-spacing: .8px; }
+    .route-name  { font-size: 13px; font-weight: 700; color: #111; margin-top: 1px; }
+    .route-addr  { font-size: 11px; color: #555; margin-top: 2px; line-height: 1.4; }
+    .route-city  { font-size: 11px; color: #888; margin-top: 1px; }
+    .route-divider { height: 20px; width: 2px; background: #e0e0e0; margin: 4px 0 4px 15px; }
+
+    /* ── Timeline ── */
+    .tl-item { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+    .tl-item:last-child { margin-bottom: 0; }
+    .tl-dot {
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+    .tl-done    { background: var(--ok); }
+    .tl-active  { background: var(--amber); box-shadow: 0 0 0 3px rgba(230,81,0,.2); }
+    .tl-pending { background: #ddd; }
+    .tl-label   { font-size: 12px; font-weight: 600; color: #222; line-height: 1.3; }
+    .tl-label.muted { color: #bbb; font-weight: 400; }
+    .tl-label.active { color: var(--amber); }
+    .tl-time    { font-size: 10px; color: #aaa; margin-top: 2px; }
+
+    /* ── Products ── */
+    .prod-item { display: flex; gap: 8px; font-size: 12px; color: #333; line-height: 1.9; }
+    .prod-qty  { font-weight: 700; color: #666; min-width: 24px; }
+
+    /* ── Actions ── */
+    .field-label { font-size: 11px; color: #666; margin-bottom: 5px; font-weight: 600; }
+    .code-input {
+      width: 100%;
+      padding: 11px 13px;
+      border: 1.5px solid #ddd;
+      border-radius: 10px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+      margin-bottom: 12px;
+    }
+    .code-input:focus { border-color: var(--brand); }
+    .btn-row { display: flex; gap: 8px; }
+    .btn {
+      flex: 1;
+      padding: 12px 8px;
+      border: none;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: .2px;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-entrega  { background: var(--brand); color: #fff; }
+    .btn-recepcion{ background: var(--blue);  color: #fff; }
+
+    /* ── States ── */
+    .loading, .error-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+      font-size: 14px;
+    }
+    .error-state { color: #c62828; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #111;
+      color: #fff;
+      padding: 11px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: transform .3s;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.success { background: var(--brand); }
+    #toast.error   { background: #c62828; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="topbar" id="topbar">
+    <div class="topbar-logo">
+      <svg viewBox="0 0 24 24"><path d="M2 21h18v-2H2v2zm2-4h14l1.5-9H2.5L4 17zm14.5-11H18V4h-2v2h-1.5c-.83 0-1.5.67-1.5 1.5v1c0 .83.67 1.5 1.5 1.5H20c.55 0 1-.45 1-1V7c0-.55-.45-1-1-1h-1.5z"/></svg>
+    </div>
+    <div class="topbar-info">
+      <div class="topbar-title" id="hdr-title">Cargando...</div>
+      <div class="topbar-sub"   id="hdr-sub"></div>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="content" id="main">
+    <div class="loading">Cargando información del pedido...</div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+<script>
+(function () {
+  // ── Extract params from URL /track/:businessId/:pedidoId ──
+  const parts = location.pathname.split('/').filter(Boolean);
+  const businessId = parts[1];
+  const pedidoId   = parts[2];
+
+  const STEPS = [
+    'Pedido creado',
+    'Preparado y despachado',
+    'En camino al destino',
+    'Entrega confirmada',
+    'Recepcion confirmada',
+  ];
+
+  const PILL_CLASS = ['pill-pending','pill-pending','pill-transit','pill-done','pill-done'];
+  const PILL_LABEL = ['Pendiente','Preparando','En camino','Entregado','Recibido'];
+
+  // ── Toast helper ──
+  function toast(msg, type = '') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show ' + type;
+    setTimeout(() => t.className = '', 3000);
+  }
+
+  // ── SVG icons ──
+  const svgPin   = '<svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
+  const svgTruck = '<svg viewBox="0 0 24 24"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>';
+
+  // ── Render ──
+  function render(data) {
+    const { id, fecha, hora, estado, timelineStep, origen, destino, productos } = data;
+
+    // Update header
+    document.getElementById('hdr-title').textContent = 'Pedido #' + id;
+    document.getElementById('hdr-sub').textContent   = (origen.nombre || '') + ' · ' + (fecha || '');
+
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+
+    // 1. Status pill
+    const pillCard = div('card');
+    pillCard.innerHTML =
+      '<span class="status-pill ' + (PILL_CLASS[timelineStep] || 'pill-grey') + '">' +
+        '<span class="status-dot"></span>' +
+        (PILL_LABEL[timelineStep] || estado) +
+      '</span>';
+    main.appendChild(pillCard);
+
+    // 2. Route
+    const routeCard = div('card');
+    routeCard.innerHTML =
+      '<div class="card-title">Ruta de entrega</div>' +
+      routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,  origen.direccion,  origen.ciudad) +
+      '<div class="route-divider"></div>' +
+      routeRow('dest',   svgTruck, 'DESTINO', 'Punto de entrega', destino.direccion, destino.ciudad);
+    main.appendChild(routeCard);
+
+    // 3. Timeline
+    const tlCard = div('card');
+    tlCard.innerHTML = '<div class="card-title">Estado del pedido</div>';
+    STEPS.forEach((label, i) => {
+      const done   = i < timelineStep;
+      const active = i === timelineStep;
+      const dotCls = done ? 'tl-done' : active ? 'tl-active' : 'tl-pending';
+      const lblCls = done ? 'tl-label' : active ? 'tl-label active' : 'tl-label muted';
+      const time   = done ? (i === 0 ? fecha + ' · ' + hora : 'Completado') : active ? 'Ahora' : '—';
+      tlCard.innerHTML +=
+        '<div class="tl-item">' +
+          '<div class="tl-dot ' + dotCls + '"></div>' +
+          '<div><div class="' + lblCls + '">' + label + '</div>' +
+          '<div class="tl-time">' + time + '</div></div>' +
+        '</div>';
+    });
+    main.appendChild(tlCard);
+
+    // 4. Products
+    const prodCard = div('card');
+    prodCard.innerHTML = '<div class="card-title">Productos</div>';
+    (productos || []).forEach(p => {
+      prodCard.innerHTML +=
+        '<div class="prod-item"><span class="prod-qty">' + p.cantidad + 'x</span>' + escHtml(p.nombre) + '</div>';
+    });
+    main.appendChild(prodCard);
+
+    // 5. Confirm actions (only if not fully confirmed yet)
+    if (timelineStep < 4) {
+      const actCard = div('card');
+      actCard.innerHTML =
+        '<div class="card-title">Confirmar</div>' +
+        '<div class="field-label">Codigo de aprobacion</div>' +
+        '<input id="key-input" class="code-input" type="text" placeholder="Ingresa tu codigo" autocomplete="off" />' +
+        '<div class="btn-row">' +
+          '<button class="btn btn-entrega"  id="btn-entrega"  ' + (timelineStep >= 3 ? 'disabled' : '') + '>Confirmar entrega</button>' +
+          '<button class="btn btn-recepcion" id="btn-recepcion" ' + (timelineStep >= 4 ? 'disabled' : '') + '>Confirmar recepcion</button>' +
+        '</div>';
+      main.appendChild(actCard);
+
+      document.getElementById('btn-entrega').addEventListener('click',   () => confirmar('entrega'));
+      document.getElementById('btn-recepcion').addEventListener('click', () => confirmar('recepcion'));
+    }
+  }
+
+  // ── Confirm action ──
+  async function confirmar(tipo) {
+    const key = (document.getElementById('key-input')?.value || '').trim();
+    if (!key) { toast('Ingresa tu codigo de aprobacion', 'error'); return; }
+
+    const btnE = document.getElementById('btn-entrega');
+    const btnR = document.getElementById('btn-recepcion');
+    if (btnE) btnE.disabled = true;
+    if (btnR) btnR.disabled = true;
+
+    try {
+      const resp = await fetch('/api/track/' + businessId + '/' + pedidoId + '/confirmar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo, keyAprobacion: key }),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        toast(data.error || 'Error al confirmar', 'error');
+        if (btnE) btnE.disabled = false;
+        if (btnR) btnR.disabled = false;
+        return;
+      }
+
+      toast(tipo === 'entrega' ? 'Entrega confirmada' : 'Recepcion confirmada', 'success');
+      // Reload data to reflect new state
+      setTimeout(load, 1200);
+    } catch (err) {
+      toast('Error de conexion', 'error');
+      if (btnE) btnE.disabled = false;
+      if (btnR) btnR.disabled = false;
+    }
+  }
+
+  // ── Load data ──
+  async function load() {
+    try {
+      const resp = await fetch('/api/track/' + businessId + '/' + pedidoId);
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}));
+        document.getElementById('main').innerHTML =
+          '<div class="error-state">No se encontro el pedido.<br><small>' + (e.error || '') + '</small></div>';
+        return;
+      }
+      const data = await resp.json();
+      render(data);
+    } catch (err) {
+      document.getElementById('main').innerHTML =
+        '<div class="error-state">Error de conexion. Verifica tu red.</div>';
+    }
+  }
+
+  // ── Helpers ──
+  function div(cls) { const d = document.createElement('div'); d.className = cls; return d; }
+  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function routeRow(type, icon, label, name, addr, city) {
+    return '<div class="route-row">' +
+      '<div class="route-icon icon-' + (type === 'origin' ? 'origin' : 'dest') + '">' + icon + '</div>' +
+      '<div>' +
+        '<div class="route-label">' + label + '</div>' +
+        '<div class="route-name">' + escHtml(name) + '</div>' +
+        (addr ? '<div class="route-addr">' + escHtml(addr) + '</div>' : '') +
+        (city ? '<div class="route-city">' + escHtml(city) + '</div>' : '') +
+      '</div></div>';
+  }
+
+  // Start
+  if (!businessId || !pedidoId) {
+    document.getElementById('main').innerHTML =
+      '<div class="error-state">URL invalida. Escanea el QR del ticket.</div>';
+  } else {
+    load();
+  }
+})();
+</script>
+</body>
+</html>
