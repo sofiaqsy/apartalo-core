@@ -1022,4 +1022,193 @@ router.post('/productos/:businessId/importar', async (req, res) => {
   }
 });
 
+// ============================================================
+// RECETAS (Production Recipes)
+// ============================================================
+
+// GET all recipes (optionally filtered by ?codigoDestino=XXX)
+router.get('/recetas/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { codigoDestino } = req.query;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    let recetas = await sheets.getRecetas();
+    if (codigoDestino) recetas = recetas.filter(r => r.codigoDestino === codigoDestino);
+
+    res.json({ recetas, total: recetas.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST create recipe
+router.post('/recetas/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { codigoDestino, nombreDestino, cantidadDestino, codigoOrigen, nombreOrigen, cantidadOrigen, descripcion } = req.body;
+
+    if (!codigoDestino || !codigoOrigen || !cantidadDestino || !cantidadOrigen) {
+      return res.status(400).json({ error: 'Required: codigoDestino, codigoOrigen, cantidadDestino, cantidadOrigen' });
+    }
+    if (cantidadDestino <= 0 || cantidadOrigen <= 0) {
+      return res.status(400).json({ error: 'Quantities must be greater than 0' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const result = await sheets.createReceta({ codigoDestino, nombreDestino, cantidadDestino, codigoOrigen, nombreOrigen, cantidadOrigen, descripcion });
+    if (!result.success) return res.status(500).json({ error: result.error });
+
+    res.status(201).json({ success: true, id: result.id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT update recipe
+router.put('/recetas/:businessId/:recetaId', async (req, res) => {
+  try {
+    const { businessId, recetaId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const result = await sheets.updateReceta(recetaId, req.body);
+    if (!result.success) return res.status(404).json({ error: result.error });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE recipe
+router.delete('/recetas/:businessId/:recetaId', async (req, res) => {
+  try {
+    const { businessId, recetaId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    const result = await sheets.deleteReceta(recetaId);
+    if (!result.success) return res.status(404).json({ error: result.error });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET fulfillment plan for a specific pedido
+// Returns per-product: direct stock status + recipe suggestions with viability
+router.get('/recetas/:businessId/plan/:pedidoId', async (req, res) => {
+  try {
+    const { businessId, pedidoId } = req.params;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const sheets = new SheetsService(negocio.spreadsheetId);
+    await sheets.initialize();
+
+    // Load all data in parallel
+    const [inventario, recetas, pedidoRows] = await Promise.all([
+      sheets.getProductos(),
+      sheets.getRecetas(),
+      sheets.getRows('Pedidos!A:U'),
+    ]);
+
+    // Find the pedido
+    const pedidoRow = pedidoRows.slice(1).find(r => (r[0] || '').trim() === pedidoId);
+    if (!pedidoRow) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    // Parse products string — format: "2x PROD-001 - Nombre: S/10.00, 1x PROD-002 - Nombre2: S/5.00"
+    // or JSON array stored in column
+    const productosRaw = pedidoRow[3] || '';
+    const stockMap = Object.fromEntries(inventario.map(p => [p.codigo, p]));
+
+    // Try to extract items: pattern "Nxxx CODIGO" or parse from JSON
+    let items = [];
+    try {
+      const parsed = JSON.parse(productosRaw);
+      if (Array.isArray(parsed)) {
+        items = parsed.map(p => ({ codigo: p.codigo || p.id, nombre: p.nombre, cantidad: parseFloat(p.cantidad) || 1 }));
+      }
+    } catch (_) {
+      // Fallback: parse text like "2x PROD-001 Café Tostado"
+      const matches = [...productosRaw.matchAll(/(\d+(?:\.\d+)?)x?\s+([A-Z0-9\-]+)/g)];
+      items = matches.map(m => ({ codigo: m[2], cantidad: parseFloat(m[1]) || 1, nombre: '' }));
+    }
+
+    // Build fulfillment plan per product
+    const plan = items.map(item => {
+      const producto = stockMap[item.codigo];
+      const stockActual = producto ? producto.stock : 0;
+      const necesita   = item.cantidad;
+      const deficit    = Math.max(0, necesita - stockActual);
+
+      // Find recipes that produce this product
+      const sugerencias = recetas
+        .filter(r => r.codigoDestino === item.codigo)
+        .map(r => {
+          const origen = stockMap[r.codigoOrigen];
+          const stockOrigen = origen ? origen.stock : 0;
+          // How many "batches" of the recipe are needed to cover the deficit
+          const batchesNecesarios = deficit > 0 ? Math.ceil(deficit / r.cantidadDestino) : 0;
+          const origenNecesario   = batchesNecesarios * r.cantidadOrigen;
+          const posible           = stockOrigen >= origenNecesario;
+          const maxProducible     = r.cantidadOrigen > 0 ? Math.floor(stockOrigen / r.cantidadOrigen) * r.cantidadDestino : 0;
+
+          return {
+            recetaId:         r.id,
+            descripcion:      r.descripcion,
+            codigoOrigen:     r.codigoOrigen,
+            nombreOrigen:     r.nombreOrigen || (origen ? origen.nombre : r.codigoOrigen),
+            stockOrigen,
+            cantidadOrigen:   r.cantidadOrigen,
+            cantidadDestino:  r.cantidadDestino,
+            origenNecesario,
+            posible,
+            maxProducible,
+            stockOrigenInsuficiente: !posible ? origenNecesario - stockOrigen : 0,
+          };
+        });
+
+      return {
+        codigo:      item.codigo,
+        nombre:      item.nombre || (producto ? producto.nombre : item.codigo),
+        cantidad:    necesita,
+        stockActual,
+        deficit,
+        cubierto:    deficit === 0,
+        parcial:     stockActual > 0 && deficit > 0,
+        sugerencias,
+      };
+    });
+
+    const todoCubierto = plan.every(p => p.cubierto);
+    const algunoSinStock = plan.some(p => p.stockActual === 0 && p.deficit > 0);
+
+    res.json({ pedidoId, plan, todoCubierto, algunoSinStock });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

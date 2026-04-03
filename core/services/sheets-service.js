@@ -428,6 +428,79 @@ class SheetsService {
   cleanPhone(phone) {
     return (phone || '').replace('whatsapp:', '').replace('+', '').replace(/[^0-9]/g, '');
   }
+
+  // ============================================
+  // RECETAS (Production Recipes)
+  // A recipe defines: "consume X units of origin → produce Y units of destination"
+  // Sheet columns A:I
+  // A: id | B: codigoDestino | C: nombreDestino | D: cantidadDestino
+  // E: codigoOrigen | F: nombreOrigen | G: cantidadOrigen | H: descripcion | I: fecha
+  // ============================================
+
+  async getRecetas() {
+    const rows = await this.getRows('Recetas!A:I');
+    if (rows.length <= 1) return [];
+    const recetas = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || !row[0] || String(row[0]).trim() === '') continue;
+      recetas.push({
+        id:                  (row[0] || '').trim(),
+        codigoDestino:       (row[1] || '').trim(),
+        nombreDestino:       (row[2] || '').trim(),
+        cantidadDestino:     parseFloat(row[3]) || 1,
+        codigoOrigen:        (row[4] || '').trim(),
+        nombreOrigen:        (row[5] || '').trim(),
+        cantidadOrigen:      parseFloat(row[6]) || 1,
+        descripcion:         (row[7] || '').trim(),
+        fecha:               (row[8] || '').trim(),
+        rowIndex:            i + 1,
+      });
+    }
+    return recetas;
+  }
+
+  async createReceta({ codigoDestino, nombreDestino, cantidadDestino, codigoOrigen, nombreOrigen, cantidadOrigen, descripcion }) {
+    const id    = `REC-${Date.now()}`;
+    const fecha = new Date().toISOString();
+    const ok = await this.appendRow('Recetas', [
+      id, codigoDestino, nombreDestino || '', cantidadDestino,
+      codigoOrigen, nombreOrigen || '', cantidadOrigen,
+      descripcion || '', fecha,
+    ]);
+    if (!ok) return { success: false, error: 'Error escribiendo en Recetas' };
+    return { success: true, id };
+  }
+
+  async updateReceta(id, data) {
+    const rows = await this.getRows('Recetas!A:I');
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i][0] || '').trim() !== id) continue;
+      const r = i + 1;
+      const updates = [];
+      if (data.codigoDestino   !== undefined) updates.push({ range: `Recetas!B${r}`, value: data.codigoDestino });
+      if (data.nombreDestino   !== undefined) updates.push({ range: `Recetas!C${r}`, value: data.nombreDestino });
+      if (data.cantidadDestino !== undefined) updates.push({ range: `Recetas!D${r}`, value: data.cantidadDestino });
+      if (data.codigoOrigen    !== undefined) updates.push({ range: `Recetas!E${r}`, value: data.codigoOrigen });
+      if (data.nombreOrigen    !== undefined) updates.push({ range: `Recetas!F${r}`, value: data.nombreOrigen });
+      if (data.cantidadOrigen  !== undefined) updates.push({ range: `Recetas!G${r}`, value: data.cantidadOrigen });
+      if (data.descripcion     !== undefined) updates.push({ range: `Recetas!H${r}`, value: data.descripcion });
+      if (updates.length > 0) await this.batchUpdate(updates);
+      return { success: true };
+    }
+    return { success: false, error: 'Receta no encontrada' };
+  }
+
+  async deleteReceta(id) {
+    const rows = await this.getRows('Recetas!A:A');
+    for (let i = 1; i < rows.length; i++) {
+      if ((rows[i][0] || '').trim() !== id) continue;
+      // Soft delete: blank the id so getRecetas() skips it
+      await this.updateCell(`Recetas!A${i + 1}`, '');
+      return { success: true };
+    }
+    return { success: false, error: 'Receta no encontrada' };
+  }
 }
 
 module.exports = SheetsService;
