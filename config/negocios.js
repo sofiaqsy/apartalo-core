@@ -106,6 +106,9 @@ class NegociosService {
     return {
       id,
       nombre,
+      // Dirección y ciudad: leídas de configExtra si están definidas
+      direccion: configExtra.direccion || configExtra.address || '',
+      ciudad:    configExtra.ciudad    || configExtra.city    || '',
       whatsapp: {
         tipo:        esPropio ? 'PROPIO' : 'COMPARTIDO',
         phoneId:     esPropio ? phoneId : config.whatsappShared.phoneId,

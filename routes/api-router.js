@@ -770,7 +770,7 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
       let whatsappAdmin = (negocio.whatsapp?.admin || '').toString().replace(/[^0-9]/g, '');
       if (whatsappAdmin.length === 9) whatsappAdmin = '51' + whatsappAdmin;
       if (whatsappAdmin && whatsappAdmin === whatsapp) {
-        return res.json({ encontrado: true, negocio: { id: negocio.id, nombre: negocio.nombre, flujo: negocio.flujo, features: negocio.features, whatsappAdmin } });
+        return res.json({ encontrado: true, negocio: { id: negocio.id, nombre: negocio.nombre, flujo: negocio.flujo, features: negocio.features, whatsappAdmin, direccion: negocio.direccion || '', ciudad: negocio.ciudad || '' } });
       }
     }
     res.json({ encontrado: false, mensaje: 'No se encontró ningún negocio asociado a este número' });
