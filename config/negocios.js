@@ -107,8 +107,8 @@ class NegociosService {
       id,
       nombre,
       // Dirección y ciudad: leídas de configExtra si están definidas
-      direccion: configExtra.direccion || configExtra.address || '',
-      ciudad:    configExtra.ciudad    || configExtra.city    || '',
+      direccion: configExtra.direccion || configExtra.address || configExtra.direccion_tienda || '',
+      ciudad:    configExtra.ciudad    || configExtra.city    || configExtra.departamento    || '',
       whatsapp: {
         tipo:        esPropio ? 'PROPIO' : 'COMPARTIDO',
         phoneId:     esPropio ? phoneId : config.whatsappShared.phoneId,
