@@ -24,7 +24,7 @@
       background: #F0F2F5;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       min-height: 100vh;
-      padding-bottom: 40px;
+      padding-bottom: 100px;
     }
 
     /* ── Header ── */
@@ -79,14 +79,11 @@
       font-size: 13px;
       font-weight: 700;
     }
-    .status-dot {
-      width: 9px; height: 9px;
-      border-radius: 50%;
-    }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; }
     .pill-pending  { background: var(--amber-l); color: var(--amber); }
     .pill-pending .status-dot { background: var(--amber); animation: pulse 1.4s infinite; }
     .pill-transit  { background: var(--blue-l);  color: var(--blue);  }
-    .pill-transit .status-dot { background: var(--blue);  animation: pulse 1.4s infinite; }
+    .pill-transit .status-dot { background: var(--blue); animation: pulse 1.4s infinite; }
     .pill-done     { background: var(--brand-l); color: var(--brand); }
     .pill-done .status-dot { background: var(--ok); }
     .pill-grey     { background: var(--grey-l);  color: var(--grey);  }
@@ -111,6 +108,31 @@
     .route-city  { font-size: 11px; color: #888; margin-top: 1px; }
     .route-divider { height: 20px; width: 2px; background: #e0e0e0; margin: 4px 0 4px 15px; }
 
+    /* ── Map ── */
+    .map-wrapper {
+      margin-top: 12px;
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+    .map-wrapper iframe {
+      width: 100%;
+      height: 180px;
+      border: none;
+      display: block;
+    }
+    .map-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue);
+      text-decoration: none;
+    }
+    .map-link svg { width: 14px; height: 14px; fill: var(--blue); }
+
     /* ── Timeline ── */
     .tl-item { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
     .tl-item:last-child { margin-bottom: 0; }
@@ -124,7 +146,7 @@
     .tl-active  { background: var(--amber); box-shadow: 0 0 0 3px rgba(230,81,0,.2); }
     .tl-pending { background: #ddd; }
     .tl-label   { font-size: 12px; font-weight: 600; color: #222; line-height: 1.3; }
-    .tl-label.muted { color: #bbb; font-weight: 400; }
+    .tl-label.muted  { color: #bbb; font-weight: 400; }
     .tl-label.active { color: var(--amber); }
     .tl-time    { font-size: 10px; color: #aaa; margin-top: 2px; }
 
@@ -132,35 +154,112 @@
     .prod-item { display: flex; gap: 8px; font-size: 12px; color: #333; line-height: 1.9; }
     .prod-qty  { font-weight: 700; color: #666; min-width: 24px; }
 
-    /* ── Actions ── */
-    .field-label { font-size: 11px; color: #666; margin-bottom: 5px; font-weight: 600; }
+    /* ── FAB ── */
+    .fab {
+      position: fixed;
+      bottom: 24px;
+      right: 20px;
+      left: 20px;
+      max-width: 440px;
+      margin: 0 auto;
+      background: var(--brand);
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      padding: 16px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      cursor: pointer;
+      box-shadow: 0 4px 18px rgba(27,94,32,.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .fab:active { transform: scale(.97); box-shadow: 0 2px 8px rgba(27,94,32,.3); }
+    .fab svg { width: 20px; height: 20px; fill: #fff; }
+
+    /* ── Modal ── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 50;
+      display: flex; align-items: flex-end; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity .25s;
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
+    .modal-sheet {
+      background: #fff;
+      border-radius: 20px 20px 0 0;
+      padding: 24px 20px 36px;
+      width: 100%;
+      max-width: 480px;
+      transform: translateY(100%);
+      transition: transform .3s cubic-bezier(.4,0,.2,1);
+    }
+    .modal-backdrop.open .modal-sheet { transform: translateY(0); }
+
+    .modal-handle {
+      width: 36px; height: 4px;
+      background: #ddd;
+      border-radius: 2px;
+      margin: 0 auto 20px;
+    }
+    .modal-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #111;
+      margin-bottom: 4px;
+    }
+    .modal-sub {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .field-label { font-size: 11px; color: #666; margin-bottom: 6px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
     .code-input {
       width: 100%;
-      padding: 11px 13px;
+      padding: 14px 16px;
       border: 1.5px solid #ddd;
-      border-radius: 10px;
-      font-size: 13px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
       outline: none;
       transition: border-color .2s;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
+      text-align: center;
     }
     .code-input:focus { border-color: var(--brand); }
-    .btn-row { display: flex; gap: 8px; }
-    .btn {
-      flex: 1;
-      padding: 12px 8px;
+    .btn-confirm {
+      width: 100%;
+      padding: 15px;
       border: none;
-      border-radius: 10px;
-      font-size: 12px;
+      border-radius: 12px;
+      background: var(--brand);
+      color: #fff;
+      font-size: 15px;
       font-weight: 700;
       cursor: pointer;
-      letter-spacing: .2px;
-      transition: opacity .2s, transform .1s;
+      transition: opacity .2s;
     }
-    .btn:active { transform: scale(.97); }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn-entrega  { background: var(--brand); color: #fff; }
-    .btn-recepcion{ background: var(--blue);  color: #fff; }
+    .btn-confirm:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-cancel {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 12px;
+      background: transparent;
+      color: #888;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
 
     /* ── States ── */
     .loading, .error-state {
@@ -174,7 +273,7 @@
     /* ── Toast ── */
     #toast {
       position: fixed;
-      bottom: 24px;
+      bottom: 90px;
       left: 50%;
       transform: translateX(-50%) translateY(100px);
       background: #111;
@@ -210,13 +309,31 @@
     <div class="loading">Cargando información del pedido...</div>
   </div>
 
+  <!-- FAB: Confirmar recepción -->
+  <button class="fab" id="fab" style="display:none" onclick="openModal()">
+    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+    Confirmar recepción
+  </button>
+
+  <!-- Modal -->
+  <div class="modal-backdrop" id="modal-backdrop" onclick="handleBackdropClick(event)">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-title">Confirmar recepción</div>
+      <div class="modal-sub">Ingresa tu código de aprobación para confirmar que recibiste el pedido correctamente.</div>
+      <div class="field-label">Código de aprobación</div>
+      <input id="key-input" class="code-input" type="text" placeholder="••••" autocomplete="off" />
+      <button class="btn-confirm" id="btn-confirm" onclick="confirmar()">Confirmar recepción</button>
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast"></div>
 
 <script>
 (function () {
-  // ── Extract params from URL /track/:businessId/:pedidoId ──
-  const parts = location.pathname.split('/').filter(Boolean);
+  const parts      = location.pathname.split('/').filter(Boolean);
   const businessId = parts[1];
   const pedidoId   = parts[2];
 
@@ -225,13 +342,12 @@
     'Preparado y despachado',
     'En camino al destino',
     'Entrega confirmada',
-    'Recepcion confirmada',
+    'Recepción confirmada',
   ];
-
   const PILL_CLASS = ['pill-pending','pill-pending','pill-transit','pill-done','pill-done'];
   const PILL_LABEL = ['Pendiente','Preparando','En camino','Entregado','Recibido'];
 
-  // ── Toast helper ──
+  // ── Toast ──
   function toast(msg, type = '') {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -239,15 +355,63 @@
     setTimeout(() => t.className = '', 3000);
   }
 
+  // ── Modal ──
+  window.openModal = function () {
+    document.getElementById('key-input').value = '';
+    document.getElementById('modal-backdrop').classList.add('open');
+    setTimeout(() => document.getElementById('key-input').focus(), 300);
+  };
+  window.closeModal = function () {
+    document.getElementById('modal-backdrop').classList.remove('open');
+  };
+  window.handleBackdropClick = function (e) {
+    if (e.target === document.getElementById('modal-backdrop')) closeModal();
+  };
+
+  // ── Confirm recepción ──
+  window.confirmar = async function () {
+    const key = (document.getElementById('key-input').value || '').trim();
+    if (!key) { toast('Ingresa tu código de aprobación', 'error'); return; }
+
+    const btn = document.getElementById('btn-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Confirmando...';
+
+    try {
+      const resp = await fetch('/api/track/' + businessId + '/' + pedidoId + '/confirmar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'recepcion', keyAprobacion: key }),
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        toast(data.error || 'Código incorrecto', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Confirmar recepción';
+        return;
+      }
+
+      closeModal();
+      toast('¡Recepción confirmada!', 'success');
+      document.getElementById('fab').style.display = 'none';
+      setTimeout(load, 1200);
+    } catch {
+      toast('Error de conexión', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Confirmar recepción';
+    }
+  };
+
   // ── SVG icons ──
   const svgPin   = '<svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
   const svgTruck = '<svg viewBox="0 0 24 24"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>';
+  const svgMap   = '<svg viewBox="0 0 24 24"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>';
 
   // ── Render ──
   function render(data) {
     const { id, fecha, hora, estado, timelineStep, origen, destino, productos } = data;
 
-    // Update header
     document.getElementById('hdr-title').textContent = 'Pedido #' + id;
     document.getElementById('hdr-sub').textContent   = (origen.nombre || '') + ' · ' + (fecha || '');
 
@@ -255,7 +419,7 @@
     main.innerHTML = '';
 
     // 1. Status pill
-    const pillCard = div('card');
+    const pillCard = el('div', 'card');
     pillCard.innerHTML =
       '<span class="status-pill ' + (PILL_CLASS[timelineStep] || 'pill-grey') + '">' +
         '<span class="status-dot"></span>' +
@@ -263,17 +427,24 @@
       '</span>';
     main.appendChild(pillCard);
 
-    // 2. Route
-    const routeCard = div('card');
+    // 2. Route + Map
+    const destAddr = [destino.direccion, destino.ciudad].filter(Boolean).join(', ');
+    const mapsQ    = encodeURIComponent(destAddr || 'Lima, Peru');
+    const embedSrc = 'https://maps.google.com/maps?q=' + mapsQ + '&output=embed&z=15';
+    const mapsUrl  = 'https://maps.google.com/?q=' + mapsQ;
+
+    const routeCard = el('div', 'card');
     routeCard.innerHTML =
       '<div class="card-title">Ruta de entrega</div>' +
       routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,  origen.direccion,  origen.ciudad) +
       '<div class="route-divider"></div>' +
-      routeRow('dest',   svgTruck, 'DESTINO', 'Punto de entrega', destino.direccion, destino.ciudad);
+      routeRow('dest',   svgTruck, 'DESTINO', destino.cliente || 'Punto de entrega', destino.direccion, destino.ciudad) +
+      '<div class="map-wrapper"><iframe src="' + embedSrc + '" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>' +
+      '<a class="map-link" href="' + mapsUrl + '" target="_blank">' + svgMap + ' Abrir en Google Maps</a>';
     main.appendChild(routeCard);
 
     // 3. Timeline
-    const tlCard = div('card');
+    const tlCard = el('div', 'card');
     tlCard.innerHTML = '<div class="card-title">Estado del pedido</div>';
     STEPS.forEach((label, i) => {
       const done   = i < timelineStep;
@@ -291,103 +462,53 @@
     main.appendChild(tlCard);
 
     // 4. Products
-    const prodCard = div('card');
+    const prodCard = el('div', 'card');
     prodCard.innerHTML = '<div class="card-title">Productos</div>';
     (productos || []).forEach(p => {
       prodCard.innerHTML +=
-        '<div class="prod-item"><span class="prod-qty">' + p.cantidad + 'x</span>' + escHtml(p.nombre) + '</div>';
+        '<div class="prod-item"><span class="prod-qty">' + p.cantidad + 'x</span>' + esc(p.nombre) + '</div>';
     });
     main.appendChild(prodCard);
 
-    // 5. Confirm actions (only if not fully confirmed yet)
-    if (timelineStep < 4) {
-      const actCard = div('card');
-      actCard.innerHTML =
-        '<div class="card-title">Confirmar</div>' +
-        '<div class="field-label">Codigo de aprobacion</div>' +
-        '<input id="key-input" class="code-input" type="text" placeholder="Ingresa tu codigo" autocomplete="off" />' +
-        '<div class="btn-row">' +
-          '<button class="btn btn-entrega"  id="btn-entrega"  ' + (timelineStep >= 3 ? 'disabled' : '') + '>Confirmar entrega</button>' +
-          '<button class="btn btn-recepcion" id="btn-recepcion" ' + (timelineStep >= 4 ? 'disabled' : '') + '>Confirmar recepcion</button>' +
-        '</div>';
-      main.appendChild(actCard);
-
-      document.getElementById('btn-entrega').addEventListener('click',   () => confirmar('entrega'));
-      document.getElementById('btn-recepcion').addEventListener('click', () => confirmar('recepcion'));
-    }
+    // 5. FAB: show only if not yet confirmed
+    const fab = document.getElementById('fab');
+    fab.style.display = timelineStep < 4 ? 'flex' : 'none';
   }
 
-  // ── Confirm action ──
-  async function confirmar(tipo) {
-    const key = (document.getElementById('key-input')?.value || '').trim();
-    if (!key) { toast('Ingresa tu codigo de aprobacion', 'error'); return; }
-
-    const btnE = document.getElementById('btn-entrega');
-    const btnR = document.getElementById('btn-recepcion');
-    if (btnE) btnE.disabled = true;
-    if (btnR) btnR.disabled = true;
-
-    try {
-      const resp = await fetch('/api/track/' + businessId + '/' + pedidoId + '/confirmar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo, keyAprobacion: key }),
-      });
-      const data = await resp.json();
-
-      if (!resp.ok) {
-        toast(data.error || 'Error al confirmar', 'error');
-        if (btnE) btnE.disabled = false;
-        if (btnR) btnR.disabled = false;
-        return;
-      }
-
-      toast(tipo === 'entrega' ? 'Entrega confirmada' : 'Recepcion confirmada', 'success');
-      // Reload data to reflect new state
-      setTimeout(load, 1200);
-    } catch (err) {
-      toast('Error de conexion', 'error');
-      if (btnE) btnE.disabled = false;
-      if (btnR) btnR.disabled = false;
-    }
-  }
-
-  // ── Load data ──
+  // ── Load ──
   async function load() {
     try {
       const resp = await fetch('/api/track/' + businessId + '/' + pedidoId);
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
         document.getElementById('main').innerHTML =
-          '<div class="error-state">No se encontro el pedido.<br><small>' + (e.error || '') + '</small></div>';
+          '<div class="error-state">No se encontró el pedido.<br><small>' + esc(e.error || '') + '</small></div>';
         return;
       }
-      const data = await resp.json();
-      render(data);
-    } catch (err) {
+      render(await resp.json());
+    } catch {
       document.getElementById('main').innerHTML =
-        '<div class="error-state">Error de conexion. Verifica tu red.</div>';
+        '<div class="error-state">Error de conexión. Verifica tu red.</div>';
     }
   }
 
   // ── Helpers ──
-  function div(cls) { const d = document.createElement('div'); d.className = cls; return d; }
-  function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function el(tag, cls) { const d = document.createElement(tag); d.className = cls; return d; }
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function routeRow(type, icon, label, name, addr, city) {
     return '<div class="route-row">' +
       '<div class="route-icon icon-' + (type === 'origin' ? 'origin' : 'dest') + '">' + icon + '</div>' +
       '<div>' +
         '<div class="route-label">' + label + '</div>' +
-        '<div class="route-name">' + escHtml(name) + '</div>' +
-        (addr ? '<div class="route-addr">' + escHtml(addr) + '</div>' : '') +
-        (city ? '<div class="route-city">' + escHtml(city) + '</div>' : '') +
+        '<div class="route-name">' + esc(name) + '</div>' +
+        (addr ? '<div class="route-addr">' + esc(addr) + '</div>' : '') +
+        (city ? '<div class="route-city">' + esc(city) + '</div>' : '') +
       '</div></div>';
   }
 
-  // Start
   if (!businessId || !pedidoId) {
     document.getElementById('main').innerHTML =
-      '<div class="error-state">URL invalida. Escanea el QR del ticket.</div>';
+      '<div class="error-state">URL inválida. Escanea el QR del ticket.</div>';
   } else {
     load();
   }
