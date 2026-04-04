@@ -69,25 +69,60 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const pedido = await sheets.getPedidoById(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
-    const productos = parseProductosPublico(pedido.productos);
+    const productos    = parseProductosPublico(pedido.productos);
     const timelineStep = estadoToStep(pedido.estado);
+    const tipoEnvio    = (pedido.tipoEnvio || '').toUpperCase();
 
-    const tipoEnvio = (pedido.tipoEnvio || '').toUpperCase();
+    // ── Leer dirección del negocio desde Configuracion!A:B ───────────────────
+    let bizConfig = {};
+    try {
+      const cfgRows = await sheets.getRows('Configuracion!A:B');
+      for (let i = 1; i < cfgRows.length; i++) {
+        const k = (cfgRows[i][0] || '').trim();
+        const v = (cfgRows[i][1] || '').toString().trim();
+        if (k) bizConfig[k] = v;
+      }
+    } catch (_) {}
 
-    // Build origin (the business)
+    // ── Leer registro de Delivery para este pedido ───────────────────────────
+    let delivery = null;
+    try {
+      const dRows = await sheets.getRows('Delivery!A:O');
+      if (dRows && dRows.length > 1) {
+        const dRow = dRows.slice(1).find(r => r[1] === pedido.id);
+        if (dRow) {
+          delivery = {
+            deliveryId:       dRow[0]  || '',
+            tipoEnvio:        dRow[2]  || '',
+            origenNombre:     dRow[3]  || '',
+            origenDireccion:  dRow[4]  || '',
+            origenCiudad:     dRow[5]  || '',
+            destinoNombre:    dRow[6]  || '',
+            destinoDireccion: dRow[7]  || '',
+            destinoCiudad:    dRow[8]  || '',
+            empresaEnvio:     dRow[9]  || '',
+            repartidorId:     dRow[10] || '',
+            estadoDelivery:   dRow[11] || 'INACTIVO',
+            fechaCreacion:    dRow[12] || '',
+            fechaDisponible:  dRow[13] || '',
+            fechaEntrega:     dRow[14] || '',
+          };
+        }
+      }
+    } catch (_) {}
+
+    // ── Origen: del registro Delivery o fallback al negocio ──────────────────
     const origen = {
-      nombre:   negocio.nombre || negocio.name || businessId,
-      direccion: negocio.direccion || negocio.address || '',
-      ciudad:   negocio.ciudad || '',
+      nombre:    delivery?.origenNombre    || negocio.nombre || businessId,
+      direccion: delivery?.origenDireccion || bizConfig['direccion_tienda'] || negocio.direccion || '',
+      ciudad:    delivery?.origenCiudad    || bizConfig['departamento']     || negocio.ciudad    || '',
     };
 
-    // Build destination based on tipoEnvio
-    // LOCAL  → client home address (pedido.direccion)
-    // NACIONAL → courier office address (pedido.direccion already built from direccionEnvio)
-    // SEDE   → pickup point only (pedido.direccion already built from sedeEnvio)
+    // ── Destino: del registro Delivery o fallback al pedido ──────────────────
     const destino = {
-      direccion: pedido.direccion || '',
-      ciudad: [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
+      nombre:    delivery?.destinoNombre    || '',
+      direccion: delivery?.destinoDireccion || pedido.direccion || '',
+      ciudad:    delivery?.destinoCiudad    || [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
     };
 
     // Build public response — no client name / phone / prices
@@ -101,6 +136,7 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
       origen,
       destino,
       productos,
+      delivery,
     });
   } catch (err) {
     console.error('[TRACK] Error GET:', err.message);
