@@ -313,7 +313,7 @@ router.get('/pedidos/:businessId', async (req, res) => {
 router.post('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, cliente, telefono, direccion, productos, total, observaciones, estado, origen, notificarCliente, departamento, ciudad, tipoEnvio, metodoEnvio, detalleEnvio, costoEnvio } = req.body;
+    const { whatsapp, cliente, telefono, direccion, productos, total, observaciones, estado, origen, notificarCliente, departamento, ciudad, tipoEnvio, empresaEnvio, costoEnvio } = req.body;
 
     if (!whatsapp || !productos || total === undefined) {
       return res.status(400).json({ error: 'Campos requeridos: whatsapp, productos, total' });
@@ -343,8 +343,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const valores = [
       pedidoId, fechaPeru, horaPeru, (whatsapp || '').toString().replace(/[^0-9]/g, ''),
       cliente || '', telefono || '', direccion || '', productosStr, totalNumero, estadoFinal,
-      '', observaciones || '', departamento || '', ciudad || '', tipoEnvio || '',
-      metodoEnvio || '', detalleEnvio || '', costoEnvioNumero, origenFinal
+      '', observaciones || '', tipoEnvio || '', empresaEnvio || '', origenFinal
     ];
 
     await sheets.appendRow('Pedidos', valores);
