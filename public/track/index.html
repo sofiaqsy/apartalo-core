@@ -410,7 +410,7 @@
 
   // ── Render ──
   function render(data) {
-    const { id, fecha, hora, estado, timelineStep, origen, destino, productos } = data;
+    const { id, fecha, hora, estado, timelineStep, tipoEnvio, origen, destino, productos } = data;
 
     document.getElementById('hdr-title').textContent = 'Pedido #' + id;
     document.getElementById('hdr-sub').textContent   = (origen.nombre || '') + ' · ' + (fecha || '');
@@ -427,18 +427,50 @@
       '</span>';
     main.appendChild(pillCard);
 
-    // 2. Route + Map
-    const destAddr = [destino.direccion, destino.ciudad].filter(Boolean).join(', ');
-    const mapsQ    = encodeURIComponent(destAddr || 'Lima, Peru');
-    const embedSrc = 'https://maps.google.com/maps?q=' + mapsQ + '&output=embed&z=15';
-    const mapsUrl  = 'https://maps.google.com/?q=' + mapsQ;
+    // 2. Route + Map  —  comportamiento según tipoEnvio
+    const tipo = (tipoEnvio || '').toUpperCase();
+    const destAddr   = [destino.direccion, destino.ciudad].filter(Boolean).join(', ');
+    const origenAddr = [origen.direccion, origen.ciudad].filter(Boolean).join(', ');
+
+    let embedSrc, mapsUrl, routeHtml;
+
+    if (tipo === 'SEDE') {
+      // Solo punto de recojo — sin origen
+      const sedeQ = encodeURIComponent(destAddr || 'Lima, Peru');
+      embedSrc  = 'https://maps.google.com/maps?q=' + sedeQ + '&output=embed&z=16';
+      mapsUrl   = 'https://maps.google.com/?q=' + sedeQ;
+      routeHtml =
+        '<div class="card-title">Punto de recojo</div>' +
+        routeRow('dest', svgPin, 'RETIRO EN SEDE', origen.nombre, destino.direccion, destino.ciudad);
+
+    } else if (tipo === 'NACIONAL') {
+      // Ruta: negocio → agencia courier
+      const originQ = encodeURIComponent(origenAddr || origen.nombre);
+      const destQ   = encodeURIComponent(destAddr || 'Lima, Peru');
+      embedSrc  = 'https://www.google.com/maps/dir/' + originQ + '/' + destQ + '?output=embed';
+      mapsUrl   = 'https://maps.google.com/maps/dir/' + originQ + '/' + destQ;
+      routeHtml =
+        '<div class="card-title">Ruta de envío nacional</div>' +
+        routeRow('origin', svgPin,   'ORIGEN',          origen.nombre,            origen.direccion, origen.ciudad) +
+        '<div class="route-divider"></div>' +
+        routeRow('dest',   svgTruck, 'AGENCIA COURIER',  destino.direccion || 'Agencia de envío', '', destino.ciudad);
+
+    } else {
+      // LOCAL (o sin tipo): ruta negocio → domicilio cliente
+      const originQ = encodeURIComponent(origenAddr || origen.nombre);
+      const destQ   = encodeURIComponent(destAddr || 'Lima, Peru');
+      embedSrc  = 'https://www.google.com/maps/dir/' + originQ + '/' + destQ + '?output=embed';
+      mapsUrl   = 'https://maps.google.com/maps/dir/' + originQ + '/' + destQ;
+      routeHtml =
+        '<div class="card-title">Ruta de entrega</div>' +
+        routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,                 origen.direccion,  origen.ciudad) +
+        '<div class="route-divider"></div>' +
+        routeRow('dest',   svgTruck, 'DESTINO', destino.direccion || 'Domicilio', '', destino.ciudad);
+    }
 
     const routeCard = el('div', 'card');
     routeCard.innerHTML =
-      '<div class="card-title">Ruta de entrega</div>' +
-      routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,  origen.direccion,  origen.ciudad) +
-      '<div class="route-divider"></div>' +
-      routeRow('dest',   svgTruck, 'DESTINO', destino.cliente || 'Punto de entrega', destino.direccion, destino.ciudad) +
+      routeHtml +
       '<div class="map-wrapper"><iframe src="' + embedSrc + '" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>' +
       '<a class="map-link" href="' + mapsUrl + '" target="_blank">' + svgMap + ' Abrir en Google Maps</a>';
     main.appendChild(routeCard);

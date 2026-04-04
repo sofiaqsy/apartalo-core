@@ -72,6 +72,24 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const productos = parseProductosPublico(pedido.productos);
     const timelineStep = estadoToStep(pedido.estado);
 
+    const tipoEnvio = (pedido.tipoEnvio || '').toUpperCase();
+
+    // Build origin (the business)
+    const origen = {
+      nombre:   negocio.nombre || negocio.name || businessId,
+      direccion: negocio.direccion || negocio.address || '',
+      ciudad:   negocio.ciudad || '',
+    };
+
+    // Build destination based on tipoEnvio
+    // LOCAL  → client home address (pedido.direccion)
+    // NACIONAL → courier office address (pedido.direccion already built from direccionEnvio)
+    // SEDE   → pickup point only (pedido.direccion already built from sedeEnvio)
+    const destino = {
+      direccion: pedido.direccion || '',
+      ciudad: [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
+    };
+
     // Build public response — no client name / phone / prices
     res.json({
       id: pedido.id,
@@ -79,20 +97,9 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
       hora: pedido.hora,
       estado: pedido.estado || 'PENDIENTE',
       timelineStep,
-
-      // Origin: the business
-      origen: {
-        nombre: negocio.nombre || negocio.name || businessId,
-        direccion: negocio.direccion || negocio.address || '',
-        ciudad: negocio.ciudad || '',
-      },
-
-      // Destination: delivery address only (no name / phone)
-      destino: {
-        direccion: pedido.direccion || '',
-        ciudad: [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
-      },
-
+      tipoEnvio,
+      origen,
+      destino,
       productos,
     });
   } catch (err) {
