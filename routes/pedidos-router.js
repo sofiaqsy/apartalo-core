@@ -497,10 +497,21 @@ router.post('/:businessId', async (req, res) => {
     if (tipoEnvio && tipoEnvio.trim() !== '') try {
       const tipo_envio = (tipoEnvio || '').toUpperCase();
 
+      // Leer dirección del negocio desde hoja Configuracion (clave-valor en A:B)
+      let bizConfig = {};
+      try {
+        const configRows = await sheets.getRows('Configuracion!A:B');
+        for (let i = 1; i < configRows.length; i++) {
+          const k = (configRows[i][0] || '').trim();
+          const v = (configRows[i][1] || '').toString().trim();
+          if (k) bizConfig[k] = v;
+        }
+      } catch (_) { /* si no existe la hoja, usamos fallback */ }
+
       // Origen: siempre el negocio
-      const origenNombre    = negocio.nombre    || '';
-      const origenDireccion = negocio.direccion || '';
-      const origenCiudad    = negocio.ciudad    || '';
+      const origenNombre    = negocio.nombre || '';
+      const origenDireccion = bizConfig['direccion_tienda'] || negocio.direccion || '';
+      const origenCiudad    = bizConfig['departamento']     || negocio.ciudad    || '';
 
       // Destino: varía por tipo de envío
       let destinoNombre    = '';
