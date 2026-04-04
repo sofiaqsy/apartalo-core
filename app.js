@@ -31,7 +31,8 @@ const clientesRouter = require('./routes/clientes-router');
 const pedidosRouter = require('./routes/pedidos-router');
 const botConversationsRouter = require('./routes/bot-conversations-router');
 const ocrRouter = require('./routes/ocr-router');
-const trackRouter = require('./routes/track-router');
+const trackRouter    = require('./routes/track-router');
+const deliveryRouter = require('./routes/delivery-router');
 
 // Inicializar Express
 const app = express();
@@ -115,6 +116,9 @@ app.use('/api/ocr', ocrRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
+
+// Delivery — gestión de hoja Delivery del spreadsheet
+app.use('/api/delivery', deliveryRouter);
 
 // API general (productos, negocios, etc.) - DESPUÉS de las específicas
 app.use('/api', apiRouter);

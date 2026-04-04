@@ -493,6 +493,72 @@ router.post('/:businessId', async (req, res) => {
       negociosService
     ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook:', e.message));
 
+    // 📦 Crear registro en hoja Delivery si el pedido tiene tipoEnvio configurado
+    if (tipoEnvio && tipoEnvio.trim() !== '') try {
+      const tipo_envio = (tipoEnvio || '').toUpperCase();
+
+      // Origen: siempre el negocio
+      const origenNombre    = negocio.nombre    || '';
+      const origenDireccion = negocio.direccion || '';
+      const origenCiudad    = negocio.ciudad    || '';
+
+      // Destino: varía por tipo de envío
+      let destinoNombre    = '';
+      let destinoDireccion = '';
+      let destinoCiudad    = [ciudad || '', departamento || ''].filter(Boolean).join(', ');
+
+      if (tipo_envio === 'NACIONAL') {
+        // Destino = agencia courier
+        destinoNombre    = empresaEnvio || 'Courier';
+        destinoDireccion = direccion    || '';
+      } else if (tipo_envio === 'SEDE') {
+        // Destino = misma sede (origen = destino)
+        destinoNombre    = origenNombre;
+        destinoDireccion = origenDireccion;
+        destinoCiudad    = origenCiudad;
+      } else {
+        // LOCAL: destino = dirección del cliente
+        destinoNombre    = cliente      || '';
+        destinoDireccion = direccion    || '';
+      }
+
+      const deliveryId = `DEL-${Date.now().toString().slice(-8)}`;
+      const ahora_delivery = new Date();
+      const peru_delivery  = new Date(ahora_delivery.getTime() - 5 * 60 * 60 * 1000);
+      const dd  = String(peru_delivery.getUTCDate()).padStart(2, '0');
+      const mm  = String(peru_delivery.getUTCMonth() + 1).padStart(2, '0');
+      const yy  = peru_delivery.getUTCFullYear();
+      let   hh  = peru_delivery.getUTCHours();
+      const min = String(peru_delivery.getUTCMinutes()).padStart(2, '0');
+      const ap  = hh >= 12 ? 'p.m.' : 'a.m.';
+      hh = hh % 12 || 12;
+      const fechaDelivery = `${dd}/${mm}/${yy} ${hh}:${min} ${ap}`;
+
+      const valoresDelivery = [
+        deliveryId,
+        pedidoId,
+        tipo_envio,
+        origenNombre,
+        origenDireccion,
+        origenCiudad,
+        destinoNombre,
+        destinoDireccion,
+        destinoCiudad,
+        tipo_envio === 'NACIONAL' ? (empresaEnvio || '') : '',
+        negocioSolicitante || '',   // repartidorId
+        'INACTIVO',
+        fechaDelivery,
+        '',   // fechaDisponible
+        '',   // fechaEntrega
+      ];
+
+      await sheets.appendRow('Delivery', valoresDelivery);
+      console.log(`[Delivery] Registro creado: ${deliveryId} → pedido ${pedidoId}`);
+    } catch (eDelivery) {
+      // No interrumpimos la respuesta si falla el registro de delivery
+      console.error('⚠️ [Delivery] Error creando registro en hoja:', eDelivery.message);
+    }
+
     res.status(201).json({
       success: true,
       mensaje: 'Pedido creado',
