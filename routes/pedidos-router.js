@@ -523,10 +523,24 @@ router.post('/:businessId', async (req, res) => {
         destinoNombre    = empresaEnvio || 'Courier';
         destinoDireccion = direccion    || '';
       } else if (tipo_envio === 'SEDE') {
-        // Destino = misma sede (origen = destino)
-        destinoNombre    = origenNombre;
-        destinoDireccion = origenDireccion;
-        destinoCiudad    = origenCiudad;
+        // Destino = localEnvio registrado en la hoja Clientes (col R, index 17)
+        // buscamos por whatsapp para garantizar la dirección correcta sin depender del campo direccion del pedido
+        let localEnvioCliente = '';
+        try {
+          const clientesRows = await sheets.getRows('Clientes!A:R');
+          const whatsappLimpio = (whatsapp || '').replace(/[^0-9]/g, '');
+          for (let ci = 1; ci < clientesRows.length; ci++) {
+            const rowWa = (clientesRows[ci][1] || '').replace(/[^0-9]/g, '');
+            if (rowWa === whatsappLimpio && !(clientesRows[ci][0] || '').includes('_DELETED')) {
+              localEnvioCliente = (clientesRows[ci][17] || '').trim(); // col R = localEnvio
+              break;
+            }
+          }
+        } catch (eCli) { console.error('[Delivery/SEDE] Error leyendo Clientes:', eCli.message); }
+
+        console.log(`[Delivery/SEDE] localEnvioCliente="${localEnvioCliente}" direccion="${direccion}"`);
+        destinoNombre    = cliente                         || '';
+        destinoDireccion = localEnvioCliente || direccion || '';
       } else {
         // LOCAL: destino = dirección del cliente
         destinoNombre    = cliente      || '';

@@ -442,7 +442,7 @@
       wazeUrl   = 'https://waze.com/ul?q=' + destQ + '&navigate=yes';
       routeHtml =
         '<div class="card-title">Punto de recojo</div>' +
-        routeRow('dest', svgPin, 'RETIRO EN SEDE', origen.nombre, destino.direccion, destino.ciudad);
+        routeRow('dest', svgPin, 'RETIRO EN SEDE', destino.nombre || destino.direccion || origen.nombre, destino.direccion, destino.ciudad);
 
     } else if (tipo === 'NACIONAL') {
       const origQ = encodeURIComponent(origAddr || origen.nombre);
