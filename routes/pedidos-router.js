@@ -538,15 +538,13 @@ router.post('/:businessId', async (req, res) => {
           }
         } catch (eCli) { console.error('[Delivery/SEDE] Error leyendo Clientes:', eCli.message); }
 
-        const sedeAddr = localEnvioCliente || direccion || '';
+        const sedeAddr    = localEnvioCliente || direccion || '';
+        const sedeCiudad  = [ciudad || '', departamento || ''].filter(Boolean).join(', ') || origenCiudad;
         console.log(`[Delivery/SEDE] sedeAddr="${sedeAddr}"`);
         // Para SEDE origen y destino son el mismo punto de recojo
-        origenNombre    = negocio.nombre || '';
-        origenDireccion = sedeAddr;
-        origenCiudad    = [ciudad || '', departamento || ''].filter(Boolean).join(', ') || bizConfig['departamento'] || '';
         destinoNombre    = origenNombre;
         destinoDireccion = sedeAddr;
-        destinoCiudad    = origenCiudad;
+        destinoCiudad    = sedeCiudad;
       } else {
         // LOCAL: destino = dirección del cliente
         destinoNombre    = cliente      || '';
