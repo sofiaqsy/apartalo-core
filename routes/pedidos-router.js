@@ -538,10 +538,10 @@ router.post('/:businessId', async (req, res) => {
           }
         } catch (eCli) { console.error('[Delivery/SEDE] Error leyendo Clientes:', eCli.message); }
 
-        const sedeAddr    = localEnvioCliente || direccion || '';
-        const sedeCiudad  = [ciudad || '', departamento || ''].filter(Boolean).join(', ') || origenCiudad;
+        const sedeAddr   = localEnvioCliente || direccion || '';
+        const sedeCiudad = [ciudad || '', departamento || ''].filter(Boolean).join(', ') || origenCiudad;
         console.log(`[Delivery/SEDE] sedeAddr="${sedeAddr}"`);
-        // Para SEDE origen y destino son el mismo punto de recojo
+        // Para SEDE origen y destino son el mismo punto de recojo (sede del cliente)
         destinoNombre    = origenNombre;
         destinoDireccion = sedeAddr;
         destinoCiudad    = sedeCiudad;
@@ -563,13 +563,17 @@ router.post('/:businessId', async (req, res) => {
       hh = hh % 12 || 12;
       const fechaDelivery = `${dd}/${mm}/${yy} ${hh}:${min} ${ap}`;
 
+      // Para SEDE, origen y destino comparten la misma dirección (punto de recojo)
+      const finalOrigenDireccion = tipo_envio === 'SEDE' ? destinoDireccion : origenDireccion;
+      const finalOrigenCiudad    = tipo_envio === 'SEDE' ? destinoCiudad    : origenCiudad;
+
       const valoresDelivery = [
         deliveryId,
         pedidoId,
         tipo_envio,
         origenNombre,
-        origenDireccion,
-        origenCiudad,
+        finalOrigenDireccion,
+        finalOrigenCiudad,
         destinoNombre,
         destinoDireccion,
         destinoCiudad,
