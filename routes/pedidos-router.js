@@ -416,20 +416,21 @@ router.post('/:businessId', async (req, res) => {
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     // ── B2B: enrich with requesting business data ──────────────────────────────
-    let telefonoFinal  = telefono  || '';
-    let direccionFinal = direccion || '';
-    let ciudadFinal    = ciudad    || '';
+    let clienteFinal      = cliente    || '';
+    let telefonoFinal     = telefono   || '';
+    let direccionFinal    = direccion  || '';
+    let ciudadFinal       = ciudad     || '';
     let departamentoFinal = departamento || '';
-    let tipoEnvioFinal = tipoEnvio || '';
+    let tipoEnvioFinal    = tipoEnvio  || '';
 
     if (tipo === 'B2B' && negocioSolicitante) {
       const negocioSol = negociosService.getById(negocioSolicitante);
       if (negocioSol) {
-        if (!telefonoFinal)   telefonoFinal   = negocioSol.whatsapp?.phoneId ? '' : '';  // no phone field, skip
+        if (!clienteFinal)    clienteFinal    = negocioSol.nombre    || negocioSolicitante;
         if (!direccionFinal)  direccionFinal  = negocioSol.direccion || '';
         if (!ciudadFinal)     ciudadFinal     = negocioSol.ciudad    || '';
       }
-      if (!tipoEnvioFinal) tipoEnvioFinal = 'LOCAL'; // B2B defaults to LOCAL delivery
+      if (!tipoEnvioFinal) tipoEnvioFinal = 'LOCAL';
     }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
@@ -459,7 +460,7 @@ router.post('/:businessId', async (req, res) => {
     const valores = [
       pedidoId, fecha, hora,
       whatsapp.replace(/[^0-9]/g, ''),
-      cliente || '', telefonoFinal, direccionFinal,
+      clienteFinal, telefonoFinal, direccionFinal,
       productosTexto, totalFinal, 'PENDIENTE', '',
       observaciones || '', tipoEnvioFinal, empresaEnvio || '', 'APP',
       estadoPago || 'PENDIENTE_PAGO',
@@ -505,7 +506,7 @@ router.post('/:businessId', async (req, res) => {
     const testMode = req.headers['x-test-mode'] === '1';
     console.log(`[Pedido] ciudad="${ciudadFinal}" departamento="${departamentoFinal}" direccion="${direccionFinal}"${testMode ? ' [TEST MODE]' : ''}`);
     deliveryService.notificarNuevoDelivery(
-      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: cliente || '', telefono: telefonoFinal, direccion: direccionFinal, ciudad: ciudadFinal, departamento: departamentoFinal, productos: productosTexto, total: totalFinal, testMode },
+      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: clienteFinal, telefono: telefonoFinal, direccion: direccionFinal, ciudad: ciudadFinal, departamento: departamentoFinal, productos: productosTexto, total: totalFinal, testMode },
       negocio,
       negociosService
     ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook:', e.message));
@@ -562,7 +563,7 @@ router.post('/:businessId', async (req, res) => {
         destinoCiudad    = sedeCiudad;
       } else {
         // LOCAL / B2B: destino = dirección del cliente/negocio solicitante
-        destinoNombre    = cliente        || '';
+        destinoNombre    = clienteFinal   || '';
         destinoDireccion = direccionFinal || '';
         destinoCiudad    = ciudadFinal    || '';
       }
