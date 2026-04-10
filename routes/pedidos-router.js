@@ -426,9 +426,29 @@ router.post('/:businessId', async (req, res) => {
     if (tipo === 'B2B' && negocioSolicitante) {
       const negocioSol = negociosService.getById(negocioSolicitante);
       if (negocioSol) {
-        if (!clienteFinal)    clienteFinal    = negocioSol.nombre    || negocioSolicitante;
-        if (!direccionFinal)  direccionFinal  = negocioSol.direccion || '';
-        if (!ciudadFinal)     ciudadFinal     = negocioSol.ciudad    || '';
+        if (!clienteFinal) clienteFinal = negocioSol.nombre || negocioSolicitante;
+
+        // Read requesting business Configuracion sheet for address data
+        if ((!direccionFinal || !ciudadFinal) && negocioSol.spreadsheetId) {
+          try {
+            const sheetsSol = new SheetsService(negocioSol.spreadsheetId);
+            await sheetsSol.initialize();
+            const configSolRows = await sheetsSol.getRows('Configuracion!A:B');
+            const solConfig = {};
+            for (let i = 1; i < configSolRows.length; i++) {
+              const k = (configSolRows[i][0] || '').trim();
+              const v = (configSolRows[i][1] || '').toString().trim();
+              if (k) solConfig[k] = v;
+            }
+            if (!direccionFinal) direccionFinal = solConfig['direccion_tienda'] || solConfig['direccion'] || negocioSol.direccion || '';
+            if (!ciudadFinal)    ciudadFinal    = solConfig['departamento']     || solConfig['ciudad']    || negocioSol.ciudad    || '';
+            console.log(`[B2B] solConfig direccion="${direccionFinal}" ciudad="${ciudadFinal}"`);
+          } catch (eSol) {
+            console.error('[B2B] Error leyendo Configuracion del solicitante:', eSol.message);
+            if (!direccionFinal) direccionFinal = negocioSol.direccion || '';
+            if (!ciudadFinal)    ciudadFinal    = negocioSol.ciudad    || '';
+          }
+        }
       }
       if (!tipoEnvioFinal) tipoEnvioFinal = 'LOCAL';
     }
