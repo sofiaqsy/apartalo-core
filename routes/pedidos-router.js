@@ -422,14 +422,16 @@ router.post('/:businessId', async (req, res) => {
     let ciudadFinal       = ciudad     || '';
     let departamentoFinal = departamento || '';
     let tipoEnvioFinal    = tipoEnvio  || '';
+    // whatsappFinal: cleaned number, will be overridden from Configuracion for B2B
+    let whatsappFinal     = (whatsapp || '').replace(/[^0-9]/g, '');
 
     if (tipo === 'B2B' && negocioSolicitante) {
       const negocioSol = negociosService.getById(negocioSolicitante);
       if (negocioSol) {
         if (!clienteFinal) clienteFinal = negocioSol.nombre || negocioSolicitante;
 
-        // Read requesting business Configuracion sheet for address data
-        if ((!direccionFinal || !ciudadFinal) && negocioSol.spreadsheetId) {
+        // Read requesting business Configuracion sheet for all missing fields
+        if (negocioSol.spreadsheetId) {
           try {
             const sheetsSol = new SheetsService(negocioSol.spreadsheetId);
             await sheetsSol.initialize();
@@ -442,7 +444,12 @@ router.post('/:businessId', async (req, res) => {
             }
             if (!direccionFinal) direccionFinal = solConfig['direccion_tienda'] || solConfig['direccion'] || negocioSol.direccion || '';
             if (!ciudadFinal)    ciudadFinal    = solConfig['departamento']     || solConfig['ciudad']    || negocioSol.ciudad    || '';
-            console.log(`[B2B] solConfig direccion="${direccionFinal}" ciudad="${ciudadFinal}"`);
+            if (!telefonoFinal)  telefonoFinal  = solConfig['telefono']         || solConfig['phone']     || '';
+            // Use real whatsapp number from config if the one passed looks invalid (< 6 digits)
+            if (!whatsappFinal || whatsappFinal.length < 6) {
+              whatsappFinal = (solConfig['whatsapp'] || solConfig['whatsapp_numero'] || solConfig['telefono'] || whatsappFinal).replace(/[^0-9]/g, '');
+            }
+            console.log(`[B2B] solConfig direccion="${direccionFinal}" ciudad="${ciudadFinal}" telefono="${telefonoFinal}" whatsapp="${whatsappFinal}"`);
           } catch (eSol) {
             console.error('[B2B] Error leyendo Configuracion del solicitante:', eSol.message);
             if (!direccionFinal) direccionFinal = negocioSol.direccion || '';
@@ -479,7 +486,7 @@ router.post('/:businessId', async (req, res) => {
 
     const valores = [
       pedidoId, fecha, hora,
-      whatsapp.replace(/[^0-9]/g, ''),
+      whatsappFinal,
       clienteFinal, telefonoFinal, direccionFinal,
       productosTexto, totalFinal, 'PENDIENTE', '',
       observaciones || '', tipoEnvioFinal, empresaEnvio || '', 'APP',
@@ -516,7 +523,7 @@ router.post('/:businessId', async (req, res) => {
       try {
         const whatsappService = new WhatsAppService(negocio.whatsapp);
         const mensaje = `✅ *Pedido Registrado*\n\n📋 *ID:* ${pedidoId}\n📅 ${fecha} ${hora}\n\n*Productos:*\n${productosTexto}\n\n💰 *Total:* S/ ${totalFinal.toFixed(2)}\n\nTe avisaremos cuando esté listo. ¡Gracias! 🙏`;
-        await whatsappService.sendMessage(whatsapp.replace(/[^0-9]/g, ''), mensaje);
+        await whatsappService.sendMessage(whatsappFinal, mensaje);
       } catch (e) {
         console.error('⚠️ Error notificando cliente:', e.message);
       }
@@ -526,7 +533,7 @@ router.post('/:businessId', async (req, res) => {
     const testMode = req.headers['x-test-mode'] === '1';
     console.log(`[Pedido] ciudad="${ciudadFinal}" departamento="${departamentoFinal}" direccion="${direccionFinal}"${testMode ? ' [TEST MODE]' : ''}`);
     deliveryService.notificarNuevoDelivery(
-      { id: pedidoId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), cliente: clienteFinal, telefono: telefonoFinal, direccion: direccionFinal, ciudad: ciudadFinal, departamento: departamentoFinal, productos: productosTexto, total: totalFinal, testMode },
+      { id: pedidoId, whatsapp: whatsappFinal, cliente: clienteFinal, telefono: telefonoFinal, direccion: direccionFinal, ciudad: ciudadFinal, departamento: departamentoFinal, productos: productosTexto, total: totalFinal, testMode },
       negocio,
       negociosService
     ).catch(e => console.error('⚠️ [Delivery] Error in delivery hook:', e.message));
@@ -634,8 +641,8 @@ router.post('/:businessId', async (req, res) => {
       mensaje: 'Pedido creado',
       pedido: {
         id: pedidoId, fecha, hora,
-        whatsapp: whatsapp.replace(/[^0-9]/g, ''),
-        cliente: cliente || '',
+        whatsapp: whatsappFinal,
+        cliente: clienteFinal || '',
         productos: productosTexto,
         total: totalFinal,
         estado: 'PENDIENTE',
