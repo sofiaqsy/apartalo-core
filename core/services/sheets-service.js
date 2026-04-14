@@ -332,7 +332,7 @@ class SheetsService {
   // ============================================
 
   async getProductos(estado = null) {
-    const rows = await this.getRows('Inventario!A:K');
+    const rows = await this.getRows('Inventario!A:M');
     if (rows.length <= 1) return [];
 
     const productos = [];
@@ -370,6 +370,8 @@ class SheetsService {
         categoria: row[8] || '',
         proveedorId: row[9] || '',
         proveedorProductoCodigo: row[10] || '',
+        precioMayor: this.parseDecimal(row[11]),       // col L
+        cantidadMayor: this.parseInt(row[12]),          // col M
         disponible: stock - stockReservado,
         rowIndex: i + 1
       });
