@@ -465,8 +465,8 @@ router.post('/:businessId', async (req, res) => {
 
     const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
     const ahora = new Date();
-    const fecha = ahora.toLocaleDateString('es-PE');
-    const hora = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    const fecha = ahora.toLocaleDateString('es-PE', { timeZone: 'America/Lima' });
+    const hora  = ahora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
 
     let productosTexto = '';
     let totalCalculado = 0;
