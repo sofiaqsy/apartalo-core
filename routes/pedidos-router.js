@@ -53,6 +53,36 @@ function serializePagos(pagos) {
   return JSON.stringify(pagos);
 }
 
+// ── Tracking helpers ──────────────────────────────────────────────────────────
+function nowPeru() {
+  const now = new Date();
+  return now.toLocaleString('es-PE', { timeZone: 'America/Lima', hour12: true });
+}
+
+function parseTracking(raw) {
+  if (!raw || raw.trim() === '') return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+}
+
+function buildTracking(creadoEn, accion, campos = []) {
+  return {
+    creadoEn,
+    actualizadoEn: nowPeru(),
+    historial: [{ fecha: nowPeru(), accion, campos }]
+  };
+}
+
+function updateTracking(raw, accion, campos = []) {
+  const ts = nowPeru();
+  const existing = parseTracking(raw);
+  if (!existing) {
+    return JSON.stringify({ creadoEn: ts, actualizadoEn: ts, historial: [{ fecha: ts, accion, campos }] });
+  }
+  const historial = existing.historial || [];
+  historial.push({ fecha: ts, accion, campos });
+  return JSON.stringify({ ...existing, actualizadoEn: ts, historial });
+}
+
 function determinarEstadoPago(pedido) {
   const estadoPagoExplicito = (pedido.estadoPago || '').toUpperCase();
   if (estadoPagoExplicito && estadoPagoExplicito !== '' && estadoPagoExplicito !== 'PENDIENTE_PAGO') {
@@ -98,8 +128,8 @@ router.get('/:businessId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    // A:U incluye tipo (T) y negocioSolicitante (U) para pedidos B2B
-    const rows = await sheets.getRows('Pedidos!A:U');
+    // A:W incluye tipo (T), negocioSolicitante (U), fechaActualizacion (V), tracking JSON (W)
+    const rows = await sheets.getRows('Pedidos!A:W');
 
     let pedidos = [];
     for (let i = 1; i < rows.length; i++) {
@@ -128,6 +158,8 @@ router.get('/:businessId', async (req, res) => {
         pagos: parsePagos(row[18]),
         tipo: row[19] || '',
         negocioSolicitante: row[20] || '',
+        fechaActualizacion: row[21] || '',
+        tracking: parseTracking(row[22]),
         rowIndex: i + 1
       };
 
@@ -330,7 +362,7 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:S');
+    const rows = await sheets.getRows('Pedidos!A:W');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] !== pedidoId) continue;
@@ -346,11 +378,17 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
         estado: 'VERIFICADO',
         operacionBCP,
         montoVerificado: parseFloat(montoVerificado) || 0,
-        fechaVerificado: new Date().toISOString(),
+        fechaVerificado: nowPeru(),
         fechaOperacion: fechaOperacion || ''
       };
 
-      await sheets.updateCell(`Pedidos!K${rowNum}`, serializeEvidencias(evidencias));
+      const tsNow = nowPeru();
+      const nuevoTracking = updateTracking(rows[i][22], 'ACTUALIZADO', ['evidencia_verificada']);
+      await sheets.batchUpdate([
+        { range: `Pedidos!K${rowNum}`, value: serializeEvidencias(evidencias) },
+        { range: `Pedidos!V${rowNum}`, value: tsNow },
+        { range: `Pedidos!W${rowNum}`, value: nuevoTracking },
+      ]);
 
       console.log(`✅ Evidencia ${evidenciaId} verificada con BCP op: ${operacionBCP}`);
       return res.json({ success: true, evidenciaId, operacionBCP });
@@ -484,6 +522,13 @@ router.post('/:businessId', async (req, res) => {
 
     const totalFinal = total || totalCalculado;
 
+    const tsCreacion = nowPeru();
+    const trackingInicial = JSON.stringify({
+      creadoEn: tsCreacion,
+      actualizadoEn: tsCreacion,
+      historial: [{ fecha: tsCreacion, accion: 'CREADO', campos: [] }]
+    });
+
     const valores = [
       pedidoId, fecha, hora,
       whatsappFinal,
@@ -494,7 +539,9 @@ router.post('/:businessId', async (req, res) => {
       montoPagado || 0,
       '', '',
       tipo ? tipo.toUpperCase() : '',   // T: tipo (B2B or empty)
-      negocioSolicitante || ''          // U: businessId of requester
+      negocioSolicitante || '',          // U: businessId of requester
+      tsCreacion,                        // V: fechaActualizacion
+      trackingInicial                    // W: tracking JSON
     ];
 
     await sheets.appendRow('Pedidos', valores);
@@ -680,24 +727,28 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const rows = await sheets.getRows('Pedidos!A:S');
+    const rows = await sheets.getRows('Pedidos!A:W');
 
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === pedidoId) {
         const updates = [];
         const rowNum = i + 1;
 
-        if (estado !== undefined) updates.push({ range: `Pedidos!J${rowNum}`, value: estado });
-        if (observaciones !== undefined) updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones });
-        if (direccion !== undefined) updates.push({ range: `Pedidos!G${rowNum}`, value: direccion });
-        if (tipoEnvio !== undefined) updates.push({ range: `Pedidos!M${rowNum}`, value: tipoEnvio });
-        if (empresaEnvio !== undefined) updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio });
-        if (voucherUrls !== undefined) updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls });
+        // track which fields changed for the historial entry
+        const camposModificados = [];
+
+        if (estado !== undefined) { updates.push({ range: `Pedidos!J${rowNum}`, value: estado }); camposModificados.push('estado'); }
+        if (observaciones !== undefined) { updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones }); camposModificados.push('observaciones'); }
+        if (direccion !== undefined) { updates.push({ range: `Pedidos!G${rowNum}`, value: direccion }); camposModificados.push('direccion'); }
+        if (tipoEnvio !== undefined) { updates.push({ range: `Pedidos!M${rowNum}`, value: tipoEnvio }); camposModificados.push('tipoEnvio'); }
+        if (empresaEnvio !== undefined) { updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio }); camposModificados.push('empresaEnvio'); }
+        if (voucherUrls !== undefined) { updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls }); camposModificados.push('voucherUrls'); }
 
         if (estadoPago !== undefined) {
           updates.push({ range: `Pedidos!P${rowNum}`, value: estadoPago });
+          camposModificados.push('estadoPago');
           if (estadoPago === 'PAGADO' && !fechaPago) {
-            updates.push({ range: `Pedidos!R${rowNum}`, value: new Date().toISOString() });
+            updates.push({ range: `Pedidos!R${rowNum}`, value: nowPeru() });
           }
         }
 
@@ -706,7 +757,7 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
           pagosActuales.push({
             id: `pago_${Date.now()}`,
             monto: parseFloat(nuevoPago),
-            fecha: new Date().toISOString(),
+            fecha: nowPeru(),
             nota: notaPago || ''
           });
           const nuevoMontoPagadoTotal = pagosActuales.reduce(
@@ -714,9 +765,11 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
           );
           updates.push({ range: `Pedidos!Q${rowNum}`, value: nuevoMontoPagadoTotal });
           updates.push({ range: `Pedidos!S${rowNum}`, value: serializePagos(pagosActuales) });
+          camposModificados.push('pago');
           console.log(`   → Nuevo pago: S/ ${nuevoPago} | Total acumulado: S/ ${nuevoMontoPagadoTotal}`);
         } else if (montoPagado !== undefined) {
           updates.push({ range: `Pedidos!Q${rowNum}`, value: montoPagado });
+          camposModificados.push('montoPagado');
           if (parseFloat(montoPagado) === 0) {
             updates.push({ range: `Pedidos!S${rowNum}`, value: '' });
           }
@@ -724,9 +777,15 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
 
         if (fechaPago !== undefined) {
           updates.push({ range: `Pedidos!R${rowNum}`, value: fechaPago });
+          camposModificados.push('fechaPago');
         }
 
+        // Always update V (fechaActualizacion) and W (tracking) on any change
         if (updates.length > 0) {
+          const tsNow = nowPeru();
+          const nuevoTracking = updateTracking(rows[i][22], 'ACTUALIZADO', camposModificados);
+          updates.push({ range: `Pedidos!V${rowNum}`, value: tsNow });
+          updates.push({ range: `Pedidos!W${rowNum}`, value: nuevoTracking });
           await sheets.batchUpdate(updates);
         }
 
