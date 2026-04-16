@@ -54,6 +54,9 @@ function serializePagos(pagos) {
 }
 
 // ── Tracking helpers ──────────────────────────────────────────────────────────
+// Solo registra cambios de estado significativos (CREADO, CONFIRMADO, COMPLETADO, etc.)
+const ESTADOS_TRACKING = new Set(['CREADO', 'CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'ENVIADO', 'ENTREGADO', 'COMPLETADO', 'CANCELADO']);
+
 function nowPeru() {
   const now = new Date();
   return now.toLocaleString('es-PE', { timeZone: 'America/Lima', hour12: true });
@@ -64,23 +67,15 @@ function parseTracking(raw) {
   try { return JSON.parse(raw); } catch (e) { return null; }
 }
 
-function buildTracking(creadoEn, accion, campos = []) {
-  return {
-    creadoEn,
-    actualizadoEn: nowPeru(),
-    historial: [{ fecha: nowPeru(), accion, campos }]
-  };
-}
-
-function updateTracking(raw, accion, campos = []) {
+function updateTracking(raw, nuevoEstado) {
   const ts = nowPeru();
   const existing = parseTracking(raw);
   if (!existing) {
-    return JSON.stringify({ creadoEn: ts, actualizadoEn: ts, historial: [{ fecha: ts, accion, campos }] });
+    return JSON.stringify({ creadoEn: ts, actualizadoEn: ts, estados: [{ estado: nuevoEstado, fecha: ts }] });
   }
-  const historial = existing.historial || [];
-  historial.push({ fecha: ts, accion, campos });
-  return JSON.stringify({ ...existing, actualizadoEn: ts, historial });
+  const estados = existing.estados || [];
+  estados.push({ estado: nuevoEstado, fecha: ts });
+  return JSON.stringify({ ...existing, actualizadoEn: ts, estados });
 }
 
 function determinarEstadoPago(pedido) {
@@ -382,12 +377,9 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
         fechaOperacion: fechaOperacion || ''
       };
 
-      const tsNow = nowPeru();
-      const nuevoTracking = updateTracking(rows[i][22], 'ACTUALIZADO', ['evidencia_verificada']);
       await sheets.batchUpdate([
         { range: `Pedidos!K${rowNum}`, value: serializeEvidencias(evidencias) },
-        { range: `Pedidos!V${rowNum}`, value: tsNow },
-        { range: `Pedidos!W${rowNum}`, value: nuevoTracking },
+        { range: `Pedidos!V${rowNum}`, value: nowPeru() },
       ]);
 
       console.log(`✅ Evidencia ${evidenciaId} verificada con BCP op: ${operacionBCP}`);
@@ -734,19 +726,15 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
         const updates = [];
         const rowNum = i + 1;
 
-        // track which fields changed for the historial entry
-        const camposModificados = [];
-
-        if (estado !== undefined) { updates.push({ range: `Pedidos!J${rowNum}`, value: estado }); camposModificados.push('estado'); }
-        if (observaciones !== undefined) { updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones }); camposModificados.push('observaciones'); }
-        if (direccion !== undefined) { updates.push({ range: `Pedidos!G${rowNum}`, value: direccion }); camposModificados.push('direccion'); }
-        if (tipoEnvio !== undefined) { updates.push({ range: `Pedidos!M${rowNum}`, value: tipoEnvio }); camposModificados.push('tipoEnvio'); }
-        if (empresaEnvio !== undefined) { updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio }); camposModificados.push('empresaEnvio'); }
-        if (voucherUrls !== undefined) { updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls }); camposModificados.push('voucherUrls'); }
+        if (estado !== undefined) updates.push({ range: `Pedidos!J${rowNum}`, value: estado });
+        if (observaciones !== undefined) updates.push({ range: `Pedidos!L${rowNum}`, value: observaciones });
+        if (direccion !== undefined) updates.push({ range: `Pedidos!G${rowNum}`, value: direccion });
+        if (tipoEnvio !== undefined) updates.push({ range: `Pedidos!M${rowNum}`, value: tipoEnvio });
+        if (empresaEnvio !== undefined) updates.push({ range: `Pedidos!N${rowNum}`, value: empresaEnvio });
+        if (voucherUrls !== undefined) updates.push({ range: `Pedidos!K${rowNum}`, value: voucherUrls });
 
         if (estadoPago !== undefined) {
           updates.push({ range: `Pedidos!P${rowNum}`, value: estadoPago });
-          camposModificados.push('estadoPago');
           if (estadoPago === 'PAGADO' && !fechaPago) {
             updates.push({ range: `Pedidos!R${rowNum}`, value: nowPeru() });
           }
@@ -765,11 +753,9 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
           );
           updates.push({ range: `Pedidos!Q${rowNum}`, value: nuevoMontoPagadoTotal });
           updates.push({ range: `Pedidos!S${rowNum}`, value: serializePagos(pagosActuales) });
-          camposModificados.push('pago');
           console.log(`   → Nuevo pago: S/ ${nuevoPago} | Total acumulado: S/ ${nuevoMontoPagadoTotal}`);
         } else if (montoPagado !== undefined) {
           updates.push({ range: `Pedidos!Q${rowNum}`, value: montoPagado });
-          camposModificados.push('montoPagado');
           if (parseFloat(montoPagado) === 0) {
             updates.push({ range: `Pedidos!S${rowNum}`, value: '' });
           }
@@ -777,13 +763,15 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
 
         if (fechaPago !== undefined) {
           updates.push({ range: `Pedidos!R${rowNum}`, value: fechaPago });
-          camposModificados.push('fechaPago');
         }
 
-        // Always update V (fechaActualizacion) and W (tracking) on any change
         if (updates.length > 0) {
+          // Solo registra en tracking si es un cambio de estado significativo
           const tsNow = nowPeru();
-          const nuevoTracking = updateTracking(rows[i][22], 'ACTUALIZADO', camposModificados);
+          let nuevoTracking = rows[i][22] || '';
+          if (estado !== undefined && ESTADOS_TRACKING.has(estado.toUpperCase())) {
+            nuevoTracking = updateTracking(nuevoTracking, estado.toUpperCase());
+          }
           updates.push({ range: `Pedidos!V${rowNum}`, value: tsNow });
           updates.push({ range: `Pedidos!W${rowNum}`, value: nuevoTracking });
           await sheets.batchUpdate(updates);
