@@ -17,6 +17,17 @@ const usuariosNegociosService = require('../core/services/usuarios-negocios-serv
 // ── Helpers ───────────────────────────────────────────────
 
 /**
+ * Strips price suffix from a product name.
+ * Handles patterns like: "Cafe Molido - S/27.00" → "Cafe Molido"
+ */
+function stripPrecio(nombre) {
+  return (nombre || '')
+    .replace(/\s*[-–]\s*S\/\s*[\d.,]+\s*$/i, '')  // "- S/27.00" at end
+    .replace(/\s*\(S\/\s*[\d.,]+\)\s*$/i, '')       // "(S/27.00)" at end
+    .trim();
+}
+
+/**
  * Parse products string into [{qty, nombre}] — strips prices
  */
 function parseProductosPublico(productosStr) {
@@ -26,19 +37,19 @@ function parseProductosPublico(productosStr) {
     if (Array.isArray(parsed)) {
       return parsed.map(p => ({
         cantidad: Number(p.cantidad || p.qty || 1),
-        nombre: (p.nombre || p.name || '').toString().trim(),
+        nombre: stripPrecio((p.nombre || p.name || '').toString().trim()),
       })).filter(p => p.nombre);
     }
   } catch (_) {}
 
-  // Plain text format: "2x Cafe Molido\n1x Cafe en Grano"
+  // Plain text format: "2x Cafe Molido - S/54.00\n1x Cafe en Grano - S/27.00"
   return productosStr.split(/\n|,/).map(line => {
     const m = line.trim().match(/^(\d+)x?\s+(.+)$/i);
-    if (m) return { cantidad: parseInt(m[1]), nombre: m[2].trim() };
+    if (m) return { cantidad: parseInt(m[1]), nombre: stripPrecio(m[2]) };
     const t = line.trim();
-    if (t) return { cantidad: 1, nombre: t };
+    if (t) return { cantidad: 1, nombre: stripPrecio(t) };
     return null;
-  }).filter(Boolean);
+  }).filter(p => p && p.nombre);
 }
 
 /**
