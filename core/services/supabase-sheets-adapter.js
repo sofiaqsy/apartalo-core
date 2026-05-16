@@ -27,8 +27,7 @@ class SupabaseSheetsAdapter {
       console.log(`SupabaseSheetsAdapter inicializado para farm ${this.farmId} (${this.farm.name})`);
       return true;
     } catch (error) {
-      console.error('Error inicializando SupabaseSheetsAdapter:', error.message);
-      console.error('Stack:', error.stack);
+      console.error('Error inicializando SupabaseSheetsAdapter:', JSON.stringify(error));
       // Initialize anyway so the adapter doesn't block the request
       this.farm = { id: this.farmId, name: this.farmId, commission_rate: 0.10 };
       this.initialized = true;
