@@ -9,7 +9,19 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
+const SupabaseSheetsAdapter = require('../core/services/supabase-sheets-adapter');
 const firebaseService = require('../core/services/firebase-service');
+
+async function getSheetsService(negocio) {
+  let sheets;
+  if (negocio.plataformaExterna && negocio.farmId) {
+    sheets = new SupabaseSheetsAdapter(negocio.farmId);
+  } else {
+    sheets = new SheetsService(negocio.spreadsheetId);
+  }
+  await sheets.initialize();
+  return sheets;
+}
 const deliveryService = require('../core/services/delivery-service');
 
 function parseDecimal(value) {
@@ -158,8 +170,7 @@ router.post('/mensaje', async (req, res) => {
     const result = await whatsapp.sendMessage(to, message);
 
     if (conversacionId) {
-      const sheets = new SheetsService(negocio.spreadsheetId);
-      await sheets.initialize();
+      const sheets = await getSheetsService(negocio);
       await sheets.appendRow('Mensajes', [`MSG-${Date.now()}`, conversacionId, new Date().toISOString(), 'ASESOR', message, negocio.nombre]);
     }
 
@@ -206,8 +217,7 @@ router.get('/conversaciones/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Conversaciones_Asesor!A:F');
 
     const conversaciones = [];
@@ -230,8 +240,7 @@ router.get('/conversaciones/:businessId/:conversacionId/mensajes', async (req, r
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Mensajes!A:F');
 
     const mensajes = [];
@@ -257,8 +266,7 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Conversaciones_Asesor!A:E');
 
     for (let i = 1; i < rows.length; i++) {
@@ -281,8 +289,7 @@ router.get('/pedidos/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Pedidos!A:S');
 
     const pedidos = [];
@@ -322,8 +329,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const pedidoId = `PED-${Date.now().toString().slice(-8)}`;
     const { fecha: fechaPeru, hora: horaPeru } = getPeruDateTime();
@@ -399,8 +405,7 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Pedidos!A:L');
 
     for (let i = 1; i < rows.length; i++) {
@@ -443,8 +448,7 @@ router.get('/clientes/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
 
     let clientes = [];
@@ -481,8 +485,7 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
     let cliente = null;
 
@@ -517,8 +520,7 @@ router.post('/clientes/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const clienteExistente = await sheets.buscarCliente(whatsapp);
     if (clienteExistente) return res.status(400).json({ error: 'Ya existe un cliente con ese WhatsApp', clienteExistente: clienteExistente.id });
@@ -542,8 +544,7 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
 
     for (let i = 1; i < rows.length; i++) {
@@ -573,8 +574,7 @@ router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:B');
 
     for (let i = 1; i < rows.length; i++) {
@@ -598,8 +598,7 @@ router.post('/clientes/:businessId/importar', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const resultados = { creados: [], existentes: [], errores: [] };
 
@@ -631,8 +630,7 @@ router.post('/clientes/:businessId/:clienteId/mensaje', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:B');
     let whatsappCliente = null;
 
@@ -656,8 +654,7 @@ router.get('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     let rows = [];
     try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { return res.json({ clienteId, precios: {}, total: 0 }); }
@@ -684,8 +681,7 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const fechaHoy = formatPeruDate();
     const usuarioFinal = usuario || 'APP';
@@ -731,8 +727,7 @@ router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     let rows = [];
     try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { return res.status(404).json({ error: 'Precio no encontrado' }); }
@@ -805,8 +800,7 @@ router.get('/productos/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     let productos = await sheets.getProductos(estado || null);
 
@@ -840,8 +834,7 @@ router.get('/productos/:businessId/:codigo', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const productos = await sheets.getProductos();
     const producto = productos.find(p => p.codigo === codigo);
     if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
@@ -860,8 +853,7 @@ router.post('/productos/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const productos = await sheets.getProductos();
     if (productos.find(p => p.codigo === codigo)) return res.status(400).json({ error: 'Ya existe un producto con ese código' });
@@ -886,8 +878,7 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Inventario!A:M');
 
     for (let i = 1; i < rows.length; i++) {
@@ -923,8 +914,7 @@ router.delete('/productos/:businessId/:codigo', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Inventario!A:H');
 
     for (let i = 1; i < rows.length; i++) {
@@ -953,8 +943,7 @@ router.post('/productos/:businessId/:codigo/stock', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Inventario!A:F');
 
     for (let i = 1; i < rows.length; i++) {
@@ -987,8 +976,7 @@ router.post('/productos/:businessId/importar', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const existentes = await sheets.getProductos();
     const codigosExistentes = new Set(existentes.map(p => p.codigo));
@@ -1038,8 +1026,7 @@ router.get('/recetas/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     let recetas = await sheets.getRecetas();
     if (codigoDestino) recetas = recetas.filter(r => r.codigoDestino === codigoDestino);
@@ -1066,8 +1053,7 @@ router.post('/recetas/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const result = await sheets.createReceta({ codigoDestino, nombreDestino, cantidadDestino, codigoOrigen, nombreOrigen, cantidadOrigen, descripcion });
     if (!result.success) return res.status(500).json({ error: result.error });
@@ -1086,8 +1072,7 @@ router.put('/recetas/:businessId/:recetaId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const result = await sheets.updateReceta(recetaId, req.body);
     if (!result.success) return res.status(404).json({ error: result.error });
@@ -1106,8 +1091,7 @@ router.delete('/recetas/:businessId/:recetaId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     const result = await sheets.deleteReceta(recetaId);
     if (!result.success) return res.status(404).json({ error: result.error });
@@ -1127,8 +1111,7 @@ router.get('/recetas/:businessId/plan/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = new SheetsService(negocio.spreadsheetId);
-    await sheets.initialize();
+    const sheets = await getSheetsService(negocio);
 
     // Load all data in parallel
     const [inventario, recetas, pedidoRows] = await Promise.all([
