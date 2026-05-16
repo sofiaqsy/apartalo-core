@@ -19,7 +19,6 @@ async function getFarm(farmId) {
     .from('farms')
     .select('id, slug, name, description, logo_url, cover_url, location, city, country, contact_email, contact_phone, status, commission_rate')
     .eq('id', farmId)
-    .eq('status', 'approved')
     .single();
   if (error) throw error;
   return data;
