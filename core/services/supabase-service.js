@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 function base() {
-  return (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  return (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, '');
 }
 
 function headers() {
