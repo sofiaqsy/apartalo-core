@@ -17,7 +17,7 @@ function getClient() {
 async function getFarm(farmId) {
   const { data, error } = await getClient()
     .from('farms')
-    .select('id, slug, name, description, logo_url, cover_url, location, city, country, contact_email, contact_phone, status, commission_rate')
+    .select('*')
     .eq('id', farmId)
     .single();
   if (error) throw error;
