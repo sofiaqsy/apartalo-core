@@ -10,6 +10,7 @@ const stateManager = require('../core/services/state-manager');
 const usuariosNegociosService = require('../core/services/usuarios-negocios-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
+const SupabaseSheetsAdapter = require('../core/services/supabase-sheets-adapter');
 const asesorService = require('../core/services/asesor-service');
 const mensajeLogger = require('../core/services/mensaje-logger');
 const firebaseService = require('../core/services/firebase-service');
@@ -398,7 +399,13 @@ async function createContext(negocio, useSharedCredentials = false) {
   }
 
   const whatsapp = new WhatsAppService(whatsappConfig);
-  const sheets = new SheetsService(negocio.spreadsheetId);
+  let sheets;
+  if (negocio.plataformaExterna && negocio.farmId) {
+    sheets = new SupabaseSheetsAdapter(negocio.farmId);
+    console.log(`🌐 [${negocio.id}] Usando Supabase (farmId: ${negocio.farmId})`);
+  } else {
+    sheets = new SheetsService(negocio.spreadsheetId);
+  }
   await sheets.initialize();
 
   const originalSendMessage = whatsapp.sendMessage.bind(whatsapp);
