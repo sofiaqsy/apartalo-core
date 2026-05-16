@@ -70,7 +70,8 @@ class NegociosService {
         const negocio = this.parseNegocioRow(row, i + 1);
         if (negocio && negocio.estado === 'ACTIVO') {
           this.negocios.set(negocio.id, negocio);
-          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo} [WhatsApp: ${negocio.whatsapp.tipo}] [PhoneId: ${negocio.whatsapp.phoneId}]`);
+          const extFlag = negocio.plataformaExterna ? `🌐 Supabase farmId=${negocio.farmId}` : '📊 Sheets';
+          console.log(`   ✅ ${negocio.nombre} (${negocio.id}) - ${negocio.flujo} [WhatsApp: ${negocio.whatsapp.tipo}] [PhoneId: ${negocio.whatsapp.phoneId}] [${extFlag}]`);
         }
       }
     } catch (error) {
