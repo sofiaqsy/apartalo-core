@@ -1,115 +1,113 @@
-const { createClient } = require('@supabase/supabase-js');
+const axios = require('axios');
 
-let supabase = null;
+function base() {
+  return (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+}
 
-function getClient() {
-  if (!supabase) {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !key) throw new Error('SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY son requeridos');
-    supabase = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false }
-    });
-  }
-  return supabase;
+function headers() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation'
+  };
+}
+
+async function get(path, params = {}) {
+  const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const url = `${base()}/rest/v1/${path}${qs ? '?' + qs : ''}`;
+  const { data } = await axios.get(url, { headers: headers() });
+  return data;
+}
+
+async function post(path, body) {
+  const url = `${base()}/rest/v1/${path}`;
+  const { data } = await axios.post(url, body, { headers: { ...headers(), Prefer: 'return=representation' } });
+  return data;
+}
+
+async function patch(path, params, body) {
+  const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const url = `${base()}/rest/v1/${path}?${qs}`;
+  const { data } = await axios.patch(url, body, { headers: { ...headers(), Prefer: 'return=representation' } });
+  return data;
 }
 
 // ─── FARMS ────────────────────────────────────────────────────────────────────
 
 async function getFarm(farmId) {
-  const { data, error } = await getClient()
-    .from('farms')
-    .select('*')
-    .eq('id', farmId)
-    .single();
-  if (error) throw error;
-  return data;
+  const rows = await get('farms', { 'id': `eq.${farmId}`, select: '*' });
+  return rows[0] || null;
 }
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
 async function getProducts(farmId) {
-  const { data, error } = await getClient()
-    .from('products')
-    .select('id, name, description, unit, price_cents, b2b_price_cents, currency, stock, min_order_qty, status, images')
-    .eq('farm_id', farmId)
-    .eq('status', 'active')
-    .order('name');
-  if (error) throw error;
-  return data;
+  return get('products', {
+    farm_id: `eq.${farmId}`,
+    status: 'eq.active',
+    select: 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images',
+    order: 'name.asc'
+  });
 }
 
 async function getProductById(productId) {
-  const { data, error } = await getClient()
-    .from('products')
-    .select('id, farm_id, name, description, unit, price_cents, b2b_price_cents, currency, stock, min_order_qty, status, images')
-    .eq('id', productId)
-    .single();
-  if (error) throw error;
-  return data;
+  const rows = await get('products', {
+    id: `eq.${productId}`,
+    select: 'id,farm_id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images'
+  });
+  return rows[0] || null;
 }
 
-// ─── CUSTOMERS (profiles) ─────────────────────────────────────────────────────
+// ─── CUSTOMERS ────────────────────────────────────────────────────────────────
 
 async function getCustomerByPhone(phone) {
   const cleaned = phone.replace(/\D/g, '');
-  const { data, error } = await getClient()
-    .from('profiles')
-    .select('id, email, full_name, phone, role')
-    .eq('phone', cleaned)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+  const rows = await get('profiles', {
+    phone: `eq.${cleaned}`,
+    select: 'id,email,full_name,phone,role'
+  });
+  return rows[0] || null;
 }
 
 async function createCustomer({ fullName, phone, email }) {
   const cleaned = phone.replace(/\D/g, '');
-  const { data, error } = await getClient()
-    .from('profiles')
-    .insert({ full_name: fullName, phone: cleaned, email: email || `${cleaned}@whatsapp.apartalo.co`, role: 'customer' })
-    .select('id, email, full_name, phone')
-    .single();
-  if (error) throw error;
-  return data;
+  const rows = await post('profiles', {
+    full_name: fullName,
+    phone: cleaned,
+    email: email || `${cleaned}@whatsapp.apartalo.co`,
+    role: 'customer'
+  });
+  return rows[0] || null;
 }
 
 async function updateCustomer(profileId, fields) {
-  const { data, error } = await getClient()
-    .from('profiles')
-    .update(fields)
-    .eq('id', profileId)
-    .select('id, email, full_name, phone')
-    .single();
-  if (error) throw error;
-  return data;
+  const rows = await patch('profiles', { id: `eq.${profileId}` }, fields);
+  return rows[0] || null;
 }
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 
 async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD' }) {
-  const client = getClient();
-
   const subtotalCents = items.reduce((sum, i) => sum + i.lineTotalCents, 0);
 
-  const { data: order, error: orderError } = await client
-    .from('orders')
-    .insert({
-      customer_id:      customer.id || null,
-      customer_email:   customer.email,
-      customer_name:    customer.fullName || customer.full_name,
-      customer_phone:   customer.phone,
-      shipping_address: shippingAddress,
-      notes,
-      subtotal_cents:   subtotalCents,
-      total_cents:      subtotalCents,
-      currency,
-      status:           'pending_payment',
-      payment_method:   paymentMethod || null
-    })
-    .select('id, order_number')
-    .single();
+  const orders = await post('orders', {
+    customer_id:      customer.id || null,
+    customer_email:   customer.email,
+    customer_name:    customer.fullName || customer.full_name,
+    customer_phone:   customer.phone,
+    shipping_address: shippingAddress,
+    notes,
+    subtotal_cents:   subtotalCents,
+    total_cents:      subtotalCents,
+    currency,
+    status:           'pending_payment',
+    payment_method:   paymentMethod || null
+  });
 
-  if (orderError) throw orderError;
+  const order = orders[0];
+  if (!order) throw new Error('Order creation failed');
 
   const orderItems = items.map(i => ({
     order_id:         order.id,
@@ -125,20 +123,16 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
     payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10)))
   }));
 
-  const { error: itemsError } = await client.from('order_items').insert(orderItems);
-  if (itemsError) throw itemsError;
-
+  await post('order_items', orderItems);
   return order;
 }
 
 async function getOrdersByCustomer(customerId) {
-  const { data, error } = await getClient()
-    .from('orders')
-    .select('id, order_number, status, total_cents, currency, created_at, order_items(product_name, quantity, unit)')
-    .eq('customer_id', customerId)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data;
+  return get('orders', {
+    customer_id: `eq.${customerId}`,
+    select: 'id,order_number,status,total_cents,currency,created_at,order_items(product_name,quantity,unit)',
+    order: 'created_at.desc'
+  });
 }
 
 module.exports = {
