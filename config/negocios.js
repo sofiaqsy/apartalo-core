@@ -14,7 +14,9 @@
  * J: Features      → lista separada por comas
  * K: Prefijo       → ej: ROSAL, CAFE, FINCA
  * L: Estado        → ACTIVO | INACTIVO
- * M: ConfigExtra   → JSON con configuración adicional
+ * M: ConfigExtra         → JSON con configuración adicional
+ * N: FarmId             → UUID de la finca en Supabase (fincas platform)
+ * O: PlataformaExterna  → true | false — si true, lee productos/clientes/órdenes desde Supabase
  */
 
 const config = require('./index');
@@ -54,7 +56,7 @@ class NegociosService {
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: config.google.masterSpreadsheetId,
-        range: 'Negocios!A:N'
+        range: 'Negocios!A:O'
       });
 
       const rows = response.data.values || [];
@@ -92,7 +94,9 @@ class NegociosService {
     const featuresStr   = (row[9] || '').trim();
     const prefijo       = (row[10] || id.substring(0, 4)).trim().toUpperCase();
     const estado        = (row[11] || 'ACTIVO').trim().toUpperCase();
-    const configExtra   = this.parseJSON(row[12]);
+    const configExtra       = this.parseJSON(row[12]);
+    const farmId            = (row[13] || '').trim() || null;
+    const plataformaExterna = (row[14] || '').trim().toLowerCase() === 'true';
 
     // Log diagnóstico para verificar qué lee el parser
     console.log(`[Negocios row ${rowNum}] id="${id}" tipo="${whatsappTipo}" phoneId="${phoneId ? phoneId.substring(0, 8) + '...' : 'VACÍO'}" token="${token ? 'SET' : 'VACÍO'}" estado="${estado}"`);
@@ -121,7 +125,9 @@ class NegociosService {
       flujo,
       features: this.parseFeatures(featuresStr),
       estado,
-      configExtra
+      configExtra,
+      farmId,
+      plataformaExterna
     };
   }
 
