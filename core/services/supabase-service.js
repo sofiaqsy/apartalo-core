@@ -189,6 +189,18 @@ async function getOrdersByCustomer(customerId) {
   });
 }
 
+async function getAllCustomers({ search } = {}) {
+  const params = { role: 'eq.customer', select: 'id,email,full_name,phone,role,created_at', order: 'created_at.desc' };
+  const rows = await get('profiles', params);
+  if (!search) return rows;
+  const s = search.toLowerCase();
+  return rows.filter(p =>
+    (p.full_name || '').toLowerCase().includes(s) ||
+    (p.phone || '').includes(search) ||
+    (p.email || '').toLowerCase().includes(s)
+  );
+}
+
 async function getCustomerById(profileId) {
   const rows = await get('profiles', {
     id: `eq.${profileId}`,
@@ -214,6 +226,7 @@ module.exports = {
   updateProduct,
   getProductById,
   getCustomerByPhone,
+  getAllCustomers,
   getCustomerById,
   getCustomersByIds,
   createCustomer,

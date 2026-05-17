@@ -461,49 +461,21 @@ router.get('/clientes/:businessId', async (req, res) => {
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     if (negocio.plataformaExterna && negocio.farmId) {
-      // Sheet col A = index of client UUIDs for this business
-      // Supabase profiles = source of truth for core data
-      const sheets = await getSheetsServiceDirect(negocio);
-      const sheetRows = await sheets.getRows('Clientes!A:K');
-      const sheetData = {}; // id → extra sheet data
-      const uuids = [];
-      for (let i = 1; i < sheetRows.length; i++) {
-        const id = (sheetRows[i][0] || '').trim();
-        if (!id) continue;
-        sheetData[id] = {
-          fechaRegistro: sheetRows[i][5] || '', ultimaCompra: sheetRows[i][6] || '',
-          departamento:  sheetRows[i][7] || '', ciudad: sheetRows[i][8] || '',
-          empresa:       sheetRows[i][9] || '', notas: sheetRows[i][10] || ''
-        };
-        if (isUUID(id)) uuids.push(id);
-      }
-
-      const profiles = uuids.length ? await supabaseService.getCustomersByIds(uuids) : [];
-      const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
-
-      let clientes = Object.keys(sheetData).map(id => {
-        const p = profileMap[id];
-        return {
-          id,
-          whatsapp:   p?.phone  || '',
-          nombre:     p?.full_name || '',
-          telefono:   p?.phone  || '',
-          email:      p?.email  || '',
-          direccion:  '',
-          ...sheetData[id]
-        };
-      });
-
-      if (buscar) {
-        const s = buscar.toLowerCase();
-        clientes = clientes.filter(c =>
-          c.nombre.toLowerCase().includes(s) || c.whatsapp.includes(buscar) ||
-          c.email.toLowerCase().includes(s)  || c.empresa.toLowerCase().includes(s)
-        );
-      }
-      if (departamento) clientes = clientes.filter(c => c.departamento === departamento);
+      const profiles = await supabaseService.getAllCustomers({ search: buscar });
+      const clientes = profiles.map(p => ({
+        id:            p.id,
+        whatsapp:      p.phone || '',
+        nombre:        p.full_name || '',
+        telefono:      p.phone || '',
+        email:         p.email || '',
+        fechaRegistro: p.created_at ? new Date(p.created_at).toLocaleDateString('es-PE') : '',
+        ultimaCompra:  '',
+        departamento:  '',
+        ciudad:        '',
+        empresa:       '',
+        notas:         ''
+      }));
       if (ordenar === 'nombre') clientes.sort((a, b) => a.nombre.localeCompare(b.nombre));
-
       return res.json({ total: clientes.length, clientes });
     }
 
