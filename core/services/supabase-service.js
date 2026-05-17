@@ -47,7 +47,7 @@ async function getProducts(farmId) {
   return get('products', {
     farm_id: `eq.${farmId}`,
     status: 'eq.active',
-    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,status,images',
+    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images',
     order: 'name.asc'
   });
 }
@@ -55,12 +55,12 @@ async function getProducts(farmId) {
 async function getAllProducts(farmId) {
   return get('products', {
     farm_id: `eq.${farmId}`,
-    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,status,images',
+    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images',
     order: 'name.asc'
   });
 }
 
-async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, compareAtPriceCents }) {
+async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, minQtyForB2b, compareAtPriceCents }) {
   const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
   const body = {
     farm_id:       farmId,
@@ -74,8 +74,9 @@ async function createProduct(farmId, { name, description, priceCents, stock, ima
     images:        images || [],
     min_order_qty: minOrderQty || 1
   };
-  if (b2bPriceCents != null)        body.b2b_price_cents         = b2bPriceCents;
-  if (compareAtPriceCents != null)  body.compare_at_price_cents  = compareAtPriceCents;
+  if (b2bPriceCents != null)       body.b2b_price_cents        = b2bPriceCents;
+  if (minQtyForB2b != null)        body.min_qty_for_b2b        = minQtyForB2b;
+  if (compareAtPriceCents != null) body.compare_at_price_cents = compareAtPriceCents;
   const rows = await post('products', body);
   return rows[0] || null;
 }
