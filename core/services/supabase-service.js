@@ -43,21 +43,24 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
+const PRODUCT_SELECT_FULL = 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
+const PRODUCT_SELECT_BASE = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images';
+
+async function safeGetProducts(params) {
+  try {
+    return await get('products', { ...params, select: PRODUCT_SELECT_FULL });
+  } catch (e) {
+    console.warn('[Supabase] Columnas extendidas no disponibles, usando base. Ejecuta la migración SQL. Error:', e.message);
+    return await get('products', { ...params, select: PRODUCT_SELECT_BASE });
+  }
+}
+
 async function getProducts(farmId) {
-  return get('products', {
-    farm_id: `eq.${farmId}`,
-    status: 'eq.active',
-    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images',
-    order: 'name.asc'
-  });
+  return safeGetProducts({ farm_id: `eq.${farmId}`, status: 'eq.active', order: 'name.asc' });
 }
 
 async function getAllProducts(farmId) {
-  return get('products', {
-    farm_id: `eq.${farmId}`,
-    select: 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images',
-    order: 'name.asc'
-  });
+  return safeGetProducts({ farm_id: `eq.${farmId}`, order: 'name.asc' });
 }
 
 async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, minQtyForB2b, compareAtPriceCents }) {

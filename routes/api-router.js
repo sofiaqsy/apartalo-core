@@ -894,7 +894,7 @@ router.put('/productos/:businessId/:codigo', async (req, res) => {
         if (proveedorId !== undefined) updates.push({ range: `Inventario!J${i + 1}`, value: proveedorId });
         if (proveedorProductoCodigo !== undefined) updates.push({ range: `Inventario!K${i + 1}`, value: proveedorProductoCodigo });
         if (precioMayor !== undefined) updates.push({ range: `Inventario!L${i + 1}`, value: parseDecimal(precioMayor) });
-        if (cantidadMayor !== undefined) updates.push({ range: `Inventario!M${i + 1}`, value: parseInt(cantidadMayor) || 0 });
+        if (cantidadMayor !== undefined) updates.push({ range: `Inventario!N${i + 1}`, value: parseFloat(cantidadMayor) || null });
         if (updates.length > 0) await sheets.batchUpdate(updates);
 
         const productosActualizados = await sheets.getProductos();
