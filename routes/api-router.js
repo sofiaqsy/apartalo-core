@@ -15,7 +15,7 @@ const firebaseService = require('../core/services/firebase-service');
 async function getSheetsService(negocio) {
   let sheets;
   if (negocio.plataformaExterna && negocio.farmId) {
-    sheets = new SupabaseSheetsAdapter(negocio.farmId);
+    sheets = new SupabaseSheetsAdapter(negocio.farmId, negocio.spreadsheetId);
   } else {
     sheets = new SheetsService(negocio.spreadsheetId);
   }

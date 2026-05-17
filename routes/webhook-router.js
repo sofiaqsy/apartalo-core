@@ -401,7 +401,7 @@ async function createContext(negocio, useSharedCredentials = false) {
   const whatsapp = new WhatsAppService(whatsappConfig);
   let sheets;
   if (negocio.plataformaExterna && negocio.farmId) {
-    sheets = new SupabaseSheetsAdapter(negocio.farmId);
+    sheets = new SupabaseSheetsAdapter(negocio.farmId, negocio.spreadsheetId);
     console.log(`🌐 [${negocio.id}] Usando Supabase (farmId: ${negocio.farmId})`);
   } else {
     sheets = new SheetsService(negocio.spreadsheetId);

@@ -5,12 +5,15 @@
  */
 
 const supabase = require('./supabase-service');
+const SheetsService = require('./sheets-service');
 const config = require('../../config');
 
 class SupabaseSheetsAdapter {
-  constructor(farmId) {
+  constructor(farmId, spreadsheetId = null) {
     this.farmId = farmId;
+    this.spreadsheetId = spreadsheetId;
     this.initialized = false;
+    this._sheets = null;
   }
 
   async initialize() {
@@ -23,12 +26,23 @@ class SupabaseSheetsAdapter {
 
       const farm = await supabase.getFarm(this.farmId);
       this.farm = farm || { id: this.farmId, name: this.farmId, commission_rate: 0.10 };
+
+      if (this.spreadsheetId) {
+        try {
+          this._sheets = new SheetsService(this.spreadsheetId);
+          await this._sheets.initialize();
+          console.log(`[Supabase] SheetsService backup inicializado (spreadsheetId: ${this.spreadsheetId.substring(0, 10)}...)`);
+        } catch (sheetsErr) {
+          console.warn('[Supabase] No se pudo inicializar SheetsService backup:', sheetsErr.message);
+          this._sheets = null;
+        }
+      }
+
       this.initialized = true;
       console.log(`SupabaseSheetsAdapter inicializado para farm ${this.farmId} (${this.farm.name})`);
       return true;
     } catch (error) {
       console.error('Error inicializando SupabaseSheetsAdapter:', JSON.stringify(error));
-      // Initialize anyway so the adapter doesn't block the request
       this.farm = { id: this.farmId, name: this.farmId, commission_rate: 0.10 };
       this.initialized = true;
       return true;
@@ -198,7 +212,7 @@ class SupabaseSheetsAdapter {
   async appendRow(sheetName, values) {
     if (sheetName === 'Inventario') {
       const statusRaw = (values[7] || 'ACTIVO').toUpperCase();
-      await supabase.createProduct(this.farmId, {
+      const product = await supabase.createProduct(this.farmId, {
         name:        values[1],
         description: values[2] || '',
         priceCents:  Math.round((parseFloat(values[3]) || 0) * 100),
@@ -207,6 +221,18 @@ class SupabaseSheetsAdapter {
         status:      statusRaw === 'ACTIVO' ? 'active' : 'draft',
         unit:        'unidad'
       });
+
+      // Mirror to sheet: register Supabase ID in col A, rest empty for future sync
+      if (product && this._sheets) {
+        try {
+          const supabaseId = product.id;
+          await this._sheets.appendRow('Inventario', [supabaseId, '', '', '', '', '', '', '', '', '', '', '', '']);
+          console.log(`[Supabase] Producto registrado en Sheets con ID ${supabaseId}`);
+        } catch (sheetsErr) {
+          console.warn('[Supabase] No se pudo registrar en Sheets:', sheetsErr.message);
+        }
+      }
+
       return true;
     }
     return false;
