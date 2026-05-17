@@ -43,29 +43,17 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
-// BASE includes all columns confirmed to exist in DB (b2b_price_cents, min_order_qty, min_qty_for_b2b)
-// FULL adds compare_at_price_cents — needs migration before it exists
-const PRODUCT_SELECT_BASE = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
-const PRODUCT_SELECT_FULL = PRODUCT_SELECT_BASE.replace('images', 'compare_at_price_cents,images');
-
-async function safeGetProducts(params) {
-  try {
-    return await get('products', { ...params, select: PRODUCT_SELECT_FULL });
-  } catch (e) {
-    console.warn('[Supabase] compare_at_price_cents no existe aún. Ejecuta: ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price_cents int8 DEFAULT NULL;');
-    return await get('products', { ...params, select: PRODUCT_SELECT_BASE });
-  }
-}
+const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
 
 async function getProducts(farmId) {
-  return safeGetProducts({ farm_id: `eq.${farmId}`, status: 'eq.active', order: 'name.asc' });
+  return get('products', { farm_id: `eq.${farmId}`, status: 'eq.active', select: PRODUCT_SELECT, order: 'name.asc' });
 }
 
 async function getAllProducts(farmId) {
-  return safeGetProducts({ farm_id: `eq.${farmId}`, order: 'name.asc' });
+  return get('products', { farm_id: `eq.${farmId}`, select: PRODUCT_SELECT, order: 'name.asc' });
 }
 
-async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, minQtyForB2b, compareAtPriceCents }) {
+async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, minQtyForB2b }) {
   const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
   const body = {
     farm_id:       farmId,
@@ -79,9 +67,8 @@ async function createProduct(farmId, { name, description, priceCents, stock, ima
     images:        images || [],
     min_order_qty: minOrderQty || 1
   };
-  if (b2bPriceCents != null)       body.b2b_price_cents        = b2bPriceCents;
-  if (minQtyForB2b != null)        body.min_qty_for_b2b        = minQtyForB2b;
-  if (compareAtPriceCents != null) body.compare_at_price_cents = compareAtPriceCents;
+  if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
+  if (minQtyForB2b != null)  body.min_qty_for_b2b = minQtyForB2b;
   const rows = await post('products', body);
   return rows[0] || null;
 }

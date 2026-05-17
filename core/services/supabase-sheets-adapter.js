@@ -60,7 +60,7 @@ class SupabaseSheetsAdapter {
         nombre:                  p.name,
         descripcion:             p.description || '',
         precio:                  p.price_cents / 100,
-        precioComparacion:       p.compare_at_price_cents ? p.compare_at_price_cents / 100 : null,
+
         stock:                   p.stock || 0,
         stockReservado:          0,
         imagenUrl:               (p.images && p.images[0]) ? p.images[0] : '',
@@ -222,10 +222,9 @@ class SupabaseSheetsAdapter {
         images:             values[6] ? [values[6]] : [],
         status:             statusRaw === 'ACTIVO' ? 'active' : 'draft',
         unit:               'unidad',
-        b2bPriceCents:       values[12] ? Math.round((parseFloat(values[12]) || 0) * 100) : null,
-        minOrderQty:         values[13] ? parseFloat(values[13]) || 1 : 1,
-        minQtyForB2b:        values[14] ? parseFloat(values[14]) || null : null,
-        compareAtPriceCents: values[15] ? Math.round((parseFloat(values[15]) || 0) * 100) : null
+        b2bPriceCents: values[12] ? Math.round((parseFloat(values[12]) || 0) * 100) : null,
+        minOrderQty:   values[13] ? parseFloat(values[13]) || 1 : 1,
+        minQtyForB2b:  values[14] ? Math.round(parseFloat(values[14])) || null : null
       });
 
       // Mirror to sheet: register Supabase ID in col A, rest empty for future sync
@@ -256,13 +255,13 @@ class SupabaseSheetsAdapter {
     const colMap = {
       B: 'name', C: 'description', D: 'price_cents', E: 'stock',
       G: 'images', H: 'status', I: 'category',
-      L: 'b2b_price_cents', M: 'min_order_qty', N: 'min_qty_for_b2b', O: 'compare_at_price_cents'
+      L: 'b2b_price_cents', M: 'min_order_qty', N: 'min_qty_for_b2b'
     };
     const field = colMap[col];
     if (!field) return false;
 
     let dbValue = value;
-    if (['price_cents', 'b2b_price_cents', 'compare_at_price_cents'].includes(field)) dbValue = Math.round((parseFloat(value) || 0) * 100);
+    if (['price_cents', 'b2b_price_cents'].includes(field)) dbValue = Math.round((parseFloat(value) || 0) * 100);
     if (field === 'min_qty_for_b2b') dbValue = value ? Math.round(parseFloat(value)) || null : null;
     if (field === 'stock' || field === 'min_order_qty') dbValue = parseFloat(value) || 0;
     if (field === 'images') dbValue = value ? [value] : [];
