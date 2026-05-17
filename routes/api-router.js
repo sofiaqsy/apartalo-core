@@ -761,11 +761,22 @@ router.get('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    if (negocio.plataformaExterna) {
+      const rows = await supabaseService.getCustomerPrices(clienteId);
+      const precios = {};
+      for (const r of rows) {
+        precios[r.product_id] = {
+          precio: r.price_cents / 100,
+          fechaActualizacion: r.updated_at ? new Date(r.updated_at).toLocaleDateString('es-PE') : '',
+          actualizadoPor: r.updated_by || 'APP'
+        };
+      }
+      return res.json({ clienteId, precios, total: Object.keys(precios).length });
+    }
 
+    const sheets = await getSheetsService(negocio);
     let rows = [];
     try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { return res.json({ clienteId, precios: {}, total: 0 }); }
-
     const precios = {};
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -788,11 +799,14 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    if (negocio.plataformaExterna) {
+      const saved = await supabaseService.upsertCustomerPrices(clienteId, precios, usuario || 'APP');
+      return res.json({ success: true, mensaje: 'Precios guardados', clienteId, resumen: { total: saved.length } });
+    }
 
+    const sheets = await getSheetsService(negocio);
     const fechaHoy = formatPeruDate();
     const usuarioFinal = usuario || 'APP';
-
     let rows = [];
     try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { rows = [['clienteId', 'codigoProducto', 'precioPersonalizado', 'fechaActualizacion', 'actualizadoPor']]; }
 
@@ -821,7 +835,6 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
 
     if (updates.length > 0) await sheets.batchUpdate(updates);
     for (const registro of nuevosRegistros) await sheets.appendRow('PreciosClientes', registro);
-
     res.json({ success: true, mensaje: 'Precios guardados', clienteId, resumen: { actualizados, creados, total: actualizados + creados } });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -834,8 +847,12 @@ router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    if (negocio.plataformaExterna) {
+      await supabaseService.deleteCustomerPrice(clienteId, codigoProducto);
+      return res.json({ success: true, mensaje: 'Precio eliminado', clienteId, codigoProducto });
+    }
 
+    const sheets = await getSheetsService(negocio);
     let rows = [];
     try { rows = await sheets.getRows('PreciosClientes!A:E'); } catch (e) { return res.status(404).json({ error: 'Precio no encontrado' }); }
 
@@ -843,7 +860,6 @@ router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId && rows[i][1] === codigoProducto) { rowToDelete = i + 1; break; }
     }
-
     if (!rowToDelete) return res.status(404).json({ error: 'Precio personalizado no encontrado' });
 
     const ok = await sheets.deleteSheetRow('PreciosClientes', rowToDelete);

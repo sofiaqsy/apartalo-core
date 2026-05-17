@@ -220,6 +220,45 @@ async function getCustomersByIds(ids) {
   return rows;
 }
 
+// ─── CUSTOMER PRODUCT PRICES ─────────────────────────────────────────────────
+
+async function getCustomerPrices(customerId) {
+  return get('customer_product_prices', {
+    customer_id: `eq.${customerId}`,
+    select: 'id,product_id,price_cents,updated_by,updated_at'
+  });
+}
+
+async function upsertCustomerPrices(customerId, prices, updatedBy = 'APP') {
+  // prices = { [productId]: priceValue (in currency units, not cents) }
+  const records = Object.entries(prices).map(([productId, price]) => ({
+    customer_id: customerId,
+    product_id:  productId,
+    price_cents: Math.round((parseFloat(price) || 0) * 100),
+    updated_by:  updatedBy,
+    updated_at:  new Date().toISOString()
+  }));
+  if (!records.length) return [];
+
+  const url = `${base()}/rest/v1/customer_product_prices`;
+  const axios = require('axios');
+  const { data } = await axios.post(url, records, {
+    headers: {
+      ...headers(),
+      Prefer: 'resolution=merge-duplicates,return=representation'
+    }
+  });
+  return data;
+}
+
+async function deleteCustomerPrice(customerId, productId) {
+  await deleteRow('customer_product_prices', {
+    customer_id: `eq.${customerId}`,
+    product_id:  `eq.${productId}`
+  });
+  return true;
+}
+
 // ─── ADDRESSES ────────────────────────────────────────────────────────────────
 
 async function getAddressesByCustomer(customerId) {
@@ -320,5 +359,8 @@ module.exports = {
   getAddressesByCustomer,
   createAddress,
   updateAddress,
-  deleteAddress
+  deleteAddress,
+  getCustomerPrices,
+  upsertCustomerPrices,
+  deleteCustomerPrice
 };
