@@ -484,34 +484,6 @@ router.put('/:businessId/:clienteId', async (req, res) => {
         await supabaseService.updateCustomer(clienteId, supabaseUpdates);
       console.log(`[Clientes PUT] → Supabase OK`);
 
-      // Upsert principal address in customer_addresses if address fields provided
-      const hasAddressData = direccion || distrito || departamento || direccionEnvio || distritoEnvio || departamentoEnvio;
-      if (hasAddressData) {
-        try {
-          const existing = await supabaseService.getAddressesByCustomer(clienteId);
-          const principal = existing.find(a => a.es_principal) || existing[0];
-          const addressFields = {
-            alias:        'Principal',
-            esPrincipal:  true,
-            direccion:    direccion || direccionEnvio || null,
-            distrito:     distrito || distritoEnvio || null,
-            departamento: departamento || departamentoEnvio || null,
-            referencia:   null,
-            notas:        notas || null,
-            courier:      empresaEnvio ? { empresa: empresaEnvio, agencia: localEnvio || null } : undefined
-          };
-          if (principal) {
-            await supabaseService.updateAddress(principal.id, addressFields);
-            console.log(`[Clientes PUT] → address updated id=${principal.id}`);
-          } else {
-            const newAddr = await supabaseService.createAddress(clienteId, addressFields);
-            console.log(`[Clientes PUT] → address created id=${newAddr.id}`);
-          }
-        } catch (addrErr) {
-          console.warn('[Clientes PUT] No se pudo guardar address:', addrErr.message);
-        }
-      }
-
       // Update extra fields in sheet
       if (negocio.spreadsheetId) {
         try {
@@ -763,9 +735,9 @@ router.post('/:businessId/:clienteId/addresses', async (req, res) => {
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
     if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
 
-    const { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier } = req.body;
-    console.log(`[Addresses POST] → createAddress fields: alias=${alias} direccion=${direccion} distrito=${distrito} departamento=${departamento}`);
-    const address = await supabaseService.createAddress(clienteId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier });
+    const { alias, isPrimary, addressLine, district, department, reference, notes, courier } = req.body;
+    console.log(`[Addresses POST] → createAddress fields: alias=${alias} addressLine=${addressLine} district=${district} department=${department}`);
+    const address = await supabaseService.createAddress(clienteId, { alias, isPrimary, addressLine, district, department, reference, notes, courier });
     console.log(`[Addresses POST] → created: ${JSON.stringify(address)}`);
     res.status(201).json({ success: true, address });
   } catch (error) {
@@ -781,8 +753,8 @@ router.put('/:businessId/:clienteId/addresses/:addressId', async (req, res) => {
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
     if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
 
-    const { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier } = req.body;
-    await supabaseService.updateAddress(addressId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier });
+    const { alias, isPrimary, addressLine, district, department, reference, notes, courier } = req.body;
+    await supabaseService.updateAddress(addressId, { alias, isPrimary, addressLine, district, department, reference, notes, courier });
     res.json({ success: true, mensaje: 'Dirección actualizada', addressId });
   } catch (error) {
     res.status(500).json({ error: error.message });

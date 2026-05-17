@@ -226,29 +226,29 @@ async function getAddressesByCustomer(customerId) {
   return get('customer_addresses', {
     customer_id: `eq.${customerId}`,
     select: '*,customer_address_courier(*)',
-    order: 'es_principal.desc,created_at.asc'
+    order: 'is_primary.desc,created_at.asc'
   });
 }
 
-async function createAddress(customerId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier }) {
+async function createAddress(customerId, { alias, isPrimary, addressLine, district, department, reference, notes, courier }) {
   const rows = await post('customer_addresses', {
     customer_id:  customerId,
     alias:        alias || null,
-    es_principal: esPrincipal || false,
-    direccion:    direccion || null,
-    distrito:     distrito || null,
-    departamento: departamento || null,
-    referencia:   referencia || null,
-    notas:        notas || null
+    is_primary:   isPrimary || false,
+    address_line: addressLine || null,
+    district:     district || null,
+    department:   department || null,
+    reference:    reference || null,
+    notes:        notes || null
   });
   const address = rows[0];
   if (!address) throw new Error('Address creation failed');
 
-  if (courier?.empresa) {
+  if (courier?.company) {
     const courierRows = await post('customer_address_courier', {
       address_id: address.id,
-      empresa:    courier.empresa,
-      agencia:    courier.agencia || null
+      company:    courier.company,
+      agency:     courier.agency || null
     });
     address.customer_address_courier = courierRows[0] || null;
   } else {
@@ -257,15 +257,15 @@ async function createAddress(customerId, { alias, esPrincipal, direccion, distri
   return address;
 }
 
-async function updateAddress(addressId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier }) {
+async function updateAddress(addressId, { alias, isPrimary, addressLine, district, department, reference, notes, courier }) {
   const fields = {};
   if (alias !== undefined)        fields.alias        = alias;
-  if (esPrincipal !== undefined)  fields.es_principal = esPrincipal;
-  if (direccion !== undefined)    fields.direccion    = direccion;
-  if (distrito !== undefined)     fields.distrito     = distrito;
-  if (departamento !== undefined) fields.departamento = departamento;
-  if (referencia !== undefined)   fields.referencia   = referencia;
-  if (notas !== undefined)        fields.notas        = notas;
+  if (isPrimary !== undefined)    fields.is_primary   = isPrimary;
+  if (addressLine !== undefined)  fields.address_line = addressLine;
+  if (district !== undefined)     fields.district     = district;
+  if (department !== undefined)   fields.department   = department;
+  if (reference !== undefined)    fields.reference    = reference;
+  if (notes !== undefined)        fields.notes        = notes;
 
   let address = null;
   if (Object.keys(fields).length > 0) {
@@ -274,18 +274,16 @@ async function updateAddress(addressId, { alias, esPrincipal, direccion, distrit
   }
 
   if (courier !== undefined) {
-    if (courier?.empresa) {
-      // Upsert: try patch first, then post if not exists
+    if (courier?.company) {
       try {
-        const existing = await patch('customer_address_courier', { address_id: `eq.${addressId}` }, { empresa: courier.empresa, agencia: courier.agencia || null });
+        const existing = await patch('customer_address_courier', { address_id: `eq.${addressId}` }, { company: courier.company, agency: courier.agency || null });
         if (!existing.length) {
-          await post('customer_address_courier', { address_id: addressId, empresa: courier.empresa, agencia: courier.agencia || null });
+          await post('customer_address_courier', { address_id: addressId, company: courier.company, agency: courier.agency || null });
         }
       } catch {
-        await post('customer_address_courier', { address_id: addressId, empresa: courier.empresa, agencia: courier.agencia || null });
+        await post('customer_address_courier', { address_id: addressId, company: courier.company, agency: courier.agency || null });
       }
     } else {
-      // Remove courier if empresa is empty/null
       await deleteRow('customer_address_courier', { address_id: `eq.${addressId}` });
     }
   }
