@@ -190,7 +190,7 @@ async function getOrdersByCustomer(customerId) {
 }
 
 async function getAllCustomers({ search } = {}) {
-  const params = { role: 'eq.customer', select: 'id,email,full_name,phone,role,created_at', order: 'created_at.desc' };
+  const params = { phone: 'not.is.null', select: 'id,email,full_name,phone,role,created_at', order: 'created_at.desc' };
   const rows = await get('profiles', params);
   if (!search) return rows;
   const s = search.toLowerCase();
