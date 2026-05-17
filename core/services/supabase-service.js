@@ -43,14 +43,16 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_SELECT_FULL = 'id,name,description,unit,price_cents,b2b_price_cents,compare_at_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
-const PRODUCT_SELECT_BASE = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images';
+// BASE includes all columns confirmed to exist in DB (b2b_price_cents, min_order_qty, min_qty_for_b2b)
+// FULL adds compare_at_price_cents — needs migration before it exists
+const PRODUCT_SELECT_BASE = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
+const PRODUCT_SELECT_FULL = PRODUCT_SELECT_BASE.replace('images', 'compare_at_price_cents,images');
 
 async function safeGetProducts(params) {
   try {
     return await get('products', { ...params, select: PRODUCT_SELECT_FULL });
   } catch (e) {
-    console.warn('[Supabase] Columnas extendidas no disponibles, usando base. Ejecuta la migración SQL. Error:', e.message);
+    console.warn('[Supabase] compare_at_price_cents no existe aún. Ejecuta: ALTER TABLE products ADD COLUMN IF NOT EXISTS compare_at_price_cents int8 DEFAULT NULL;');
     return await get('products', { ...params, select: PRODUCT_SELECT_BASE });
   }
 }

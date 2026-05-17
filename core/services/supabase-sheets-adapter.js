@@ -69,7 +69,7 @@ class SupabaseSheetsAdapter {
         proveedorId:             '',
         proveedorProductoCodigo: '',
         precioMayor:             p.b2b_price_cents ? p.b2b_price_cents / 100 : null,
-        cantidadMayor:           p.min_qty_for_b2b || null,
+        cantidadMayor:           p.min_qty_for_b2b ? Math.round(p.min_qty_for_b2b) : null,
         pedidoMinimo:            p.min_order_qty || 1,
         disponible:              p.stock || 0,
         unit:                    p.unit || 'unidad'
@@ -263,7 +263,7 @@ class SupabaseSheetsAdapter {
 
     let dbValue = value;
     if (['price_cents', 'b2b_price_cents', 'compare_at_price_cents'].includes(field)) dbValue = Math.round((parseFloat(value) || 0) * 100);
-    if (field === 'min_qty_for_b2b') dbValue = parseFloat(value) || null;
+    if (field === 'min_qty_for_b2b') dbValue = value ? Math.round(parseFloat(value)) || null : null;
     if (field === 'stock' || field === 'min_order_qty') dbValue = parseFloat(value) || 0;
     if (field === 'images') dbValue = value ? [value] : [];
     if (field === 'status') {
