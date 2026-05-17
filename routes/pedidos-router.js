@@ -12,6 +12,7 @@ const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const deliveryService = require('../core/services/delivery-service');
+const supabaseService = require('../core/services/supabase-service');
 
 // ==================== HELPERS ====================
 
@@ -119,6 +120,11 @@ router.get('/:businessId', async (req, res) => {
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna) {
+      const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, estadoPago, cliente, fecha, pagina, limite });
+      return res.json(result);
+    }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
@@ -237,6 +243,12 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+      return res.json(pedido);
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -287,6 +299,23 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+      const sid = pedido.supabaseId;
+
+      // Attach proof to first existing payment, or create a zero-amount placeholder
+      let paymentId = pedido.pagos?.[0]?.id || null;
+      if (!paymentId) {
+        const pago = await supabaseService.addOrderPayment(sid, { amountCents: 0, notes: 'Creado automáticamente para comprobante', createdBy: 'APP' });
+        paymentId = pago?.id || null;
+      }
+      if (!paymentId) return res.status(500).json({ error: 'No se pudo crear registro de pago para el comprobante' });
+
+      const proof = await supabaseService.addPaymentProof(paymentId, { url, source: tipo || 'APP', notes: descripcion || '' });
+      return res.json({ success: true, evidencia: { id: proof?.id, paymentId, url, tipo: tipo || 'APP', fecha: proof?.created_at || new Date().toISOString(), descripcion: descripcion || '' }, totalEvidencias: (pedido.evidencias?.length || 0) + 1 });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -323,6 +352,12 @@ router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+      return res.json({ evidencias: pedido.evidencias || [] });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -353,6 +388,15 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna) {
+      await supabaseService.verifyPaymentProof(evidenciaId, {
+        bcpOpCode: operacionBCP,
+        amountVerifiedCents: montoVerificado ? Math.round(parseFloat(montoVerificado) * 100) : null,
+        verifiedBy: 'ADMIN'
+      });
+      return res.json({ success: true, evidenciaId, operacionBCP });
+    }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
@@ -399,6 +443,11 @@ router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res)
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna) {
+      await supabaseService.deletePaymentProof(evidenciaId);
+      return res.json({ success: true, message: 'Evidencia eliminada' });
+    }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
@@ -488,6 +537,47 @@ router.post('/:businessId', async (req, res) => {
         }
       }
       if (!tipoEnvioFinal) tipoEnvioFinal = 'LOCAL';
+    }
+
+    if (negocio.plataformaExterna) {
+      const customer = await supabaseService.getCustomerByPhone(whatsappFinal);
+      const productosArr = Array.isArray(productos) ? productos : [];
+      const items = productosArr.map(p => ({
+        productId:      p.codigo || p.id || '',
+        productName:    p.nombre || p.name || '',
+        unit:           p.unidad || p.unit || 'unidad',
+        quantity:       p.cantidad || p.quantity || 1,
+        unitPriceCents: Math.round((p.precio || p.price || 0) * 100),
+        lineTotalCents: Math.round(((p.subtotal) || (p.precio || 0) * (p.cantidad || 1)) * 100),
+        commissionRate: negocio.commission_rate || 0.10
+      }));
+      const order = await supabaseService.createOrder({
+        customer: {
+          id: customer?.id || null,
+          email: customer?.email || `${whatsappFinal}@whatsapp.apartalo.co`,
+          fullName: clienteFinal || '', phone: whatsappFinal
+        },
+        farmId: negocio.farmId, items,
+        shippingAddress: {
+          line1: direccionFinal, city: ciudadFinal, department: departamentoFinal,
+          tipo: tipoEnvioFinal, courier: empresaEnvio || ''
+        },
+        notes: observaciones || '', paymentMethod: null, currency: 'PEN'
+      });
+      if (!order) return res.status(500).json({ error: 'Error creando pedido en Supabase' });
+
+      if (notificarCliente) {
+        try {
+          const ws = new WhatsAppService(negocio.whatsapp);
+          const productosTexto = items.map(i => `${i.quantity}x ${i.productName}`).join('\n');
+          await ws.sendMessage(whatsappFinal, `✅ *Pedido Registrado*\n\n📋 *ID:* ${order.order_number}\n\n*Productos:*\n${productosTexto}\n\n💰 *Total:* S/ ${(order.total_cents/100).toFixed(2)}\n\nTe avisaremos cuando esté listo. ¡Gracias! 🙏`);
+        } catch (e) { console.error('⚠️ Error notificando cliente:', e.message); }
+      }
+
+      return res.status(201).json({
+        success: true, mensaje: 'Pedido creado',
+        pedido: { id: order.order_number, supabaseId: order.id, estado: 'PENDIENTE', estadoPago: 'PENDIENTE_PAGO' }
+      });
     }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
@@ -716,6 +806,50 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+      const sid = pedido.supabaseId;
+
+      if (estado !== undefined) await supabaseService.updateOrderStatus(sid, estado);
+
+      const orderUpdates = {};
+      if (observaciones !== undefined) orderUpdates.notes = observaciones;
+      if (direccion !== undefined) {
+        const addr = pedido._rawAddress || {};
+        orderUpdates.shipping_address = { ...addr, line1: direccion };
+      }
+      if (Object.keys(orderUpdates).length > 0) await supabaseService.updateOrderFields(sid, orderUpdates);
+
+      if (nuevoPago !== undefined && parseFloat(nuevoPago) > 0) {
+        await supabaseService.addOrderPayment(sid, {
+          amountCents: Math.round(parseFloat(nuevoPago) * 100),
+          notes: notaPago || '', createdBy: 'APP'
+        });
+      } else if (estadoPago !== undefined) {
+        const psMap = { PAGADO: 'paid', PARCIAL: 'partial', PENDIENTE_PAGO: 'pending' };
+        await supabaseService.updateOrderFields(sid, { payment_status: psMap[estadoPago] || 'pending' });
+      }
+
+      if (notificarCliente && estado) {
+        try {
+          const ws = new WhatsAppService(negocio.whatsapp);
+          const msgs = {
+            CONFIRMADO: `✅ Tu pedido *${pedido.id}* ha sido confirmado.`,
+            EN_PREPARACION: `📦 Tu pedido *${pedido.id}* está en preparación.`,
+            LISTO: `✅ Tu pedido *${pedido.id}* está listo.`,
+            ENVIADO: `🚚 Tu pedido *${pedido.id}* ha sido enviado.`,
+            COMPLETADO: `✅ Tu pedido *${pedido.id}* ha sido completado. ¡Gracias!`,
+            CANCELADO: `❌ Tu pedido *${pedido.id}* ha sido cancelado.`
+          };
+          const msg = msgs[estado.toUpperCase()];
+          if (msg) await ws.sendMessage(pedido.whatsapp, msg);
+        } catch (e) { console.error('⚠️ Error notificando:', e.message); }
+      }
+
+      return res.json({ success: true, mensaje: 'Pedido actualizado', pedidoId });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -818,6 +952,16 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
     const { businessId, pedidoId } = req.params;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+      if (pedido._status !== 'pending_payment') {
+        return res.status(403).json({ error: 'Solo se pueden eliminar pedidos en estado PENDIENTE', estadoActual: pedido.estado, pedidoId });
+      }
+      await supabaseService.updateOrderFields(pedido.supabaseId, { status: 'cancelled' });
+      return res.json({ success: true, mensaje: 'Pedido cancelado/eliminado', pedidoId });
+    }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();

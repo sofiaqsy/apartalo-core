@@ -259,6 +259,203 @@ async function deleteCustomerPrice(customerId, productId) {
   return true;
 }
 
+// ─── ORDERS (extended) ────────────────────────────────────────────────────────
+
+const ESTADO_TO_STATUS = {
+  PENDIENTE: 'pending_payment', CONFIRMADO: 'paid',
+  EN_PREPARACION: 'preparing',  LISTO: 'preparing',
+  ENVIADO: 'shipped', ENTREGADO: 'delivered',
+  COMPLETADO: 'delivered', CANCELADO: 'cancelled'
+};
+const STATUS_TO_ESTADO = {
+  pending_payment: 'PENDIENTE', paid: 'CONFIRMADO', preparing: 'EN_PREPARACION',
+  shipped: 'ENVIADO', delivered: 'COMPLETADO', cancelled: 'CANCELADO', refunded: 'CANCELADO'
+};
+const ESTADOPAGO_TO_PS = { PENDIENTE_PAGO: 'pending', PARCIAL: 'partial', PAGADO: 'paid' };
+const PS_TO_ESTADOPAGO = { pending: 'PENDIENTE_PAGO', partial: 'PARCIAL', paid: 'PAGADO' };
+
+function toStatus(estado)     { return ESTADO_TO_STATUS[(estado||'').toUpperCase()]  || 'pending_payment'; }
+function fromStatus(s)        { return STATUS_TO_ESTADO[s]   || 'PENDIENTE'; }
+function toPayStatus(ep)      { return ESTADOPAGO_TO_PS[(ep||'').toUpperCase()] || 'pending'; }
+function fromPayStatus(ps)    { return PS_TO_ESTADOPAGO[ps]  || 'PENDIENTE_PAGO'; }
+
+function mapOrder(o, items = [], payments = []) {
+  const montoCents = payments.reduce((s, p) => s + (p.amount_cents || 0), 0);
+  const addr = o.shipping_address || {};
+  const evidencias = payments.flatMap(p =>
+    (p.order_payment_proofs || []).map(pr => ({
+      id: pr.id, paymentId: p.id, url: pr.url,
+      tipo: pr.source || 'APP', fecha: pr.created_at, descripcion: pr.notes || '',
+      verificacion: pr.verified ? {
+        estado: 'VERIFICADO', operacionBCP: pr.bcp_op_code,
+        montoVerificado: pr.amount_verified_cents ? pr.amount_verified_cents / 100 : 0,
+        fechaVerificado: pr.verified_at, verificadoPor: pr.verified_by
+      } : null
+    }))
+  );
+  return {
+    id: o.order_number, supabaseId: o.id,
+    fecha: o.created_at ? new Date(o.created_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
+    hora:  o.created_at ? new Date(o.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '',
+    whatsapp: o.customer_phone || '', cliente: o.customer_name || '', telefono: o.customer_phone || '',
+    direccion: addr.line1 || addr.address || '', ciudad: addr.city || '', departamento: addr.department || '',
+    tipoEnvio: addr.tipo || '', empresaEnvio: addr.courier || '',
+    productos: items.map(i => `${i.quantity}x ${i.product_name} - S/${(i.line_total_cents/100).toFixed(2)}`).join('\n'),
+    productosDetalle: items.map(i => ({
+      id: i.product_id, codigo: i.product_id, nombre: i.product_name,
+      cantidad: parseFloat(i.quantity), precio: i.unit_price_cents / 100,
+      subtotal: i.line_total_cents / 100, unit: i.unit
+    })),
+    total: o.total_cents / 100,
+    estado: fromStatus(o.status), _status: o.status,
+    observaciones: o.notes || '', origen: 'APP',
+    estadoPago: fromPayStatus(o.payment_status),
+    montoPagado: montoCents / 100,
+    fechaPago: o.paid_at ? new Date(o.paid_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
+    pagos: payments.map(p => ({
+      id: p.id, monto: p.amount_cents / 100,
+      fecha: new Date(p.created_at).toLocaleString('es-PE', { timeZone: 'America/Lima' }),
+      nota: p.notes || ''
+    })),
+    evidencias,
+    fechaActualizacion: o.updated_at ? new Date(o.updated_at).toLocaleString('es-PE', { timeZone: 'America/Lima' }) : '',
+    tracking: {
+      creadoEn: o.created_at, confirmedAt: o.confirmed_at,
+      preparingAt: o.preparing_at, readyAt: o.ready_at,
+      shippedAt: o.shipped_at, deliveredAt: o.delivered_at
+    }
+  };
+}
+
+async function getOrdersByFarm(farmId, filters = {}) {
+  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50 } = filters;
+
+  const itemRows = await get('order_items', { farm_id: `eq.${farmId}`, select: 'order_id' });
+  if (!itemRows.length) return { total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false };
+
+  const orderIds = [...new Set(itemRows.map(i => i.order_id))];
+  const idList = orderIds.join(',');
+
+  const [orders, allPayments, allItems] = await Promise.all([
+    get('orders',       { id: `in.(${idList})`, select: '*', order: 'created_at.desc' }),
+    get('order_payments', { order_id: `in.(${idList})`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' }),
+    get('order_items',  { order_id: `in.(${idList})`, select: '*' })
+  ]);
+
+  const payByOrder = {}, itemsByOrder = {};
+  for (const p of allPayments) { if (!payByOrder[p.order_id]) payByOrder[p.order_id] = []; payByOrder[p.order_id].push(p); }
+  for (const i of allItems)    { if (!itemsByOrder[i.order_id]) itemsByOrder[i.order_id] = []; itemsByOrder[i.order_id].push(i); }
+
+  let pedidos = orders.map(o => mapOrder(o, itemsByOrder[o.id] || [], payByOrder[o.id] || []));
+
+  if (vista) {
+    const v = vista.toUpperCase();
+    pedidos = pedidos.filter(p => {
+      const s = p._status;
+      const esMuestra = p.total === 0 || p.observaciones.toUpperCase().includes('MUESTRA');
+      if (v === 'PENDIENTES') return !['delivered','cancelled','refunded'].includes(s) && !esMuestra;
+      if (v === 'HISTORIAL')  return ['delivered','cancelled','refunded'].includes(s);
+      if (v === 'POR_COBRAR') return s === 'delivered' && p.estadoPago !== 'PAGADO';
+      if (v === 'PAGADOS')    return ['delivered','cancelled','refunded'].includes(s) && p.estadoPago === 'PAGADO';
+      if (v === 'MUESTRAS')   return esMuestra;
+      return true;
+    });
+  }
+  if (estado)     pedidos = pedidos.filter(p => p.estado === estado.toUpperCase());
+  if (estadoPago) pedidos = pedidos.filter(p => p.estadoPago === estadoPago.toUpperCase());
+  if (cliente)    pedidos = pedidos.filter(p => p.cliente.toLowerCase().includes(cliente.toLowerCase()));
+  if (fecha)      pedidos = pedidos.filter(p => p.fecha === fecha);
+
+  const total = pedidos.length;
+  const paginaNum = parseInt(pagina) || 1;
+  const limiteNum = parseInt(limite) || 50;
+  const totalPaginas = Math.ceil(total / limiteNum);
+  return { total, pagina: paginaNum, totalPaginas, hayMas: paginaNum < totalPaginas, pedidos: pedidos.slice((paginaNum-1)*limiteNum, paginaNum*limiteNum) };
+}
+
+async function getOrderByIdOrNumber(idOrNumber) {
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(idOrNumber);
+  const param = isUUID ? { id: `eq.${idOrNumber}` } : { order_number: `eq.${idOrNumber}` };
+  const orders = await get('orders', { ...param, select: '*' });
+  if (!orders[0]) return null;
+  const o = orders[0];
+  const [items, payments] = await Promise.all([
+    get('order_items', { order_id: `eq.${o.id}`, select: '*' }),
+    get('order_payments', { order_id: `eq.${o.id}`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' })
+  ]);
+  return mapOrder(o, items, payments);
+}
+
+async function updateOrderStatus(supabaseId, estado) {
+  const status = toStatus(estado);
+  const fields = { status };
+  const now = new Date().toISOString();
+  const up = estado.toUpperCase();
+  if (up === 'CONFIRMADO')     { fields.confirmed_at = now; fields.paid_at = now; }
+  if (up === 'EN_PREPARACION') fields.preparing_at = now;
+  if (up === 'LISTO')          fields.ready_at = now;
+  if (up === 'ENVIADO')        fields.shipped_at = now;
+  if (up === 'ENTREGADO' || up === 'COMPLETADO') fields.delivered_at = now;
+  const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
+  return rows[0] || null;
+}
+
+async function updateOrderFields(supabaseId, fields) {
+  const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
+  return rows[0] || null;
+}
+
+async function recalcPaymentStatus(supabaseId) {
+  const orders = await get('orders', { id: `eq.${supabaseId}`, select: 'total_cents' });
+  const totalCents = orders[0]?.total_cents || 0;
+  const payments = await get('order_payments', { order_id: `eq.${supabaseId}`, select: 'amount_cents' });
+  const paidCents = payments.reduce((s, p) => s + (p.amount_cents || 0), 0);
+  const ps = paidCents === 0 ? 'pending' : paidCents >= totalCents ? 'paid' : 'partial';
+  await patch('orders', { id: `eq.${supabaseId}` }, { payment_status: ps });
+  return ps;
+}
+
+// ─── ORDER PAYMENTS ───────────────────────────────────────────────────────────
+
+async function addOrderPayment(supabaseOrderId, { amountCents, notes, createdBy = 'APP' }) {
+  const rows = await post('order_payments', {
+    order_id: supabaseOrderId, amount_cents: amountCents,
+    notes: notes || null, created_by: createdBy
+  });
+  await recalcPaymentStatus(supabaseOrderId);
+  return rows[0] || null;
+}
+
+async function deleteOrderPayment(paymentId, supabaseOrderId) {
+  await deleteRow('order_payments', { id: `eq.${paymentId}` });
+  if (supabaseOrderId) await recalcPaymentStatus(supabaseOrderId);
+  return true;
+}
+
+// ─── PAYMENT PROOFS ───────────────────────────────────────────────────────────
+
+async function addPaymentProof(paymentId, { url, source = 'APP', notes }) {
+  const rows = await post('order_payment_proofs', {
+    payment_id: paymentId, url, source, notes: notes || null
+  });
+  return rows[0] || null;
+}
+
+async function verifyPaymentProof(proofId, { bcpOpCode, amountVerifiedCents, verifiedBy }) {
+  const rows = await patch('order_payment_proofs', { id: `eq.${proofId}` }, {
+    verified: true, verified_at: new Date().toISOString(),
+    verified_by: verifiedBy || 'ADMIN',
+    bcp_op_code: bcpOpCode || null,
+    amount_verified_cents: amountVerifiedCents || null
+  });
+  return rows[0] || null;
+}
+
+async function deletePaymentProof(proofId) {
+  await deleteRow('order_payment_proofs', { id: `eq.${proofId}` });
+  return true;
+}
+
 // ─── ADDRESSES ────────────────────────────────────────────────────────────────
 
 async function getAddressesByCustomer(customerId) {
@@ -362,5 +559,15 @@ module.exports = {
   deleteAddress,
   getCustomerPrices,
   upsertCustomerPrices,
-  deleteCustomerPrice
+  deleteCustomerPrice,
+  getOrdersByFarm,
+  getOrderByIdOrNumber,
+  updateOrderStatus,
+  updateOrderFields,
+  recalcPaymentStatus,
+  addOrderPayment,
+  deleteOrderPayment,
+  addPaymentProof,
+  verifyPaymentProof,
+  deletePaymentProof
 };
