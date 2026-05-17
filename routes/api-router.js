@@ -460,8 +460,12 @@ router.get('/clientes/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    console.log(`[Clientes GET] businessId=${businessId} plataformaExterna=${negocio.plataformaExterna} farmId=${negocio.farmId}`);
+
     if (negocio.plataformaExterna && negocio.farmId) {
+      console.log(`[Clientes GET] → rama Supabase activada, llamando getAllCustomers...`);
       const profiles = await supabaseService.getAllCustomers({ search: buscar });
+      console.log(`[Clientes GET] → ${profiles.length} perfiles obtenidos de Supabase`);
       const clientes = profiles.map(p => ({
         id:            p.id,
         whatsapp:      p.phone || '',
