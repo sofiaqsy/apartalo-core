@@ -484,6 +484,34 @@ router.put('/:businessId/:clienteId', async (req, res) => {
         await supabaseService.updateCustomer(clienteId, supabaseUpdates);
       console.log(`[Clientes PUT] → Supabase OK`);
 
+      // Upsert principal address in customer_addresses if address fields provided
+      const hasAddressData = direccion || distrito || departamento || direccionEnvio || distritoEnvio || departamentoEnvio;
+      if (hasAddressData) {
+        try {
+          const existing = await supabaseService.getAddressesByCustomer(clienteId);
+          const principal = existing.find(a => a.es_principal) || existing[0];
+          const addressFields = {
+            alias:        'Principal',
+            esPrincipal:  true,
+            direccion:    direccion || direccionEnvio || null,
+            distrito:     distrito || distritoEnvio || null,
+            departamento: departamento || departamentoEnvio || null,
+            referencia:   null,
+            notas:        notas || null,
+            courier:      empresaEnvio ? { empresa: empresaEnvio, agencia: localEnvio || null } : undefined
+          };
+          if (principal) {
+            await supabaseService.updateAddress(principal.id, addressFields);
+            console.log(`[Clientes PUT] → address updated id=${principal.id}`);
+          } else {
+            const newAddr = await supabaseService.createAddress(clienteId, addressFields);
+            console.log(`[Clientes PUT] → address created id=${newAddr.id}`);
+          }
+        } catch (addrErr) {
+          console.warn('[Clientes PUT] No se pudo guardar address:', addrErr.message);
+        }
+      }
+
       // Update extra fields in sheet
       if (negocio.spreadsheetId) {
         try {
