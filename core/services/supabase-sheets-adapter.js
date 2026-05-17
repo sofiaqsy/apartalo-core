@@ -253,12 +253,19 @@ class SupabaseSheetsAdapter {
     if (!cached) return false;
 
     // J and K (B2B Business, B2B Product) live only in the sheet
+    // Must find the actual sheet row by searching column A for the Supabase ID
     if (col === 'J' || col === 'K') {
-      if (this._sheets) {
+      if (this._sheets && cached) {
         try {
-          await this._sheets.updateCell(range, value);
+          const colA = await this._sheets.getRows('Inventario!A:A');
+          const actualRow = colA.findIndex((r, idx) => idx > 0 && r[0] === cached.id);
+          if (actualRow > 0) {
+            await this._sheets.updateCell(`Inventario!${col}${actualRow + 1}`, value);
+          } else {
+            console.warn(`[Supabase] ID ${cached.id} no encontrado en col A del sheet para actualizar ${col}`);
+          }
         } catch (e) {
-          console.warn(`[Supabase] No se pudo actualizar ${range} en Sheets:`, e.message);
+          console.warn(`[Supabase] No se pudo actualizar ${col} en Sheets:`, e.message);
         }
       }
       return true;
