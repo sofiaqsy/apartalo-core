@@ -252,6 +252,18 @@ class SupabaseSheetsAdapter {
     const cached = this._productRowCache.find(r => r.rowIndex === rowNum);
     if (!cached) return false;
 
+    // J and K (B2B Business, B2B Product) live only in the sheet
+    if (col === 'J' || col === 'K') {
+      if (this._sheets) {
+        try {
+          await this._sheets.updateCell(range, value);
+        } catch (e) {
+          console.warn(`[Supabase] No se pudo actualizar ${range} en Sheets:`, e.message);
+        }
+      }
+      return true;
+    }
+
     const colMap = {
       B: 'name', C: 'description', D: 'price_cents', E: 'stock',
       G: 'images', H: 'status', I: 'category',
@@ -271,15 +283,6 @@ class SupabaseSheetsAdapter {
     }
 
     await supabase.updateProduct(cached.id, { [field]: dbValue });
-
-    if (this._sheets) {
-      try {
-        await this._sheets.updateCell(range, value);
-      } catch (e) {
-        console.warn(`[Supabase] No se pudo actualizar ${range} en Sheets:`, e.message);
-      }
-    }
-
     return true;
   }
 
