@@ -470,14 +470,19 @@ router.put('/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    console.log(`[Clientes PUT] clienteId=${clienteId} plataformaExterna=${negocio.plataformaExterna} isUUID=${isUUID(clienteId)}`);
+    console.log(`[Clientes PUT] body=${JSON.stringify(req.body)}`);
+
     if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
       // Update core fields in Supabase
       const supabaseUpdates = {};
       if (nombreNegocio !== undefined) supabaseUpdates.business_name = nombreNegocio;
       if (nombreResponsable !== undefined) supabaseUpdates.full_name = nombreResponsable;
       if (whatsapp !== undefined) supabaseUpdates.phone = whatsapp.replace(/[^0-9+]/g, '');
+      console.log(`[Clientes PUT] → Supabase updates: ${JSON.stringify(supabaseUpdates)}`);
       if (Object.keys(supabaseUpdates).length > 0)
         await supabaseService.updateCustomer(clienteId, supabaseUpdates);
+      console.log(`[Clientes PUT] → Supabase OK`);
 
       // Update extra fields in sheet
       if (negocio.spreadsheetId) {
