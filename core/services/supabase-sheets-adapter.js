@@ -51,8 +51,27 @@ class SupabaseSheetsAdapter {
 
   // ─── PRODUCTOS ───────────────────────────────────────────────────────────────
 
+  async _getSheetB2bMap() {
+    if (!this._sheets) return {};
+    try {
+      const rows = await this._sheets.getRows('Inventario!A:K');
+      const map = {};
+      for (let i = 1; i < rows.length; i++) {
+        const id = (rows[i][0] || '').trim();
+        if (id) map[id] = { b2bBusiness: rows[i][9] || '', b2bProduct: rows[i][10] || '' };
+      }
+      return map;
+    } catch (e) {
+      console.warn('[Supabase] No se pudo leer J/K del sheet:', e.message);
+      return {};
+    }
+  }
+
   async getProductos(estado = null) {
-    const rows = await supabase.getProducts(this.farmId);
+    const [rows, b2bMap] = await Promise.all([
+      supabase.getProducts(this.farmId),
+      this._getSheetB2bMap()
+    ]);
     return rows
       .filter(p => !estado || p.status.toUpperCase() === estado.toUpperCase())
       .map(p => ({
@@ -60,14 +79,13 @@ class SupabaseSheetsAdapter {
         nombre:                  p.name,
         descripcion:             p.description || '',
         precio:                  p.price_cents / 100,
-
         stock:                   p.stock || 0,
         stockReservado:          0,
         imagenUrl:               (p.images && p.images[0]) ? p.images[0] : '',
         estado:                  p.status.toUpperCase(),
         categoria:               '',
-        proveedorId:             '',
-        proveedorProductoCodigo: '',
+        proveedorId:             b2bMap[p.id]?.b2bBusiness || '',
+        proveedorProductoCodigo: b2bMap[p.id]?.b2bProduct  || '',
         precioMayor:             p.b2b_price_cents ? p.b2b_price_cents / 100 : null,
         cantidadMayor:           p.min_qty_for_b2b ? Math.round(p.min_qty_for_b2b) : null,
         pedidoMinimo:            p.min_order_qty || 1,
