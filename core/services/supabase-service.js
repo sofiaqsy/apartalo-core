@@ -65,7 +65,8 @@ async function createProduct(farmId, { name, description, priceCents, stock, ima
     stock:         stock || 0,
     status:        status || 'active',
     images:        images || [],
-    min_order_qty: minOrderQty || 1
+    min_order_qty: minOrderQty || 1,
+    currency:      'PEN'
   };
   if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
   if (minQtyForB2b != null)  body.min_qty_for_b2b = minQtyForB2b;
