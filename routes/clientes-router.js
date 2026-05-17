@@ -728,14 +728,20 @@ router.get('/:businessId/:clienteId/addresses', async (req, res) => {
 router.post('/:businessId/:clienteId/addresses', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
+    console.log(`[Addresses POST] businessId=${businessId} clienteId=${clienteId}`);
+    console.log(`[Addresses POST] body=${JSON.stringify(req.body)}`);
+
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
     if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
 
     const { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier } = req.body;
+    console.log(`[Addresses POST] → createAddress fields: alias=${alias} direccion=${direccion} distrito=${distrito} departamento=${departamento}`);
     const address = await supabaseService.createAddress(clienteId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier });
+    console.log(`[Addresses POST] → created: ${JSON.stringify(address)}`);
     res.status(201).json({ success: true, address });
   } catch (error) {
+    console.error(`[Addresses POST] ERROR: ${error.message}`);
     res.status(500).json({ error: error.message });
   }
 });
