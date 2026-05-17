@@ -165,6 +165,87 @@ class SupabaseSheetsAdapter {
     return false;
   }
 
+  // ─── SHEETS-COMPATIBLE METHODS FOR PRODUCT CRUD ──────────────────────────────
+
+  async getRows(range) {
+    if (range && range.startsWith('Inventario')) {
+      const products = await supabase.getAllProducts(this.farmId);
+      this._productRowCache = [];
+      const rows = [['codigo', 'nombre', 'descripcion', 'precio', 'stock', 'stockReservado', 'imagenUrl', 'estado', 'categoria', '', '', 'precioMayor', 'cantidadMayor']];
+      products.forEach((p, i) => {
+        const rowIndex = i + 2;
+        this._productRowCache.push({ id: p.id, rowIndex });
+        rows.push([
+          p.id,
+          p.name,
+          p.description || '',
+          p.price_cents / 100,
+          p.stock || 0,
+          0,
+          (p.images && p.images[0]) ? p.images[0] : '',
+          p.status === 'active' ? 'ACTIVO' : p.status === 'archived' ? 'INACTIVO' : p.status.toUpperCase(),
+          '',
+          '', '', '',
+          p.b2b_price_cents ? p.b2b_price_cents / 100 : 0,
+          p.min_order_qty || 1
+        ]);
+      });
+      return rows;
+    }
+    return [];
+  }
+
+  async appendRow(sheetName, values) {
+    if (sheetName === 'Inventario') {
+      const statusRaw = (values[7] || 'ACTIVO').toUpperCase();
+      await supabase.createProduct(this.farmId, {
+        name:        values[1],
+        description: values[2] || '',
+        priceCents:  Math.round((parseFloat(values[3]) || 0) * 100),
+        stock:       parseFloat(values[4]) || 0,
+        images:      values[6] ? [values[6]] : [],
+        status:      statusRaw === 'ACTIVO' ? 'active' : 'draft',
+        unit:        'unidad'
+      });
+      return true;
+    }
+    return false;
+  }
+
+  async updateCell(range, value) {
+    const match = (range || '').match(/^Inventario!([A-Z]+)(\d+)$/);
+    if (!match) return false;
+    const col = match[1];
+    const rowNum = parseInt(match[2]);
+    if (!this._productRowCache) this._productRowCache = [];
+    const cached = this._productRowCache.find(r => r.rowIndex === rowNum);
+    if (!cached) return false;
+
+    const colMap = {
+      B: 'name', C: 'description', D: 'price_cents', E: 'stock',
+      G: 'images', H: 'status', I: 'category', L: 'b2b_price_cents', M: 'min_order_qty'
+    };
+    const field = colMap[col];
+    if (!field) return false;
+
+    let dbValue = value;
+    if (field === 'price_cents' || field === 'b2b_price_cents') dbValue = Math.round((parseFloat(value) || 0) * 100);
+    if (field === 'stock' || field === 'min_order_qty') dbValue = parseFloat(value) || 0;
+    if (field === 'images') dbValue = value ? [value] : [];
+    if (field === 'status') {
+      const v = (value || '').toUpperCase();
+      dbValue = v === 'ACTIVO' ? 'active' : v === 'ELIMINADO' ? 'archived' : 'archived';
+    }
+
+    await supabase.updateProduct(cached.id, { [field]: dbValue });
+    return true;
+  }
+
+  async batchUpdate(updates) {
+    for (const u of updates) await this.updateCell(u.range, u.value);
+    return true;
+  }
+
   // ─── MÉTODOS VACÍOS (no aplican en Supabase) ─────────────────────────────────
 
   async getMetodosPago() { return []; }

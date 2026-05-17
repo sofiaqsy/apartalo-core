@@ -52,6 +52,35 @@ async function getProducts(farmId) {
   });
 }
 
+async function getAllProducts(farmId) {
+  return get('products', {
+    farm_id: `eq.${farmId}`,
+    select: 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images',
+    order: 'name.asc'
+  });
+}
+
+async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit }) {
+  const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
+  const rows = await post('products', {
+    farm_id:       farmId,
+    slug,
+    name,
+    description:   description || '',
+    unit:          unit || 'unidad',
+    price_cents:   priceCents || 0,
+    stock:         stock || 0,
+    status:        status || 'active',
+    images:        images || []
+  });
+  return rows[0] || null;
+}
+
+async function updateProduct(productId, fields) {
+  const rows = await patch('products', { id: `eq.${productId}` }, fields);
+  return rows[0] || null;
+}
+
 async function getProductById(productId) {
   const rows = await get('products', {
     id: `eq.${productId}`,
@@ -138,6 +167,9 @@ async function getOrdersByCustomer(customerId) {
 module.exports = {
   getFarm,
   getProducts,
+  getAllProducts,
+  createProduct,
+  updateProduct,
   getProductById,
   getCustomerByPhone,
   createCustomer,
