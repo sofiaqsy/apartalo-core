@@ -9,6 +9,11 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const SheetsService = require('../core/services/sheets-service');
 const WhatsAppService = require('../core/services/whatsapp-service');
+const supabaseService = require('../core/services/supabase-service');
+
+function isUUID(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
 
 // ==================== HELPER: Determinar estado de pago ====================
 
@@ -160,6 +165,38 @@ router.get('/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    console.log(`[Clientes GET] businessId=${businessId} plataformaExterna=${negocio.plataformaExterna} farmId=${negocio.farmId}`);
+
+    if (negocio.plataformaExterna && negocio.farmId) {
+      console.log(`[Clientes GET] → Supabase getAllCustomers`);
+      const profiles = await supabaseService.getAllCustomers({ search: buscar });
+      console.log(`[Clientes GET] → ${profiles.length} perfiles obtenidos`);
+      let clientes = profiles.map(p => ({
+        id: p.id, whatsapp: p.phone || '', nombreNegocio: p.full_name || '', nombreResponsable: p.full_name || '',
+        telefono: p.phone || '', email: p.email || '', direccion: '', departamento: '', distrito: '',
+        fechaRegistro: p.created_at ? new Date(p.created_at).toLocaleDateString('es-PE') : '',
+        ultimaCompra: '', totalPedidos: 0, totalComprado: 0, totalKg: 0, totalPorCobrar: 0,
+        pedidosActivos: 0, pedidosPorCobrar: 0, pedidosPagados: 0,
+        estado: 'ACTIVO', tipoEnvio: '', empresaEnvio: '', localEnvio: '',
+        direccionEnvio: '', distritoEnvio: '', departamentoEnvio: '', notas: ''
+      }));
+      if (buscar) {
+        const s = buscar.toLowerCase();
+        clientes = clientes.filter(c =>
+          c.nombreNegocio.toLowerCase().includes(s) ||
+          c.whatsapp.includes(buscar) ||
+          c.email.toLowerCase().includes(s)
+        );
+      }
+      if (ordenar === 'nombre') clientes.sort((a, b) => a.nombreNegocio.localeCompare(b.nombreNegocio));
+      const total = clientes.length;
+      const paginaNum = parseInt(pagina) || 1;
+      const limiteNum = parseInt(limite) || 50;
+      const totalPaginas = Math.ceil(total / limiteNum);
+      const inicio = (paginaNum - 1) * limiteNum;
+      return res.json({ total, pagina: paginaNum, totalPaginas, hayMas: paginaNum < totalPaginas, clientes: clientes.slice(inicio, inicio + limiteNum) });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -288,6 +325,19 @@ router.get('/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
+      const profile = await supabaseService.getCustomerById(clienteId);
+      if (!profile) return res.status(404).json({ error: 'Cliente no encontrado' });
+      const cliente = {
+        id: profile.id, whatsapp: profile.phone || '', nombreNegocio: profile.full_name || '', nombreResponsable: profile.full_name || '',
+        telefono: profile.phone || '', email: profile.email || '', direccion: '', departamento: '', distrito: '',
+        fechaRegistro: '', ultimaCompra: '', totalPedidos: 0, totalComprado: 0, totalKg: 0,
+        estado: 'ACTIVO', tipoEnvio: '', empresaEnvio: '', localEnvio: '',
+        direccionEnvio: '', distritoEnvio: '', departamentoEnvio: '', notas: ''
+      };
+      return res.json({ cliente, pedidos: [], estadisticas: calcularStats([]) });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
@@ -355,10 +405,33 @@ router.post('/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    const whatsappLimpio = whatsapp.replace(/[^0-9+]/g, '');
+
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const nuevo = await supabaseService.createCustomer({
+        fullName: nombreNegocio || nombreResponsable || '',
+        phone: whatsappLimpio,
+        email: email || null
+      });
+      if (!nuevo) return res.status(500).json({ error: 'Error creando cliente en Supabase' });
+
+      // Mirror UUID to sheet col A
+      if (negocio.spreadsheetId) {
+        try {
+          const sheets = new SheetsService(negocio.spreadsheetId);
+          await sheets.initialize();
+          await sheets.appendRow('Clientes', [nuevo.id, whatsappLimpio, nombreNegocio || '', nombreResponsable || '', telefono || '', email || '', direccion || '', departamento || '', distrito || '', new Date().toLocaleDateString('es-PE'), '', 0, 0, 0, estado || 'ACTIVO', tipoEnvio || '', empresaEnvio || '', localEnvio || '', direccionEnvio || '', distritoEnvio || '', departamentoEnvio || '', notas || '']);
+        } catch (sheetsErr) {
+          console.warn('[Clientes POST] No se pudo guardar en sheet:', sheetsErr.message);
+        }
+      }
+
+      return res.status(201).json({ success: true, mensaje: 'Cliente creado', cliente: { id: nuevo.id, whatsapp: whatsappLimpio, nombreNegocio: nombreNegocio || '', nombreResponsable: nombreResponsable || '', fechaRegistro: new Date().toLocaleDateString('es-PE'), estado: estado || 'ACTIVO' } });
+    }
+
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
 
-    const whatsappLimpio = whatsapp.replace(/[^0-9+]/g, '');
     const rows = await sheets.getRows('Clientes!A:B');
     for (let i = 1; i < rows.length; i++) {
       const existingWa = (rows[i][1] || '').replace(/[^0-9]/g, '');
@@ -394,6 +467,53 @@ router.put('/:businessId/:clienteId', async (req, res) => {
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
+      // Update core fields in Supabase
+      const supabaseUpdates = {};
+      if (nombreNegocio !== undefined || nombreResponsable !== undefined)
+        supabaseUpdates.full_name = nombreNegocio || nombreResponsable;
+      if (whatsapp !== undefined)
+        supabaseUpdates.phone = whatsapp.replace(/[^0-9+]/g, '');
+      if (Object.keys(supabaseUpdates).length > 0)
+        await supabaseService.updateCustomer(clienteId, supabaseUpdates);
+
+      // Update extra fields in sheet
+      if (negocio.spreadsheetId) {
+        try {
+          const sheets = new SheetsService(negocio.spreadsheetId);
+          await sheets.initialize();
+          const rows = await sheets.getRows('Clientes!A:V');
+          for (let i = 1; i < rows.length; i++) {
+            if ((rows[i][0] || '').trim() === clienteId) {
+              const updates = [];
+              const rowNum = i + 1;
+              if (whatsapp !== undefined) updates.push({ range: `Clientes!B${rowNum}`, value: whatsapp.replace(/[^0-9+]/g, '') });
+              if (nombreNegocio !== undefined) updates.push({ range: `Clientes!C${rowNum}`, value: nombreNegocio });
+              if (nombreResponsable !== undefined) updates.push({ range: `Clientes!D${rowNum}`, value: nombreResponsable });
+              if (telefono !== undefined) updates.push({ range: `Clientes!E${rowNum}`, value: telefono });
+              if (email !== undefined) updates.push({ range: `Clientes!F${rowNum}`, value: email });
+              if (direccion !== undefined) updates.push({ range: `Clientes!G${rowNum}`, value: direccion });
+              if (departamento !== undefined) updates.push({ range: `Clientes!H${rowNum}`, value: departamento });
+              if (distrito !== undefined) updates.push({ range: `Clientes!I${rowNum}`, value: distrito });
+              if (estado !== undefined) updates.push({ range: `Clientes!O${rowNum}`, value: estado });
+              if (tipoEnvio !== undefined) updates.push({ range: `Clientes!P${rowNum}`, value: tipoEnvio });
+              if (empresaEnvio !== undefined) updates.push({ range: `Clientes!Q${rowNum}`, value: empresaEnvio });
+              if (localEnvio !== undefined) updates.push({ range: `Clientes!R${rowNum}`, value: localEnvio });
+              if (direccionEnvio !== undefined) updates.push({ range: `Clientes!S${rowNum}`, value: direccionEnvio });
+              if (distritoEnvio !== undefined) updates.push({ range: `Clientes!T${rowNum}`, value: distritoEnvio });
+              if (departamentoEnvio !== undefined) updates.push({ range: `Clientes!U${rowNum}`, value: departamentoEnvio });
+              if (notas !== undefined) updates.push({ range: `Clientes!V${rowNum}`, value: notas });
+              if (updates.length > 0) await sheets.batchUpdate(updates);
+              break;
+            }
+          }
+        } catch (sheetsErr) {
+          console.warn('[Clientes PUT] No se pudo actualizar sheet:', sheetsErr.message);
+        }
+      }
+      return res.json({ success: true, mensaje: 'Cliente actualizado', clienteId });
+    }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
     await sheets.initialize();
