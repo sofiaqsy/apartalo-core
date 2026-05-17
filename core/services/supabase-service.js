@@ -391,11 +391,11 @@ async function updateOrderStatus(supabaseId, estado) {
   const fields = { status };
   const now = new Date().toISOString();
   const up = estado.toUpperCase();
-  if (up === 'CONFIRMADO')     { fields.confirmed_at = now; fields.paid_at = now; }
+  if (up === 'CONFIRMADO')     fields.confirmed_at = now;
   if (up === 'EN_PREPARACION') fields.preparing_at = now;
   if (up === 'LISTO')          fields.ready_at = now;
   if (up === 'ENVIADO')        fields.shipped_at = now;
-  if (up === 'ENTREGADO' || up === 'COMPLETADO') fields.delivered_at = now;
+  if (up === 'ENTREGADO')      fields.delivered_at = now;
   const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
   return rows[0] || null;
 }
@@ -406,12 +406,15 @@ async function updateOrderFields(supabaseId, fields) {
 }
 
 async function recalcPaymentStatus(supabaseId) {
-  const orders = await get('orders', { id: `eq.${supabaseId}`, select: 'total_cents' });
-  const totalCents = orders[0]?.total_cents || 0;
+  const orders = await get('orders', { id: `eq.${supabaseId}`, select: 'total_cents,paid_at' });
+  const order = orders[0];
+  const totalCents = order?.total_cents || 0;
   const payments = await get('order_payments', { order_id: `eq.${supabaseId}`, select: 'amount_cents' });
   const paidCents = payments.reduce((s, p) => s + (p.amount_cents || 0), 0);
   const ps = paidCents === 0 ? 'pending' : paidCents >= totalCents ? 'paid' : 'partial';
-  await patch('orders', { id: `eq.${supabaseId}` }, { payment_status: ps });
+  const update = { payment_status: ps };
+  if (ps === 'paid' && !order?.paid_at) update.paid_at = new Date().toISOString();
+  await patch('orders', { id: `eq.${supabaseId}` }, update);
   return ps;
 }
 
