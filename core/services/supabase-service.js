@@ -91,25 +91,52 @@ async function getProductById(productId) {
 
 async function getCustomerByPhone(phone) {
   const cleaned = phone.replace(/\D/g, '');
-  const rows = await get('profiles', {
-    phone: `eq.${cleaned}`,
-    select: 'id,email,full_name,phone,role'
-  });
-  return rows[0] || null;
+  // Try exact match first, then with country prefix stripped
+  const attempts = [cleaned];
+  if (cleaned.startsWith('51') && cleaned.length > 9) attempts.push(cleaned.slice(2)); // Peru prefix
+  if (cleaned.startsWith('57') && cleaned.length > 9) attempts.push(cleaned.slice(2)); // Colombia prefix
+
+  for (const num of attempts) {
+    const rows = await get('profiles', {
+      phone: `eq.${num}`,
+      select: 'id,email,full_name,phone,role'
+    });
+    if (rows[0]) return rows[0];
+  }
+  return null;
 }
 
 async function createCustomer({ fullName, phone, email }) {
   const cleaned = phone.replace(/\D/g, '');
-  const rows = await post('profiles', {
-    full_name: fullName,
-    phone: cleaned,
-    email: email || `${cleaned}@whatsapp.apartalo.co`,
-    role: 'customer'
-  });
-  return rows[0] || null;
+  const customerEmail = email || `${cleaned}@whatsapp.apartalo.co`;
+
+  try {
+    // profiles.id is FK to auth.users.id — must create via Admin Auth API
+    const authUrl = `${base()}/auth/v1/admin/users`;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const { data: authUser } = await axios.post(authUrl, {
+      email: customerEmail,
+      email_confirm: true,
+      phone: cleaned,
+      user_metadata: { full_name: fullName || '' }
+    }, {
+      headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
+    });
+
+    // Trigger handle_new_user() auto-creates the profile — update phone explicitly
+    if (authUser?.id) {
+      await patch('profiles', { id: `eq.${authUser.id}` }, { phone: cleaned, full_name: fullName || '' });
+      return { id: authUser.id, email: customerEmail, full_name: fullName || '', phone: cleaned, role: 'customer' };
+    }
+    return null;
+  } catch (error) {
+    console.error('[Supabase] createCustomer error:', error.response?.data || error.message);
+    return null;
+  }
 }
 
 async function updateCustomer(profileId, fields) {
+  if (fields.phone) fields.phone = fields.phone.replace(/\D/g, '');
   const rows = await patch('profiles', { id: `eq.${profileId}` }, fields);
   return rows[0] || null;
 }
