@@ -704,4 +704,64 @@ router.post('/:businessId/:clienteId/actualizar-stats', async (req, res) => {
   }
 });
 
+// ==================== DIRECCIONES (Supabase only) ====================
+
+router.get('/:businessId/:clienteId/addresses', async (req, res) => {
+  try {
+    const { businessId, clienteId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
+
+    const addresses = await supabaseService.getAddressesByCustomer(clienteId);
+    res.json({ total: addresses.length, addresses });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/:businessId/:clienteId/addresses', async (req, res) => {
+  try {
+    const { businessId, clienteId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
+
+    const { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier } = req.body;
+    const address = await supabaseService.createAddress(clienteId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier });
+    res.status(201).json({ success: true, address });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.put('/:businessId/:clienteId/addresses/:addressId', async (req, res) => {
+  try {
+    const { businessId, addressId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
+
+    const { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier } = req.body;
+    await supabaseService.updateAddress(addressId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier });
+    res.json({ success: true, mensaje: 'Dirección actualizada', addressId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/:businessId/:clienteId/addresses/:addressId', async (req, res) => {
+  try {
+    const { businessId, addressId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible en plataforma externa' });
+
+    await supabaseService.deleteAddress(addressId);
+    res.json({ success: true, mensaje: 'Dirección eliminada', addressId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

@@ -220,6 +220,90 @@ async function getCustomersByIds(ids) {
   return rows;
 }
 
+// ─── ADDRESSES ────────────────────────────────────────────────────────────────
+
+async function getAddressesByCustomer(customerId) {
+  return get('customer_addresses', {
+    customer_id: `eq.${customerId}`,
+    select: '*,customer_address_courier(*)',
+    order: 'es_principal.desc,created_at.asc'
+  });
+}
+
+async function createAddress(customerId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier }) {
+  const rows = await post('customer_addresses', {
+    customer_id:  customerId,
+    alias:        alias || null,
+    es_principal: esPrincipal || false,
+    direccion:    direccion || null,
+    distrito:     distrito || null,
+    departamento: departamento || null,
+    referencia:   referencia || null,
+    notas:        notas || null
+  });
+  const address = rows[0];
+  if (!address) throw new Error('Address creation failed');
+
+  if (courier?.empresa) {
+    const courierRows = await post('customer_address_courier', {
+      address_id: address.id,
+      empresa:    courier.empresa,
+      agencia:    courier.agencia || null
+    });
+    address.customer_address_courier = courierRows[0] || null;
+  } else {
+    address.customer_address_courier = null;
+  }
+  return address;
+}
+
+async function updateAddress(addressId, { alias, esPrincipal, direccion, distrito, departamento, referencia, notas, courier }) {
+  const fields = {};
+  if (alias !== undefined)        fields.alias        = alias;
+  if (esPrincipal !== undefined)  fields.es_principal = esPrincipal;
+  if (direccion !== undefined)    fields.direccion    = direccion;
+  if (distrito !== undefined)     fields.distrito     = distrito;
+  if (departamento !== undefined) fields.departamento = departamento;
+  if (referencia !== undefined)   fields.referencia   = referencia;
+  if (notas !== undefined)        fields.notas        = notas;
+
+  let address = null;
+  if (Object.keys(fields).length > 0) {
+    const rows = await patch('customer_addresses', { id: `eq.${addressId}` }, fields);
+    address = rows[0] || null;
+  }
+
+  if (courier !== undefined) {
+    if (courier?.empresa) {
+      // Upsert: try patch first, then post if not exists
+      try {
+        const existing = await patch('customer_address_courier', { address_id: `eq.${addressId}` }, { empresa: courier.empresa, agencia: courier.agencia || null });
+        if (!existing.length) {
+          await post('customer_address_courier', { address_id: addressId, empresa: courier.empresa, agencia: courier.agencia || null });
+        }
+      } catch {
+        await post('customer_address_courier', { address_id: addressId, empresa: courier.empresa, agencia: courier.agencia || null });
+      }
+    } else {
+      // Remove courier if empresa is empty/null
+      await deleteRow('customer_address_courier', { address_id: `eq.${addressId}` });
+    }
+  }
+  return address;
+}
+
+async function deleteAddress(addressId) {
+  await deleteRow('customer_addresses', { id: `eq.${addressId}` });
+  return true;
+}
+
+async function deleteRow(path, params) {
+  const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  const url = `${base()}/rest/v1/${path}?${qs}`;
+  const axios = require('axios');
+  await axios.delete(url, { headers: headers() });
+}
+
 module.exports = {
   getFarm,
   getProducts,
@@ -234,5 +318,9 @@ module.exports = {
   createCustomer,
   updateCustomer,
   createOrder,
-  getOrdersByCustomer
+  getOrdersByCustomer,
+  getAddressesByCustomer,
+  createAddress,
+  updateAddress,
+  deleteAddress
 };
