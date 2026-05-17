@@ -10,7 +10,12 @@ const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');
 const SupabaseSheetsAdapter = require('../core/services/supabase-sheets-adapter');
+const supabaseService = require('../core/services/supabase-service');
 const firebaseService = require('../core/services/firebase-service');
+
+function isUUID(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
 
 async function getSheetsService(negocio) {
   let sheets;
@@ -455,7 +460,7 @@ router.get('/clientes/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
 
     let clientes = [];
@@ -492,7 +497,7 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
     let cliente = null;
 
@@ -521,23 +526,36 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
 router.post('/clientes/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, nombre, telefono, direccion, departamento, ciudad, empresa, notas } = req.body;
+    const { whatsapp, nombre, telefono, direccion, departamento, ciudad, empresa, notas, email } = req.body;
     if (!whatsapp || !nombre) return res.status(400).json({ error: 'Campos requeridos: whatsapp, nombre' });
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
-    const clienteExistente = await sheets.buscarCliente(whatsapp);
-    if (clienteExistente) return res.status(400).json({ error: 'Ya existe un cliente con ese WhatsApp', clienteExistente: clienteExistente.id });
+    // Check duplicate in sheet
+    const sheetRows = await sheets.getRows('Clientes!A:B');
+    const phone = whatsapp.replace(/[^0-9]/g, '');
+    const dup = sheetRows.slice(1).find(r => (r[1] || '').replace(/[^0-9]/g, '') === phone);
+    if (dup) return res.status(400).json({ error: 'Ya existe un cliente con ese WhatsApp', clienteExistente: dup[0] });
 
-    const clienteId = `CLI-${Date.now().toString().slice(-6)}`;
+    let clienteId = `CLI-${Date.now().toString().slice(-6)}`;
     const fechaHoy = formatPeruDate();
 
-    await sheets.appendRow('Clientes', [clienteId, whatsapp.replace(/[^0-9]/g, ''), nombre, telefono || '', direccion || '', fechaHoy, '', departamento || '', ciudad || '', empresa || '', notas || '']);
+    // Create in Supabase when plataformaExterna=true and get auth UUID
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const supabaseCliente = await supabaseService.createCustomer({
+        fullName: nombre,
+        phone:    whatsapp,
+        email:    email || null
+      });
+      if (supabaseCliente?.id) clienteId = supabaseCliente.id;
+    }
 
-    res.status(201).json({ success: true, mensaje: 'Cliente creado', cliente: { id: clienteId, whatsapp: whatsapp.replace(/[^0-9]/g, ''), nombre, telefono: telefono || '', direccion: direccion || '', fechaRegistro: fechaHoy, departamento: departamento || '', ciudad: ciudad || '', empresa: empresa || '', notas: notas || '' } });
+    await sheets.appendRow('Clientes', [clienteId, phone, nombre, telefono || '', direccion || '', fechaHoy, '', departamento || '', ciudad || '', empresa || '', notas || '']);
+
+    res.status(201).json({ success: true, mensaje: 'Cliente creado', cliente: { id: clienteId, whatsapp: phone, nombre, telefono: telefono || '', direccion: direccion || '', fechaRegistro: fechaHoy, departamento: departamento || '', ciudad: ciudad || '', empresa: empresa || '', notas: notas || '' } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -551,7 +569,7 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
 
     for (let i = 1; i < rows.length; i++) {
@@ -566,6 +584,18 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
         if (empresa !== undefined) updates.push({ range: `Clientes!J${i + 1}`, value: empresa });
         if (notas !== undefined) updates.push({ range: `Clientes!K${i + 1}`, value: notas });
         if (updates.length > 0) await sheets.batchUpdate(updates);
+
+        // If col A is a Supabase UUID, also sync core fields to profiles
+        if (negocio.plataformaExterna && isUUID(clienteId)) {
+          const supabaseUpdates = {};
+          if (nombre !== undefined) supabaseUpdates.full_name = nombre;
+          if (whatsapp !== undefined) supabaseUpdates.phone = whatsapp.replace(/[^0-9]/g, '');
+          if (Object.keys(supabaseUpdates).length > 0)
+            await supabaseService.updateCustomer(clienteId, supabaseUpdates).catch(e =>
+              console.warn('[Supabase] updateCustomer error:', e.message)
+            );
+        }
+
         return res.json({ success: true, mensaje: 'Cliente actualizado', clienteId });
       }
     }
