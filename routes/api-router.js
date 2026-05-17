@@ -22,6 +22,13 @@ async function getSheetsService(negocio) {
   await sheets.initialize();
   return sheets;
 }
+
+// Always uses Google Sheets — for data that only lives in the spreadsheet (recetas, proveedores, etc.)
+async function getSheetsServiceDirect(negocio) {
+  const sheets = new SheetsService(negocio.spreadsheetId);
+  await sheets.initialize();
+  return sheets;
+}
 const deliveryService = require('../core/services/delivery-service');
 
 function parseDecimal(value) {
@@ -1026,7 +1033,7 @@ router.get('/recetas/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
     let recetas = await sheets.getRecetas();
     if (codigoDestino) recetas = recetas.filter(r => r.codigoDestino === codigoDestino);
@@ -1053,7 +1060,7 @@ router.post('/recetas/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
     const result = await sheets.createReceta({ codigoDestino, nombreDestino, cantidadDestino, codigoOrigen, nombreOrigen, cantidadOrigen, descripcion });
     if (!result.success) return res.status(500).json({ error: result.error });
@@ -1072,7 +1079,7 @@ router.put('/recetas/:businessId/:recetaId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
     const result = await sheets.updateReceta(recetaId, req.body);
     if (!result.success) return res.status(404).json({ error: result.error });
@@ -1091,7 +1098,7 @@ router.delete('/recetas/:businessId/:recetaId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
     const result = await sheets.deleteReceta(recetaId);
     if (!result.success) return res.status(404).json({ error: result.error });
@@ -1111,7 +1118,7 @@ router.get('/recetas/:businessId/plan/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const sheets = await getSheetsServiceDirect(negocio);
 
     // Load all data in parallel
     const [inventario, recetas, pedidoRows] = await Promise.all([
