@@ -271,6 +271,15 @@ class SupabaseSheetsAdapter {
     }
 
     await supabase.updateProduct(cached.id, { [field]: dbValue });
+
+    if (this._sheets) {
+      try {
+        await this._sheets.updateCell(range, value);
+      } catch (e) {
+        console.warn(`[Supabase] No se pudo actualizar ${range} en Sheets:`, e.message);
+      }
+    }
+
     return true;
   }
 
