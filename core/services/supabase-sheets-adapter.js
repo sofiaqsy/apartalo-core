@@ -68,12 +68,16 @@ class SupabaseSheetsAdapter {
   }
 
   async getProductos(estado = null) {
+    const APP_TO_DB = { ACTIVO: 'active', INACTIVO: 'archived', ELIMINADO: 'archived' };
+    const DB_TO_APP = { active: 'ACTIVO', archived: 'INACTIVO', draft: 'BORRADOR' };
+    const dbStatus = estado ? (APP_TO_DB[estado.toUpperCase()] || null) : null;
+
     const [rows, b2bMap] = await Promise.all([
-      supabase.getProducts(this.farmId),
+      supabase.getAllProducts(this.farmId),
       this._getSheetB2bMap()
     ]);
     return rows
-      .filter(p => !estado || p.status.toUpperCase() === estado.toUpperCase())
+      .filter(p => !dbStatus || p.status === dbStatus)
       .map(p => ({
         codigo:                  p.id,
         nombre:                  p.name,
@@ -82,7 +86,7 @@ class SupabaseSheetsAdapter {
         stock:                   p.stock || 0,
         stockReservado:          0,
         imagenUrl:               (p.images && p.images[0]) ? p.images[0] : '',
-        estado:                  p.status.toUpperCase(),
+        estado:                  DB_TO_APP[p.status] || p.status.toUpperCase(),
         categoria:               '',
         proveedorId:             b2bMap[p.id]?.b2bBusiness || '',
         proveedorProductoCodigo: b2bMap[p.id]?.b2bProduct  || '',
