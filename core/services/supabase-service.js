@@ -189,6 +189,23 @@ async function getOrdersByCustomer(customerId) {
   });
 }
 
+async function getCustomerById(profileId) {
+  const rows = await get('profiles', {
+    id: `eq.${profileId}`,
+    select: 'id,email,full_name,phone,role'
+  });
+  return rows[0] || null;
+}
+
+async function getCustomersByIds(ids) {
+  if (!ids || ids.length === 0) return [];
+  const rows = await get('profiles', {
+    id: `in.(${ids.join(',')})`,
+    select: 'id,email,full_name,phone,role'
+  });
+  return rows;
+}
+
 module.exports = {
   getFarm,
   getProducts,
@@ -197,6 +214,8 @@ module.exports = {
   updateProduct,
   getProductById,
   getCustomerByPhone,
+  getCustomerById,
+  getCustomersByIds,
   createCustomer,
   updateCustomer,
   createOrder,
