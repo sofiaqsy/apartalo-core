@@ -172,7 +172,7 @@ router.get('/:businessId', async (req, res) => {
       const profiles = await supabaseService.getAllCustomers({ search: buscar });
       console.log(`[Clientes GET] → ${profiles.length} perfiles obtenidos`);
       let clientes = profiles.map(p => ({
-        id: p.id, whatsapp: p.phone || '', nombreNegocio: p.full_name || '', nombreResponsable: p.full_name || '',
+        id: p.id, whatsapp: p.phone || '', nombreNegocio: p.business_name || '', nombreResponsable: p.full_name || '',
         telefono: p.phone || '', email: p.email || '', direccion: '', departamento: '', distrito: '',
         fechaRegistro: p.created_at ? new Date(p.created_at).toLocaleDateString('es-PE') : '',
         ultimaCompra: '', totalPedidos: 0, totalComprado: 0, totalKg: 0, totalPorCobrar: 0,
@@ -184,6 +184,7 @@ router.get('/:businessId', async (req, res) => {
         const s = buscar.toLowerCase();
         clientes = clientes.filter(c =>
           c.nombreNegocio.toLowerCase().includes(s) ||
+          c.nombreResponsable.toLowerCase().includes(s) ||
           c.whatsapp.includes(buscar) ||
           c.email.toLowerCase().includes(s)
         );
@@ -329,7 +330,7 @@ router.get('/:businessId/:clienteId', async (req, res) => {
       const profile = await supabaseService.getCustomerById(clienteId);
       if (!profile) return res.status(404).json({ error: 'Cliente no encontrado' });
       const cliente = {
-        id: profile.id, whatsapp: profile.phone || '', nombreNegocio: profile.full_name || '', nombreResponsable: profile.full_name || '',
+        id: profile.id, whatsapp: profile.phone || '', nombreNegocio: profile.business_name || '', nombreResponsable: profile.full_name || '',
         telefono: profile.phone || '', email: profile.email || '', direccion: '', departamento: '', distrito: '',
         fechaRegistro: '', ultimaCompra: '', totalPedidos: 0, totalComprado: 0, totalKg: 0,
         estado: 'ACTIVO', tipoEnvio: '', empresaEnvio: '', localEnvio: '',
@@ -409,7 +410,8 @@ router.post('/:businessId', async (req, res) => {
 
     if (negocio.plataformaExterna && negocio.farmId) {
       const nuevo = await supabaseService.createCustomer({
-        fullName: nombreNegocio || nombreResponsable || '',
+        fullName: nombreResponsable || '',
+        businessName: nombreNegocio || '',
         phone: whatsappLimpio,
         email: email || null
       });
@@ -471,10 +473,9 @@ router.put('/:businessId/:clienteId', async (req, res) => {
     if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
       // Update core fields in Supabase
       const supabaseUpdates = {};
-      if (nombreNegocio !== undefined || nombreResponsable !== undefined)
-        supabaseUpdates.full_name = nombreNegocio || nombreResponsable;
-      if (whatsapp !== undefined)
-        supabaseUpdates.phone = whatsapp.replace(/[^0-9+]/g, '');
+      if (nombreNegocio !== undefined) supabaseUpdates.business_name = nombreNegocio;
+      if (nombreResponsable !== undefined) supabaseUpdates.full_name = nombreResponsable;
+      if (whatsapp !== undefined) supabaseUpdates.phone = whatsapp.replace(/[^0-9+]/g, '');
       if (Object.keys(supabaseUpdates).length > 0)
         await supabaseService.updateCustomer(clienteId, supabaseUpdates);
 

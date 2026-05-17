@@ -99,14 +99,14 @@ async function getCustomerByPhone(phone) {
   for (const num of attempts) {
     const rows = await get('profiles', {
       phone: `eq.${num}`,
-      select: 'id,email,full_name,phone,role'
+      select: 'id,email,full_name,business_name,phone,role'
     });
     if (rows[0]) return rows[0];
   }
   return null;
 }
 
-async function createCustomer({ fullName, phone, email }) {
+async function createCustomer({ fullName, businessName, phone, email }) {
   const cleaned = phone.replace(/\D/g, '');
   const customerEmail = email || `${cleaned}@whatsapp.apartalo.co`;
 
@@ -123,10 +123,12 @@ async function createCustomer({ fullName, phone, email }) {
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
     });
 
-    // Trigger handle_new_user() auto-creates the profile — update phone explicitly
+    // Trigger handle_new_user() auto-creates the profile — update fields explicitly
     if (authUser?.id) {
-      await patch('profiles', { id: `eq.${authUser.id}` }, { phone: cleaned, full_name: fullName || '' });
-      return { id: authUser.id, email: customerEmail, full_name: fullName || '', phone: cleaned, role: 'customer' };
+      const profilePatch = { phone: cleaned, full_name: fullName || '' };
+      if (businessName) profilePatch.business_name = businessName;
+      await patch('profiles', { id: `eq.${authUser.id}` }, profilePatch);
+      return { id: authUser.id, email: customerEmail, full_name: fullName || '', business_name: businessName || '', phone: cleaned, role: 'customer' };
     }
     return null;
   } catch (error) {
@@ -190,7 +192,7 @@ async function getOrdersByCustomer(customerId) {
 }
 
 async function getAllCustomers({ search } = {}) {
-  const params = { phone: 'not.is.null', select: 'id,email,full_name,phone,role,created_at', order: 'created_at.desc' };
+  const params = { phone: 'not.is.null', select: 'id,email,full_name,business_name,phone,role,created_at', order: 'created_at.desc' };
   const rows = await get('profiles', params);
   if (!search) return rows;
   const s = search.toLowerCase();
@@ -204,7 +206,7 @@ async function getAllCustomers({ search } = {}) {
 async function getCustomerById(profileId) {
   const rows = await get('profiles', {
     id: `eq.${profileId}`,
-    select: 'id,email,full_name,phone,role'
+    select: 'id,email,full_name,business_name,phone,role'
   });
   return rows[0] || null;
 }
@@ -213,7 +215,7 @@ async function getCustomersByIds(ids) {
   if (!ids || ids.length === 0) return [];
   const rows = await get('profiles', {
     id: `in.(${ids.join(',')})`,
-    select: 'id,email,full_name,phone,role'
+    select: 'id,email,full_name,business_name,phone,role'
   });
   return rows;
 }
