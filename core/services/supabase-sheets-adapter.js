@@ -5,7 +5,6 @@
  */
 
 const supabase = require('./supabase-service');
-const SheetsService = require('./sheets-service');
 const config = require('../../config');
 
 class SupabaseSheetsAdapter {
@@ -27,17 +26,6 @@ class SupabaseSheetsAdapter {
       const farm = await supabase.getFarm(this.farmId);
       this.farm = farm || { id: this.farmId, name: this.farmId, commission_rate: 0.10 };
 
-      if (this.spreadsheetId) {
-        try {
-          this._sheets = new SheetsService(this.spreadsheetId);
-          await this._sheets.initialize();
-          console.log(`[Supabase] SheetsService backup inicializado (spreadsheetId: ${this.spreadsheetId.substring(0, 10)}...)`);
-        } catch (sheetsErr) {
-          console.warn('[Supabase] No se pudo inicializar SheetsService backup:', sheetsErr.message);
-          this._sheets = null;
-        }
-      }
-
       this.initialized = true;
       console.log(`SupabaseSheetsAdapter inicializado para farm ${this.farmId} (${this.farm.name})`);
       return true;
@@ -51,51 +39,44 @@ class SupabaseSheetsAdapter {
 
   // ─── PRODUCTOS ───────────────────────────────────────────────────────────────
 
-  async _getSheetB2bMap() {
-    if (!this._sheets) return {};
-    try {
-      const rows = await this._sheets.getRows('Inventario!A:K');
-      const map = {};
-      for (let i = 1; i < rows.length; i++) {
-        const id = (rows[i][0] || '').trim();
-        if (id) map[id] = { b2bBusiness: rows[i][9] || '', b2bProduct: rows[i][10] || '' };
-      }
-      return map;
-    } catch (e) {
-      console.warn('[Supabase] No se pudo leer J/K del sheet:', e.message);
-      return {};
-    }
-  }
-
   async getProductos(estado = null) {
     const APP_TO_DB = { ACTIVO: 'active', INACTIVO: 'archived', ELIMINADO: 'archived' };
     const DB_TO_APP = { active: 'ACTIVO', archived: 'INACTIVO', draft: 'BORRADOR' };
     const dbStatus = estado ? (APP_TO_DB[estado.toUpperCase()] || null) : null;
 
-    const [rows, b2bMap] = await Promise.all([
-      supabase.getAllProducts(this.farmId),
-      this._getSheetB2bMap()
-    ]);
-    return rows
+    const products = await supabase.getProductsWithPresentations(this.farmId);
+    return products
       .filter(p => !dbStatus || p.status === dbStatus)
-      .map(p => ({
-        codigo:                  p.id,
-        nombre:                  p.name,
-        descripcion:             p.description || '',
-        precio:                  p.price_cents / 100,
-        stock:                   p.stock || 0,
-        stockReservado:          0,
-        imagenUrl:               (p.images && p.images[0]) ? p.images[0] : '',
-        estado:                  DB_TO_APP[p.status] || p.status.toUpperCase(),
-        categoria:               '',
-        proveedorId:             b2bMap[p.id]?.b2bBusiness || '',
-        proveedorProductoCodigo: b2bMap[p.id]?.b2bProduct  || '',
-        precioMayor:             p.b2b_price_cents ? p.b2b_price_cents / 100 : null,
-        cantidadMayor:           p.min_qty_for_b2b ? Math.round(p.min_qty_for_b2b) : null,
-        pedidoMinimo:            p.min_order_qty || 1,
-        disponible:              p.stock || 0,
-        unit:                    p.unit || 'unidad'
-      }));
+      .map(p => {
+        const defaultPres = p.presentations.find(pp => pp.is_default) || p.presentations[0] || null;
+        return {
+          codigo:       p.id,
+          nombre:       p.name,
+          descripcion:  p.description || '',
+          precio:       defaultPres ? defaultPres.price_cents / 100 : 0,
+          stock:        defaultPres ? (defaultPres.stock || 0) : 0,
+          stockReservado: 0,
+          imagenUrl:    (p.images && p.images[0]) ? p.images[0] : '',
+          estado:       DB_TO_APP[p.status] || p.status.toUpperCase(),
+          categoria:    '',
+          precioMayor:  defaultPres?.b2b_price_cents ? defaultPres.b2b_price_cents / 100 : null,
+          cantidadMayor: defaultPres?.min_order_qty ? Math.round(defaultPres.min_order_qty) : null,
+          pedidoMinimo: defaultPres?.min_order_qty || 1,
+          disponible:   defaultPres ? (defaultPres.stock || 0) : 0,
+          unit:         defaultPres?.unit || 'unidad',
+          presentaciones: p.presentations.map(pp => ({
+            id:           pp.id,
+            contenido:    pp.pack_size,
+            unidad:       pp.unit,
+            precio:       pp.price_cents / 100,
+            precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+            stock:        pp.stock || 0,
+            pedidoMinimo: pp.min_order_qty || 1,
+            predeterminada: pp.is_default || false,
+            molienda:     pp.grind || []
+          }))
+        };
+      });
   }
 
   async getProductosConPrecios(whatsapp) {

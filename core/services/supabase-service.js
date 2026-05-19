@@ -87,6 +87,62 @@ async function getProductById(productId) {
   return rows[0] || null;
 }
 
+// ─── PRODUCT PRESENTATIONS ────────────────────────────────────────────────────
+
+const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,stock,min_order_qty,sort_order,is_default,grind';
+
+async function getPresentations(productId) {
+  return get('product_presentations', {
+    product_id: `eq.${productId}`,
+    select: PRESENTATION_SELECT,
+    order: 'sort_order.asc'
+  });
+}
+
+async function getProductsWithPresentations(farmId) {
+  const products = await getAllProducts(farmId);
+  if (!products.length) return [];
+  const ids = products.map(p => p.id);
+  // PostgREST: filter by multiple IDs using in.(id1,id2,...)
+  const presentations = await get('product_presentations', {
+    product_id: `in.(${ids.join(',')})`,
+    select: PRESENTATION_SELECT,
+    order: 'sort_order.asc'
+  });
+  const presMap = {};
+  for (const pp of presentations) {
+    if (!presMap[pp.product_id]) presMap[pp.product_id] = [];
+    presMap[pp.product_id].push(pp);
+  }
+  return products.map(p => ({ ...p, presentations: presMap[p.id] || [] }));
+}
+
+async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, stock, minOrderQty, sortOrder, isDefault, grind }) {
+  const body = {
+    product_id:    productId,
+    pack_size:     packSize || 1,
+    unit:          unit || 'kg',
+    price_cents:   priceCents || 0,
+    stock:         stock || 0,
+    min_order_qty: minOrderQty || 1,
+    sort_order:    sortOrder || 0,
+    is_default:    isDefault || false,
+    grind:         grind || []
+  };
+  if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
+  const rows = await post('product_presentations', body);
+  return rows[0] || null;
+}
+
+async function updatePresentation(presentationId, fields) {
+  const rows = await patch('product_presentations', { id: `eq.${presentationId}` }, fields);
+  return rows[0] || null;
+}
+
+async function deletePresentation(presentationId) {
+  await deleteRow('product_presentations', { id: `eq.${presentationId}` });
+}
+
 // ─── CUSTOMERS ────────────────────────────────────────────────────────────────
 
 async function getCustomerByPhone(phone) {
@@ -545,9 +601,14 @@ module.exports = {
   getFarm,
   getProducts,
   getAllProducts,
+  getProductsWithPresentations,
   createProduct,
   updateProduct,
   getProductById,
+  getPresentations,
+  createPresentation,
+  updatePresentation,
+  deletePresentation,
   getCustomerByPhone,
   getAllCustomers,
   getCustomerById,

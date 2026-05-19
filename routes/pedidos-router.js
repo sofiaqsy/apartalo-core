@@ -304,8 +304,8 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
       if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
       const sid = pedido.supabaseId;
 
-      // Attach proof to first existing payment, or create a zero-amount placeholder
-      let paymentId = pedido.pagos?.[0]?.id || null;
+      // Use provided paymentId, or fall back to first existing payment, or create a zero-amount placeholder
+      let paymentId = req.body.paymentId || pedido.pagos?.[0]?.id || null;
       if (!paymentId) {
         const pago = await supabaseService.addOrderPayment(sid, { amountCents: 0, notes: 'Creado automáticamente para comprobante', createdBy: 'APP' });
         paymentId = pago?.id || null;

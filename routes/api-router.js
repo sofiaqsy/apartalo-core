@@ -970,25 +970,17 @@ router.get('/productos/:businessId/:codigo', async (req, res) => {
 router.post('/productos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { codigo, nombre, descripcion, precio, stock, imagenUrl, estado, categoria, proveedorId, proveedorProductoCodigo, precioMayor, cantidadMayor } = req.body;
-    if (!codigo || !nombre || precio === undefined || stock === undefined) return res.status(400).json({ error: 'Campos requeridos: codigo, nombre, precio, stock' });
+    const { nombre } = req.body;
+    if (!nombre) return res.status(400).json({ error: 'Campo requerido: nombre' });
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
+    const supabase = require('../core/services/supabase-service');
+    const created = await supabase.createProduct(negocio.farmId, { name: nombre, status: 'draft' });
+    if (!created) return res.status(500).json({ error: 'No se pudo crear el producto' });
 
-    const productos = await sheets.getProductos();
-    if (productos.find(p => p.codigo === codigo)) return res.status(400).json({ error: 'Ya existe un producto con ese código' });
-
-    const precioNumero = parseDecimal(precio);
-    const stockNumero = parseInt(stock) || 0;
-    const precioMayorNum = parseDecimal(precioMayor) || 0;
-    const cantidadMayorNum = parseInt(cantidadMayor) || 0;
-
-    await sheets.appendRow('Inventario', [codigo, nombre, descripcion || '', precioNumero, stockNumero, 0, imagenUrl || '', estado || 'ACTIVO', categoria || '', proveedorId || '', proveedorProductoCodigo || '', precioMayorNum, cantidadMayorNum]);
-
-    res.status(201).json({ success: true, mensaje: 'Producto creado', producto: { codigo, nombre, descripcion: descripcion || '', precio: precioNumero, stock: stockNumero, stockReservado: 0, imagenUrl: imagenUrl || '', estado: estado || 'ACTIVO', categoria: categoria || '', proveedorId: proveedorId || '', precioMayor: precioMayorNum, cantidadMayor: cantidadMayorNum, disponible: stockNumero } });
+    res.status(201).json({ success: true, mensaje: 'Producto creado', producto: { codigo: created.id, nombre: created.name, estado: 'BORRADOR', presentaciones: [] } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1138,7 +1130,119 @@ router.post('/productos/:businessId/importar', async (req, res) => {
 
 // ============================================================
 // RECETAS (Production Recipes)
-// ============================================================
+// ─── PRESENTACIONES ──────────────────────────────────────────────────────────
+
+router.get('/productos/:businessId/:productId/presentaciones', async (req, res) => {
+  try {
+    const { businessId, productId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const supabaseService = require('../core/services/supabase-service');
+    const presentations = await supabaseService.getPresentations(productId);
+    res.json({ presentaciones: presentations.map(pp => ({
+      id:           pp.id,
+      contenido:    pp.pack_size,
+      unidad:       pp.unit,
+      precio:       pp.price_cents / 100,
+      precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+      stock:        pp.stock || 0,
+      pedidoMinimo: pp.min_order_qty || 1,
+      orden:        pp.sort_order || 0,
+      predeterminada: pp.is_default || false,
+      molienda:     pp.grind || []
+    })) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/productos/:businessId/:productId/presentaciones', async (req, res) => {
+  try {
+    const { businessId, productId } = req.params;
+    const { contenido, unidad, precio, precioB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    if (contenido === undefined || !unidad || precio === undefined) {
+      return res.status(400).json({ error: 'Campos requeridos: contenido, unidad, precio' });
+    }
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const supabaseService = require('../core/services/supabase-service');
+
+    if (predeterminada) {
+      const existing = await supabaseService.getPresentations(productId);
+      await Promise.all(existing.filter(pp => pp.is_default).map(pp => supabaseService.updatePresentation(pp.id, { is_default: false })));
+    }
+
+    const created = await supabaseService.createPresentation(productId, {
+      packSize:     parseFloat(contenido),
+      unit:         unidad,
+      priceCents:   Math.round(parseFloat(precio) * 100),
+      b2bPriceCents: precioB2b != null ? Math.round(parseFloat(precioB2b) * 100) : null,
+      stock:        parseFloat(stock) || 0,
+      minOrderQty:  parseFloat(pedidoMinimo) || 1,
+      sortOrder:    parseInt(orden) || 0,
+      isDefault:    predeterminada || false,
+      grind:        Array.isArray(molienda) ? molienda : []
+    });
+    if (!created) return res.status(500).json({ error: 'No se pudo crear la presentación' });
+
+    res.status(201).json({ success: true, mensaje: 'Presentación creada', presentacion: { id: created.id } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.put('/productos/:businessId/:productId/presentaciones/:presentationId', async (req, res) => {
+  try {
+    const { businessId, productId, presentationId } = req.params;
+    const { contenido, unidad, precio, precioB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const supabaseService = require('../core/services/supabase-service');
+
+    if (predeterminada) {
+      const existing = await supabaseService.getPresentations(productId);
+      await Promise.all(
+        existing.filter(pp => pp.is_default && pp.id !== presentationId)
+          .map(pp => supabaseService.updatePresentation(pp.id, { is_default: false }))
+      );
+    }
+
+    const fields = {};
+    if (contenido !== undefined) fields.pack_size   = parseFloat(contenido);
+    if (unidad    !== undefined) fields.unit         = unidad;
+    if (precio    !== undefined) fields.price_cents  = Math.round(parseFloat(precio) * 100);
+    if (precioB2b !== undefined) fields.b2b_price_cents = precioB2b != null ? Math.round(parseFloat(precioB2b) * 100) : null;
+    if (stock     !== undefined) fields.stock        = parseFloat(stock) || 0;
+    if (pedidoMinimo !== undefined) fields.min_order_qty = parseFloat(pedidoMinimo) || 1;
+    if (orden     !== undefined) fields.sort_order   = parseInt(orden) || 0;
+    if (predeterminada !== undefined) fields.is_default = predeterminada;
+    if (molienda  !== undefined) fields.grind        = Array.isArray(molienda) ? molienda : [];
+
+    const updated = await supabaseService.updatePresentation(presentationId, fields);
+    res.json({ success: true, mensaje: 'Presentación actualizada', presentacion: updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/productos/:businessId/:productId/presentaciones/:presentationId', async (req, res) => {
+  try {
+    const { businessId, presentationId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const supabaseService = require('../core/services/supabase-service');
+    await supabaseService.deletePresentation(presentationId);
+    res.json({ success: true, mensaje: 'Presentación eliminada' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── RECETAS ─────────────────────────────────────────────────────────────────
 
 // GET all recipes (optionally filtered by ?codigoDestino=XXX)
 router.get('/recetas/:businessId', async (req, res) => {
