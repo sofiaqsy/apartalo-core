@@ -43,7 +43,7 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,min_qty_for_b2b,status,images';
+const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images';
 
 async function getProducts(farmId) {
   return get('products', { farm_id: `eq.${farmId}`, status: 'eq.active', select: PRODUCT_SELECT, order: 'name.asc' });
@@ -53,7 +53,7 @@ async function getAllProducts(farmId) {
   return get('products', { farm_id: `eq.${farmId}`, select: PRODUCT_SELECT, order: 'name.asc' });
 }
 
-async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty, minQtyForB2b }) {
+async function createProduct(farmId, { name, description, priceCents, stock, images, status, unit, b2bPriceCents, minOrderQty }) {
   const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') + '-' + Date.now();
   const body = {
     farm_id:       farmId,
@@ -69,7 +69,6 @@ async function createProduct(farmId, { name, description, priceCents, stock, ima
     currency:      'PEN'
   };
   if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
-  if (minQtyForB2b != null)  body.min_qty_for_b2b = minQtyForB2b;
   const rows = await post('products', body);
   return rows[0] || null;
 }
@@ -86,6 +85,7 @@ async function getProductById(productId) {
   });
   return rows[0] || null;
 }
+
 
 // ─── PRODUCT PRESENTATIONS ────────────────────────────────────────────────────
 
