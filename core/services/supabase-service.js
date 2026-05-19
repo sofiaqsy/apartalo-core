@@ -89,7 +89,7 @@ async function getProductById(productId) {
 
 // ─── PRODUCT PRESENTATIONS ────────────────────────────────────────────────────
 
-const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,stock,min_order_qty,sort_order,is_default,grind';
+const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,min_qty_for_b2b,stock,min_order_qty,sort_order,is_default,grind';
 
 async function getPresentations(productId) {
   return get('product_presentations', {
@@ -117,7 +117,7 @@ async function getProductsWithPresentations(farmId) {
   return products.map(p => ({ ...p, presentations: presMap[p.id] || [] }));
 }
 
-async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, stock, minOrderQty, sortOrder, isDefault, grind }) {
+async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, minQtyForB2b, stock, minOrderQty, sortOrder, isDefault, grind }) {
   const body = {
     product_id:    productId,
     pack_size:     packSize || 1,
@@ -130,6 +130,7 @@ async function createPresentation(productId, { packSize, unit, priceCents, b2bPr
     grind:         grind || []
   };
   if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
+  if (minQtyForB2b != null) body.min_qty_for_b2b = minQtyForB2b;
   const rows = await post('product_presentations', body);
   return rows[0] || null;
 }

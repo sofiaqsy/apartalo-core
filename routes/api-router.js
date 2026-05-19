@@ -1146,6 +1146,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
       unidad:       pp.unit,
       precio:       pp.price_cents / 100,
       precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+      cantidadB2b:  pp.min_qty_for_b2b || null,
       stock:        pp.stock || 0,
       pedidoMinimo: pp.min_order_qty || 1,
       orden:        pp.sort_order || 0,
@@ -1160,7 +1161,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
 router.post('/productos/:businessId/:productId/presentaciones', async (req, res) => {
   try {
     const { businessId, productId } = req.params;
-    const { contenido, unidad, precio, precioB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
     if (contenido === undefined || !unidad || precio === undefined) {
       return res.status(400).json({ error: 'Campos requeridos: contenido, unidad, precio' });
     }
@@ -1179,6 +1180,7 @@ router.post('/productos/:businessId/:productId/presentaciones', async (req, res)
       unit:         unidad,
       priceCents:   Math.round(parseFloat(precio) * 100),
       b2bPriceCents: precioB2b != null ? Math.round(parseFloat(precioB2b) * 100) : null,
+      minQtyForB2b: cantidadB2b != null ? parseInt(cantidadB2b) : null,
       stock:        parseFloat(stock) || 0,
       minOrderQty:  parseFloat(pedidoMinimo) || 1,
       sortOrder:    parseInt(orden) || 0,
@@ -1196,7 +1198,7 @@ router.post('/productos/:businessId/:productId/presentaciones', async (req, res)
 router.put('/productos/:businessId/:productId/presentaciones/:presentationId', async (req, res) => {
   try {
     const { businessId, productId, presentationId } = req.params;
-    const { contenido, unidad, precio, precioB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
@@ -1215,6 +1217,7 @@ router.put('/productos/:businessId/:productId/presentaciones/:presentationId', a
     if (unidad    !== undefined) fields.unit         = unidad;
     if (precio    !== undefined) fields.price_cents  = Math.round(parseFloat(precio) * 100);
     if (precioB2b !== undefined) fields.b2b_price_cents = precioB2b != null ? Math.round(parseFloat(precioB2b) * 100) : null;
+    if (cantidadB2b !== undefined) fields.min_qty_for_b2b = cantidadB2b != null ? parseInt(cantidadB2b) : null;
     if (stock     !== undefined) fields.stock        = parseFloat(stock) || 0;
     if (pedidoMinimo !== undefined) fields.min_order_qty = parseFloat(pedidoMinimo) || 1;
     if (orden     !== undefined) fields.sort_order   = parseInt(orden) || 0;
