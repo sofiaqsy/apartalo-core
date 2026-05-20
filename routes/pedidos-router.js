@@ -216,15 +216,13 @@ router.post('/:businessId', async (req, res) => {
       } catch (e) { console.error('⚠️ Error notificando cliente:', e.message); }
     }
 
+    // Retornar el pedido completo para que la app pueda mostrar el detalle de inmediato
+    const pedidoCompleto = await supabaseService.getOrderByIdOrNumber(order.order_number);
+
     return res.status(201).json({
       success: true,
       mensaje: 'Pedido creado',
-      pedido: {
-        id: order.order_number,
-        supabaseId: order.id,
-        estado: 'PENDIENTE',
-        estadoPago: 'PENDIENTE_PAGO'
-      }
+      pedido: pedidoCompleto || { id: order.order_number, supabaseId: order.id, estado: 'PENDIENTE', estadoPago: 'PENDIENTE_PAGO' }
     });
   } catch (error) {
     console.error('❌ Error creando pedido:', error);
