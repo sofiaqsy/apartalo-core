@@ -144,6 +144,40 @@ async function deletePresentation(presentationId) {
   await deleteRow('product_presentations', { id: `eq.${presentationId}` });
 }
 
+// ─── AUTH / ADMIN LOGIN ───────────────────────────────────────────────────────
+
+async function getAdminFarmsByPhone(phone) {
+  const cleaned = phone.replace(/\D/g, '');
+  const attempts = [cleaned];
+  if (cleaned.length === 9) attempts.push('51' + cleaned);
+  if (cleaned.startsWith('51') && cleaned.length > 9) attempts.push(cleaned.slice(2));
+
+  for (const num of attempts) {
+    const profiles = await get('profiles', { phone: `eq.${num}`, select: 'id,full_name,phone,email,role' });
+    if (!profiles[0]) continue;
+
+    const profile = profiles[0];
+    // Allowed roles in farm_members
+    const members = await get('farm_members', {
+      user_id: `eq.${profile.id}`,
+      role:    `in.(owner,admin)`,
+      select:  'farm_id,role'
+    });
+
+    if (members.length === 0) return { profile, farms: [], authorized: false };
+
+    const farmIds = members.map(m => m.farm_id);
+    const farms = await get('farms', {
+      id:     `in.(${farmIds.join(',')})`,
+      select: 'id,name,slug,city,location,status'
+    });
+
+    return { profile, farms, authorized: true };
+  }
+
+  return null;
+}
+
 // ─── CUSTOMERS ────────────────────────────────────────────────────────────────
 
 async function getCustomerByPhone(phone) {
@@ -609,6 +643,7 @@ async function deleteRow(path, params) {
 }
 
 module.exports = {
+  getAdminFarmsByPhone,
   getFarm,
   getProducts,
   getAllProducts,

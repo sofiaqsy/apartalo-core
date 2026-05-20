@@ -888,15 +888,43 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
     whatsapp = whatsapp.replace(/[^0-9]/g, '');
     if (whatsapp.length === 9) whatsapp = '51' + whatsapp;
 
-    const negocios = negociosService.getAll();
-    for (const negocio of negocios) {
-      let whatsappAdmin = (negocio.whatsapp?.admin || '').toString().replace(/[^0-9]/g, '');
-      if (whatsappAdmin.length === 9) whatsappAdmin = '51' + whatsappAdmin;
-      if (whatsappAdmin && whatsappAdmin === whatsapp) {
-        return res.json({ encontrado: true, negocio: { id: negocio.id, nombre: negocio.nombre, flujo: negocio.flujo, features: negocio.features, whatsappAdmin, direccion: negocio.direccion || '', ciudad: negocio.ciudad || '' } });
+    // Supabase-based admin auth
+    const adminData = await supabaseService.getAdminFarmsByPhone(whatsapp);
+
+    if (!adminData) {
+      return res.json({ encontrado: false, mensaje: 'Número no registrado como administrador' });
+    }
+    if (!adminData.authorized) {
+      return res.json({ encontrado: false, mensaje: 'No tienes permisos de administrador en ningún negocio' });
+    }
+
+    // Map farms → negocios config
+    const negociosMapeados = [];
+    for (const farm of adminData.farms) {
+      const negocio = negociosService.getAll().find(n => n.farmId === farm.id);
+      if (negocio) {
+        negociosMapeados.push({
+          id:        negocio.id,
+          nombre:    negocio.nombre || farm.name,
+          farmId:    farm.id,
+          slug:      farm.slug,
+          flujo:     negocio.flujo,
+          features:  negocio.features,
+          direccion: negocio.direccion || '',
+          ciudad:    negocio.ciudad || farm.city || '',
+        });
       }
     }
-    res.json({ encontrado: false, mensaje: 'No se encontró ningún negocio asociado a este número' });
+
+    if (negociosMapeados.length === 0) {
+      return res.json({ encontrado: false, mensaje: 'No se encontró configuración activa para tu negocio' });
+    }
+
+    if (negociosMapeados.length === 1) {
+      return res.json({ encontrado: true, negocio: negociosMapeados[0] });
+    }
+
+    return res.json({ encontrado: true, negocios: negociosMapeados });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
