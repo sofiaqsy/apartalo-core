@@ -175,13 +175,14 @@ router.post('/:businessId', async (req, res) => {
     const customer = await supabaseService.getCustomerByPhone(whatsappFinal);
     const productosArr = Array.isArray(productos) ? productos : [];
     const items = productosArr.map(p => ({
-      productId:      p.codigo || p.id || '',
-      productName:    p.nombre || p.name || '',
-      unit:           p.unidad || p.unit || 'unidad',
-      quantity:       p.cantidad || p.quantity || 1,
-      unitPriceCents: Math.round((p.precio || p.price || 0) * 100),
-      lineTotalCents: Math.round(((p.subtotal) || (p.precio || 0) * (p.cantidad || 1)) * 100),
-      commissionRate: negocio.commission_rate || 0.10
+      productId:       p.codigo || p.id || '',
+      productName:     p.nombre || p.name || '',
+      unit:            p.unidad || p.unit || 'unidad',
+      presentacionId:  p.presentacionId || null,
+      quantity:        p.cantidad || p.quantity || 1,
+      unitPriceCents:  Math.round((p.precio || p.price || 0) * 100),
+      lineTotalCents:  Math.round(((p.subtotal) || (p.precio || 0) * (p.cantidad || 1)) * 100),
+      commissionRate:  negocio.commission_rate || 0.10
     }));
 
     const order = await supabaseService.createOrder({
