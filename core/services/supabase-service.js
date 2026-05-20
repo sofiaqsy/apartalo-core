@@ -228,6 +228,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
     product_id:       i.productId,
     product_name:     i.productName,
     unit:             i.unit,
+    presentation_id:  i.presentacionId || null,
     quantity:         i.quantity,
     unit_price_cents: i.unitPriceCents,
     line_total_cents: i.lineTotalCents,
@@ -361,7 +362,8 @@ function mapOrder(o, items = [], payments = []) {
     productosDetalle: items.map(i => ({
       id: i.product_id, codigo: i.product_id, nombre: i.product_name,
       cantidad: parseFloat(i.quantity), precio: i.unit_price_cents / 100,
-      subtotal: i.line_total_cents / 100, unit: i.unit
+      subtotal: i.line_total_cents / 100, unit: i.unit,
+      presentacionId: i.presentation_id || null,
     })),
     total: o.total_cents / 100,
     estado: fromStatus(o.status), _status: o.status,
