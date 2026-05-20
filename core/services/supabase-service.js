@@ -175,7 +175,8 @@ async function createCustomer({ fullName, businessName, phone, email }) {
       email: customerEmail,
       email_confirm: true,
       phone: cleaned,
-      user_metadata: { full_name: fullName || '' }
+      user_metadata: { full_name: fullName || '' },
+      email_change: ''
     }, {
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
     });
@@ -189,7 +190,13 @@ async function createCustomer({ fullName, businessName, phone, email }) {
     }
     return null;
   } catch (error) {
-    console.error('[Supabase] createCustomer error:', error.response?.data || error.message);
+    const errData = error.response?.data;
+    // If user already exists, fetch and return the existing profile
+    if (errData?.error_code === 'email_exists') {
+      const existing = await get('profiles', { select: 'id,full_name,business_name,phone,role', phone: `eq.${cleaned}` });
+      if (existing?.[0]) return { ...existing[0], email: customerEmail };
+    }
+    console.error('[Supabase] createCustomer error:', errData || error.message);
     return null;
   }
 }
@@ -229,6 +236,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
     product_name:     i.productName,
     unit:             i.unit,
     presentation_id:  i.presentacionId || null,
+    grind:            i.grind || null,
     quantity:         i.quantity,
     unit_price_cents: i.unitPriceCents,
     line_total_cents: i.lineTotalCents,
@@ -249,16 +257,15 @@ async function getOrdersByCustomer(customerId) {
   });
 }
 
-async function getAllCustomers({ search } = {}) {
-  const params = { phone: 'not.is.null', select: 'id,email,full_name,business_name,phone,role,created_at', order: 'created_at.desc' };
-  const rows = await get('profiles', params);
-  if (!search) return rows;
-  const s = search.toLowerCase();
-  return rows.filter(p =>
-    (p.full_name || '').toLowerCase().includes(s) ||
-    (p.phone || '').includes(search) ||
-    (p.email || '').toLowerCase().includes(s)
-  );
+async function getAllCustomers({ search, limit = 50 } = {}) {
+  const select = 'id,email,full_name,business_name,phone,role,created_at';
+  let url = `${base()}/rest/v1/profiles?select=${select}&phone=not.is.null&order=created_at.desc&limit=${limit}`;
+  if (search && search.trim().length >= 2) {
+    const s = encodeURIComponent(`*${search.trim()}*`);
+    url += `&or=(full_name.ilike.${s},phone.ilike.${s},email.ilike.${s},business_name.ilike.${s})`;
+  }
+  const { data } = await axios.get(url, { headers: headers() });
+  return data;
 }
 
 async function getCustomerById(profileId) {
@@ -283,18 +290,18 @@ async function getCustomersByIds(ids) {
 async function getCustomerPrices(customerId) {
   return get('customer_product_prices', {
     customer_id: `eq.${customerId}`,
-    select: 'id,product_id,price_cents,updated_by,updated_at'
+    select: 'id,product_id,presentation_id,price_cents,updated_by,updated_at'
   });
 }
 
 async function upsertCustomerPrices(customerId, prices, updatedBy = 'APP') {
-  // prices = { [productId]: priceValue (in currency units, not cents) }
-  const records = Object.entries(prices).map(([productId, price]) => ({
-    customer_id: customerId,
-    product_id:  productId,
-    price_cents: Math.round((parseFloat(price) || 0) * 100),
-    updated_by:  updatedBy,
-    updated_at:  new Date().toISOString()
+  // prices = { [presentationId]: priceValue (in currency units, not cents) }
+  const records = Object.entries(prices).map(([presentationId, price]) => ({
+    customer_id:     customerId,
+    presentation_id: presentationId,
+    price_cents:     Math.round((parseFloat(price) || 0) * 100),
+    updated_by:      updatedBy,
+    updated_at:      new Date().toISOString()
   }));
   if (!records.length) return [];
 
@@ -309,10 +316,10 @@ async function upsertCustomerPrices(customerId, prices, updatedBy = 'APP') {
   return data;
 }
 
-async function deleteCustomerPrice(customerId, productId) {
+async function deleteCustomerPrice(customerId, presentationId) {
   await deleteRow('customer_product_prices', {
-    customer_id: `eq.${customerId}`,
-    product_id:  `eq.${productId}`
+    customer_id:     `eq.${customerId}`,
+    presentation_id: `eq.${presentationId}`
   });
   return true;
 }
@@ -364,6 +371,7 @@ function mapOrder(o, items = [], payments = []) {
       cantidad: parseFloat(i.quantity), precio: i.unit_price_cents / 100,
       subtotal: i.line_total_cents / 100, unit: i.unit,
       presentacionId: i.presentation_id || null,
+      grind: i.grind || null,
     })),
     total: o.total_cents / 100,
     estado: fromStatus(o.status), _status: o.status,
