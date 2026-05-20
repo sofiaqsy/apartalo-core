@@ -191,10 +191,10 @@ async function createCustomer({ fullName, businessName, phone, email }) {
     return null;
   } catch (error) {
     const errData = error.response?.data;
-    // If user already exists, fetch and return the existing profile
     if (errData?.error_code === 'email_exists') {
-      const existing = await get('profiles', { select: 'id,full_name,business_name,phone,role', phone: `eq.${cleaned}` });
-      if (existing?.[0]) return { ...existing[0], email: customerEmail };
+      const err = new Error('Ya existe un cliente registrado con ese número de WhatsApp');
+      err.code = 'duplicate_phone';
+      throw err;
     }
     console.error('[Supabase] createCustomer error:', errData || error.message);
     return null;

@@ -594,7 +594,13 @@ router.post('/clientes/:businessId', async (req, res) => {
       const existente = await supabaseService.getCustomerByPhone(phone);
       if (existente) return res.status(400).json({ error: 'Ya existe un cliente con ese WhatsApp', clienteExistente: existente.id });
 
-      const nuevo = await supabaseService.createCustomer({ fullName: nombre, phone, email: email || null });
+      let nuevo;
+      try {
+        nuevo = await supabaseService.createCustomer({ fullName: nombre, phone, email: email || null });
+      } catch (e) {
+        if (e.code === 'duplicate_phone') return res.status(400).json({ error: e.message });
+        throw e;
+      }
       if (!nuevo) return res.status(500).json({ error: 'Error creando cliente en Supabase' });
 
       // Register UUID in sheet col A only
@@ -765,7 +771,7 @@ router.get('/precios-cliente/:businessId/:clienteId', async (req, res) => {
       const rows = await supabaseService.getCustomerPrices(clienteId);
       const precios = {};
       for (const r of rows) {
-        precios[r.product_id] = {
+        precios[r.presentation_id] = {
           precio: r.price_cents / 100,
           fechaActualizacion: r.updated_at ? new Date(r.updated_at).toLocaleDateString('es-PE') : '',
           actualizadoPor: r.updated_by || 'APP'
@@ -841,15 +847,15 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
   }
 });
 
-router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (req, res) => {
+router.delete('/precios-cliente/:businessId/:clienteId/:presentationId', async (req, res) => {
   try {
-    const { businessId, clienteId, codigoProducto } = req.params;
+    const { businessId, clienteId, presentationId } = req.params;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     if (negocio.plataformaExterna) {
-      await supabaseService.deleteCustomerPrice(clienteId, codigoProducto);
-      return res.json({ success: true, mensaje: 'Precio eliminado', clienteId, codigoProducto });
+      await supabaseService.deleteCustomerPrice(clienteId, presentationId);
+      return res.json({ success: true, mensaje: 'Precio eliminado', clienteId, presentationId });
     }
 
     const sheets = await getSheetsService(negocio);
@@ -858,12 +864,12 @@ router.delete('/precios-cliente/:businessId/:clienteId/:codigoProducto', async (
 
     let rowToDelete = null;
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === clienteId && rows[i][1] === codigoProducto) { rowToDelete = i + 1; break; }
+      if (rows[i][0] === clienteId && rows[i][1] === presentationId) { rowToDelete = i + 1; break; }
     }
     if (!rowToDelete) return res.status(404).json({ error: 'Precio personalizado no encontrado' });
 
     const ok = await sheets.deleteSheetRow('PreciosClientes', rowToDelete);
-    if (ok) res.json({ success: true, mensaje: 'Precio eliminado', clienteId, codigoProducto });
+    if (ok) res.json({ success: true, mensaje: 'Precio eliminado', clienteId, presentationId });
     else res.status(500).json({ error: 'Error eliminando fila' });
   } catch (error) {
     res.status(500).json({ error: error.message });
