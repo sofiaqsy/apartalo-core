@@ -388,24 +388,52 @@ async function getCustomerPrices(customerId) {
 
 async function upsertCustomerPrices(customerId, prices, updatedBy = 'APP') {
   // prices = { [presentationId]: priceValue (in currency units, not cents) }
-  const records = Object.entries(prices).map(([presentationId, price]) => ({
-    customer_id:     customerId,
-    presentation_id: presentationId,
-    price_cents:     Math.round((parseFloat(price) || 0) * 100),
-    updated_by:      updatedBy,
-    updated_at:      new Date().toISOString()
-  }));
-  if (!records.length) return [];
+  const presentationIds = Object.keys(prices);
+  if (!presentationIds.length) return [];
+
+  console.log(`[upsertCustomerPrices] customerId=${customerId} presentations=${presentationIds.join(',')} updatedBy=${updatedBy}`);
+
+  // Fetch product_id for each presentation (required NOT NULL column)
+  const presentations = await get('product_presentations', {
+    id: `in.(${presentationIds.join(',')})`,
+    select: 'id,product_id'
+  });
+  const productIdMap = {};
+  for (const pp of presentations) productIdMap[pp.id] = pp.product_id;
+
+  const records = presentationIds.map(presentationId => {
+    const product_id = productIdMap[presentationId];
+    if (!product_id) console.warn(`[upsertCustomerPrices] no product_id found for presentation ${presentationId}`);
+    return {
+      customer_id:     customerId,
+      product_id:      product_id,
+      presentation_id: presentationId,
+      price_cents:     Math.round((parseFloat(prices[presentationId]) || 0) * 100),
+      updated_by:      updatedBy,
+      updated_at:      new Date().toISOString()
+    };
+  }).filter(r => r.product_id); // skip any with missing product_id
+
+  if (!records.length) throw new Error('No se pudo resolver product_id para ninguna presentación');
+
+  console.log(`[upsertCustomerPrices] upserting ${records.length} records`);
 
   const url = `${base()}/rest/v1/customer_product_prices`;
   const axios = require('axios');
-  const { data } = await axios.post(url, records, {
-    headers: {
-      ...headers(),
-      Prefer: 'resolution=merge-duplicates,return=representation'
-    }
-  });
-  return data;
+  try {
+    const { data } = await axios.post(url, records, {
+      headers: {
+        ...headers(),
+        Prefer: 'resolution=merge-duplicates,return=representation'
+      }
+    });
+    console.log(`[upsertCustomerPrices] OK saved ${data.length} records`);
+    return data;
+  } catch (err) {
+    const detail = err.response?.data ?? err.message;
+    console.error('[upsertCustomerPrices] Supabase error:', JSON.stringify(detail));
+    throw new Error(typeof detail === 'object' ? (detail.message || detail.hint || JSON.stringify(detail)) : detail);
+  }
 }
 
 async function deleteCustomerPrice(customerId, presentationId) {

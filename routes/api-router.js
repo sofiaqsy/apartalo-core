@@ -800,6 +800,7 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
   try {
     const { businessId, clienteId } = req.params;
     const { precios, usuario } = req.body;
+    console.log(`[precios-cliente POST] businessId=${businessId} clienteId=${clienteId} precios=${JSON.stringify(precios)} usuario=${usuario}`);
     if (!precios || typeof precios !== 'object') return res.status(400).json({ error: 'Campo requerido: precios' });
 
     const negocio = negociosService.getById(businessId);
@@ -807,6 +808,7 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
 
     if (negocio.plataformaExterna) {
       const saved = await supabaseService.upsertCustomerPrices(clienteId, precios, usuario || 'APP');
+      console.log(`[precios-cliente POST] OK clienteId=${clienteId} saved=${saved.length}`);
       return res.json({ success: true, mensaje: 'Precios guardados', clienteId, resumen: { total: saved.length } });
     }
 
@@ -843,6 +845,7 @@ router.post('/precios-cliente/:businessId/:clienteId', async (req, res) => {
     for (const registro of nuevosRegistros) await sheets.appendRow('PreciosClientes', registro);
     res.json({ success: true, mensaje: 'Precios guardados', clienteId, resumen: { actualizados, creados, total: actualizados + creados } });
   } catch (error) {
+    console.error('[precios-cliente POST] error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
