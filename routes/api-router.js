@@ -1041,22 +1041,41 @@ router.get('/productos/:businessId', async (req, res) => {
     else if (ordenar === 'stock') productos.sort((a, b) => b.disponible - a.disponible);
     else if (ordenar === 'nombre') productos.sort((a, b) => a.nombre.localeCompare(b.nombre));
     else if (negocio.farmId) {
-      // Default: sort by best seller using order_items
+      // Default: sort by best seller + merge images and presentations from Supabase
       try {
-        const salesRows = await supabaseService.getRawSalesCounts(negocio.farmId);
-        const salesMap = {};
-        for (const r of salesRows) salesMap[r.product_id] = Number(r.total_sold || 0);
-        // Match by product name (Sheets products don't have Supabase IDs directly)
-        const supabaseProducts = await supabaseService.getAllProducts(negocio.farmId);
-        const nameToSales = {};
-        for (const sp of supabaseProducts) {
-          nameToSales[sp.name.toLowerCase()] = salesMap[sp.id] || 0;
-        }
+        const supabaseProducts = await supabaseService.getProductsWithPresentations(negocio.farmId);
+        const byName = {};
+        for (const sp of supabaseProducts) byName[sp.name.toLowerCase()] = sp;
+        // Merge image_url and presentations into Sheets products
+        productos = productos.map(p => {
+          const sp = byName[(p.nombre || '').toLowerCase()];
+          if (!sp) return p;
+          return {
+            ...p,
+            imagenUrl: p.imagenUrl || sp.image_url || '',
+            presentaciones: sp.presentations.map(pp => ({
+              id:           pp.id,
+              contenido:    pp.pack_size,
+              unidad:       pp.unit,
+              precio:       pp.price_cents / 100,
+              precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+              cantidadB2b:  pp.min_qty_for_b2b || null,
+              stock:        pp.stock || 0,
+              pedidoMinimo: pp.min_order_qty || 1,
+              orden:        pp.sort_order || 0,
+              predeterminada: pp.is_default || false,
+              molienda:     pp.grind || [],
+              imageUrl:     pp.image_url || null
+            })),
+            _totalSold: sp.totalSold || 0
+          };
+        });
         productos.sort((a, b) => {
-          const sa = nameToSales[(a.nombre || '').toLowerCase()] || 0;
-          const sb = nameToSales[(b.nombre || '').toLowerCase()] || 0;
+          const sa = a._totalSold || 0;
+          const sb = b._totalSold || 0;
           return sb - sa || (a.nombre || '').localeCompare(b.nombre || '');
         });
+        productos = productos.map(({ _totalSold, ...rest }) => rest);
       } catch (e) { /* keep original order on error */ }
     }
 
