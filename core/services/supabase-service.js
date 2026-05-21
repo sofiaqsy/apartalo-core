@@ -160,7 +160,7 @@ async function getAdminFarmsByPhone(phone) {
     // Allowed roles in farm_members
     const members = await get('farm_members', {
       user_id: `eq.${profile.id}`,
-      role:    `in.(owner,admin)`,
+      role:    `in.(owner,staff)`,
       select:  'farm_id,role'
     });
 
