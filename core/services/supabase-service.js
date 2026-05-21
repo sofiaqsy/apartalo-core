@@ -301,8 +301,9 @@ async function updateCustomer(profileId, fields) {
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 
-async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD' }) {
+async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0 }) {
   const subtotalCents = items.reduce((sum, i) => sum + i.lineTotalCents, 0);
+  const shipping = Math.round(shippingCents || 0);
 
   const orders = await post('orders', {
     customer_id:      customer.id || null,
@@ -312,7 +313,8 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
     shipping_address: shippingAddress,
     notes,
     subtotal_cents:   subtotalCents,
-    total_cents:      subtotalCents,
+    shipping_cents:   shipping,
+    total_cents:      subtotalCents + shipping,
     currency,
     status:           'pending_payment',
     payment_method:   paymentMethod || null
@@ -344,7 +346,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
 async function getOrdersByCustomer(customerId) {
   return get('orders', {
     customer_id: `eq.${customerId}`,
-    select: 'id,order_number,status,total_cents,currency,created_at,order_items(product_name,quantity,unit)',
+    select: 'id,order_number,status,subtotal_cents,shipping_cents,total_cents,currency,created_at,order_items(product_name,quantity,unit)',
     order: 'created_at.desc'
   });
 }
@@ -721,6 +723,17 @@ async function deleteAddress(addressId) {
   return true;
 }
 
+async function updateOrderShipping(orderNumber, shippingCents) {
+  const shipping = Math.round(shippingCents || 0);
+  const url = `${base()}/rest/v1/orders?order_number=eq.${encodeURIComponent(orderNumber)}&select=id,subtotal_cents`;
+  const { data: orders } = await axios.get(url, { headers: headers() });
+  const order = orders[0];
+  if (!order) throw new Error(`Pedido no encontrado: ${orderNumber}`);
+  const totalCents = (order.subtotal_cents || 0) + shipping;
+  const rows = await patch('orders', { id: `eq.${order.id}` }, { shipping_cents: shipping, total_cents: totalCents });
+  return rows[0];
+}
+
 async function getAddressesByCustomers(customerIds) {
   if (!customerIds || customerIds.length === 0) return [];
   const ids = customerIds.join(',');
@@ -763,6 +776,7 @@ module.exports = {
   createAddress,
   updateAddress,
   deleteAddress,
+  updateOrderShipping,
   getCustomerPrices,
   upsertCustomerPrices,
   deleteCustomerPrice,

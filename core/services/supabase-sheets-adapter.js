@@ -155,7 +155,8 @@ class SupabaseSheetsAdapter {
       },
       notes:         datosPedido.observaciones || '',
       paymentMethod: datosPedido.metodoPago || null,
-      currency:      'USD'
+      currency:      'USD',
+      shippingCents: Math.round((parseFloat(datosPedido.costoEnvio) || 0) * 100)
     });
 
     return order ? { id: order.order_number, supabaseId: order.id, ...datosPedido } : null;
@@ -166,13 +167,15 @@ class SupabaseSheetsAdapter {
     if (!cliente) return [];
     const orders = await supabase.getOrdersByCustomer(cliente.id);
     return orders.map(o => ({
-      id:        o.order_number,
-      fecha:     new Date(o.created_at).toLocaleDateString('es-CO'),
+      id:          o.order_number,
+      fecha:       new Date(o.created_at).toLocaleDateString('es-CO'),
       whatsapp,
-      cliente:   o.customer_name || '',
-      productos: (o.order_items || []).map(i => `${i.quantity} ${i.product_name}`).join(', '),
-      total:     o.total_cents / 100,
-      estado:    o.status
+      cliente:     o.customer_name || '',
+      productos:   (o.order_items || []).map(i => `${i.quantity} ${i.product_name}`).join(', '),
+      subtotal:    (o.subtotal_cents || 0) / 100,
+      costoEnvio:  (o.shipping_cents || 0) / 100,
+      total:       o.total_cents / 100,
+      estado:      o.status
     }));
   }
 

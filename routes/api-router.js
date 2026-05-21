@@ -409,6 +409,23 @@ router.post('/pedidos/:businessId', async (req, res) => {
   }
 });
 
+router.patch('/pedidos/:businessId/:pedidoId/shipping', async (req, res) => {
+  try {
+    const { businessId, pedidoId } = req.params;
+    const { costoEnvio } = req.body;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible para pedidos Supabase' });
+    const shippingCents = Math.round((parseFloat(costoEnvio) || 0) * 100);
+    await supabaseService.updateOrderShipping(pedidoId, shippingCents);
+    console.log(`[Shipping] pedido=${pedidoId} costoEnvio=${costoEnvio}`);
+    res.json({ success: true, costoEnvio: shippingCents / 100 });
+  } catch (error) {
+    console.error('[Shipping] Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
