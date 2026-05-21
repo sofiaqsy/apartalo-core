@@ -181,6 +181,38 @@ router.get('/:businessId', async (req, res) => {
         estado: 'ACTIVO', tipoEnvio: '', empresaEnvio: '', localEnvio: '',
         direccionEnvio: '', distritoEnvio: '', departamentoEnvio: '', notas: ''
       }));
+
+      // Merge primary address data
+      console.log(`[Clientes GET] → iniciando fetch de direcciones para ${clientes.length} clientes`);
+      try {
+        const customerIds = clientes.map(c => c.id);
+        const addresses = await supabaseService.getAddressesByCustomers(customerIds);
+        console.log(`[Clientes GET] → ${addresses.length} direcciones obtenidas para ${customerIds.length} clientes`);
+        const addrMap = {};
+        for (const addr of addresses) {
+          if (!addrMap[addr.customer_id]) addrMap[addr.customer_id] = addr;
+        }
+        clientes = clientes.map(c => {
+          const addr = addrMap[c.id];
+          if (!addr) return c;
+          const courier = Array.isArray(addr.customer_address_courier) ? addr.customer_address_courier[0] : addr.customer_address_courier;
+          return {
+            ...c,
+            direccion: addr.address_line || '',
+            distrito: addr.district || '',
+            departamento: addr.department || '',
+            direccionEnvio: addr.address_line || '',
+            distritoEnvio: addr.district || '',
+            departamentoEnvio: addr.department || '',
+            tipoEnvio: courier?.company ? 'NACIONAL' : (addr.address_line ? 'LOCAL' : ''),
+            empresaEnvio: courier?.company || '',
+            localEnvio: courier?.agency || '',
+          };
+        });
+      } catch (addrErr) {
+        console.error('[Clientes GET] ERROR al cargar direcciones:', addrErr.message, addrErr.stack);
+      }
+
       if (ordenar === 'nombre') clientes.sort((a, b) => a.nombreNegocio.localeCompare(b.nombreNegocio));
       return res.json({ total: clientes.length, pagina: 1, totalPaginas: 1, hayMas: false, clientes });
     }

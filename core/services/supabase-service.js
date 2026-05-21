@@ -721,6 +721,14 @@ async function deleteAddress(addressId) {
   return true;
 }
 
+async function getAddressesByCustomers(customerIds) {
+  if (!customerIds || customerIds.length === 0) return [];
+  const ids = customerIds.join(',');
+  const url = `${base()}/rest/v1/customer_addresses?customer_id=in.(${ids})&select=*,customer_address_courier(*)&order=is_primary.desc,created_at.asc`;
+  const { data } = await axios.get(url, { headers: headers() });
+  return data;
+}
+
 async function deleteRow(path, params) {
   const qs = Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
   const url = `${base()}/rest/v1/${path}?${qs}`;
@@ -751,6 +759,7 @@ module.exports = {
   createOrder,
   getOrdersByCustomer,
   getAddressesByCustomer,
+  getAddressesByCustomers,
   createAddress,
   updateAddress,
   deleteAddress,
