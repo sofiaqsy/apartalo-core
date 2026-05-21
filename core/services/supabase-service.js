@@ -100,10 +100,19 @@ async function getPresentations(productId) {
 }
 
 async function getProductsWithPresentations(farmId) {
-  const products = await getAllProducts(farmId);
+  const [products, salesRows] = await Promise.all([
+    getAllProducts(farmId),
+    get('order_items', { farm_id: `eq.${farmId}`, select: 'product_id,quantity' })
+  ]);
   if (!products.length) return [];
+
+  // Aggregate sales per product
+  const salesMap = {};
+  for (const row of salesRows) {
+    salesMap[row.product_id] = (salesMap[row.product_id] || 0) + Number(row.quantity || 0);
+  }
+
   const ids = products.map(p => p.id);
-  // PostgREST: filter by multiple IDs using in.(id1,id2,...)
   const presentations = await get('product_presentations', {
     product_id: `in.(${ids.join(',')})`,
     select: PRESENTATION_SELECT,
@@ -114,7 +123,10 @@ async function getProductsWithPresentations(farmId) {
     if (!presMap[pp.product_id]) presMap[pp.product_id] = [];
     presMap[pp.product_id].push(pp);
   }
-  return products.map(p => ({ ...p, presentations: presMap[p.id] || [] }));
+
+  return products
+    .map(p => ({ ...p, presentations: presMap[p.id] || [], totalSold: salesMap[p.id] || 0 }))
+    .sort((a, b) => b.totalSold - a.totalSold || a.name.localeCompare(b.name));
 }
 
 async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, minQtyForB2b, stock, minOrderQty, sortOrder, isDefault, grind }) {
