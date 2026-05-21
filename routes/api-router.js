@@ -1040,6 +1040,25 @@ router.get('/productos/:businessId', async (req, res) => {
     else if (ordenar === 'precio_desc') productos.sort((a, b) => b.precio - a.precio);
     else if (ordenar === 'stock') productos.sort((a, b) => b.disponible - a.disponible);
     else if (ordenar === 'nombre') productos.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    else if (negocio.farmId) {
+      // Default: sort by best seller using order_items
+      try {
+        const salesRows = await supabaseService.getRawSalesCounts(negocio.farmId);
+        const salesMap = {};
+        for (const r of salesRows) salesMap[r.product_id] = Number(r.total_sold || 0);
+        // Match by product name (Sheets products don't have Supabase IDs directly)
+        const supabaseProducts = await supabaseService.getAllProducts(negocio.farmId);
+        const nameToSales = {};
+        for (const sp of supabaseProducts) {
+          nameToSales[sp.name.toLowerCase()] = salesMap[sp.id] || 0;
+        }
+        productos.sort((a, b) => {
+          const sa = nameToSales[(a.nombre || '').toLowerCase()] || 0;
+          const sb = nameToSales[(b.nombre || '').toLowerCase()] || 0;
+          return sb - sa || (a.nombre || '').localeCompare(b.nombre || '');
+        });
+      } catch (e) { /* keep original order on error */ }
+    }
 
     const total = productos.length;
     const paginaNum = parseInt(pagina) || 1;

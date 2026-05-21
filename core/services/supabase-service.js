@@ -156,6 +156,10 @@ async function deletePresentation(presentationId) {
   await deleteRow('product_presentations', { id: `eq.${presentationId}` });
 }
 
+async function getRawSalesCounts(farmId) {
+  return get('order_items', { farm_id: `eq.${farmId}`, select: 'product_id,quantity' });
+}
+
 // ─── AUTH / ADMIN LOGIN ───────────────────────────────────────────────────────
 
 async function getAdminFarmsByPhone(phone) {
@@ -655,6 +659,7 @@ async function deleteRow(path, params) {
 }
 
 module.exports = {
+  getRawSalesCounts,
   getAdminFarmsByPhone,
   getFarm,
   getProducts,
