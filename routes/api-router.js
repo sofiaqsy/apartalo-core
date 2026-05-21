@@ -1272,7 +1272,8 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
       pedidoMinimo: pp.min_order_qty || 1,
       orden:        pp.sort_order || 0,
       predeterminada: pp.is_default || false,
-      molienda:     pp.grind || []
+      molienda:     pp.grind || [],
+      imageUrl:     pp.image_url || null
     })) });
   } catch (error) {
     res.status(500).json({ error: error.message });

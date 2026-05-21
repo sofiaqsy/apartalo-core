@@ -92,11 +92,25 @@ async function getProductById(productId) {
 const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,min_qty_for_b2b,stock,min_order_qty,sort_order,is_default,grind';
 
 async function getPresentations(productId) {
-  return get('product_presentations', {
-    product_id: `eq.${productId}`,
-    select: PRESENTATION_SELECT,
-    order: 'sort_order.asc'
-  });
+  const [presentations, mediaRows] = await Promise.all([
+    get('product_presentations', {
+      product_id: `eq.${productId}`,
+      select: PRESENTATION_SELECT,
+      order: 'sort_order.asc'
+    }),
+    get('media', {
+      owner_id: `eq.${productId}`,
+      select: 'presentation_id,url,role,sort_order',
+      order: 'sort_order.asc'
+    })
+  ]);
+  const presImageMap = {};
+  for (const m of mediaRows) {
+    if (m.presentation_id && !presImageMap[m.presentation_id]) {
+      presImageMap[m.presentation_id] = m.url;
+    }
+  }
+  return presentations.map(pp => ({ ...pp, image_url: presImageMap[pp.id] || null }));
 }
 
 async function getProductsWithPresentations(farmId) {
@@ -113,19 +127,47 @@ async function getProductsWithPresentations(farmId) {
   }
 
   const ids = products.map(p => p.id);
-  const presentations = await get('product_presentations', {
-    product_id: `in.(${ids.join(',')})`,
-    select: PRESENTATION_SELECT,
-    order: 'sort_order.asc'
-  });
+  const [presentations, mediaRows] = await Promise.all([
+    get('product_presentations', {
+      product_id: `in.(${ids.join(',')})`,
+      select: PRESENTATION_SELECT,
+      order: 'sort_order.asc'
+    }),
+    get('media', {
+      owner_id: `in.(${ids.join(',')})`,
+      select: 'owner_id,presentation_id,url,role,sort_order',
+      order: 'sort_order.asc'
+    })
+  ]);
+
+  // presentation_id set → image for that specific presentation
+  // no presentation_id + role cover/profile → fallback product image
+  const presImageMap = {};
+  const productCoverMap = {};
+  for (const m of mediaRows) {
+    if (m.presentation_id && !presImageMap[m.presentation_id]) {
+      presImageMap[m.presentation_id] = m.url;
+    } else if (!m.presentation_id && (m.role === 'cover' || m.role === 'profile') && !productCoverMap[m.owner_id]) {
+      productCoverMap[m.owner_id] = m.url;
+    }
+  }
+
   const presMap = {};
   for (const pp of presentations) {
     if (!presMap[pp.product_id]) presMap[pp.product_id] = [];
-    presMap[pp.product_id].push(pp);
+    presMap[pp.product_id].push({
+      ...pp,
+      image_url: presImageMap[pp.id] || null
+    });
   }
 
   return products
-    .map(p => ({ ...p, presentations: presMap[p.id] || [], totalSold: salesMap[p.id] || 0 }))
+    .map(p => ({
+      ...p,
+      presentations: presMap[p.id] || [],
+      image_url: productCoverMap[p.id] || null,
+      totalSold: salesMap[p.id] || 0
+    }))
     .sort((a, b) => b.totalSold - a.totalSold || a.name.localeCompare(b.name));
 }
 

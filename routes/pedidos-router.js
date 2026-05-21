@@ -179,6 +179,7 @@ router.post('/:businessId', async (req, res) => {
       productName:     p.nombre || p.name || '',
       unit:            p.unidad || p.unit || 'unidad',
       presentacionId:  p.presentacionId || null,
+      grind:           p.grind || null,
       quantity:        p.cantidad || p.quantity || 1,
       unitPriceCents:  Math.round((p.precio || p.price || 0) * 100),
       lineTotalCents:  Math.round(((p.subtotal) || (p.precio || 0) * (p.cantidad || 1)) * 100),

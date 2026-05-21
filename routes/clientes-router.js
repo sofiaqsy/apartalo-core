@@ -169,7 +169,8 @@ router.get('/:businessId', async (req, res) => {
 
     if (negocio.plataformaExterna && negocio.farmId) {
       console.log(`[Clientes GET] → Supabase getAllCustomers`);
-      const profiles = await supabaseService.getAllCustomers({ search: buscar });
+      const limiteNum = parseInt(limite) || 50;
+      const profiles = await supabaseService.getAllCustomers({ search: buscar, limit: limiteNum });
       console.log(`[Clientes GET] → ${profiles.length} perfiles obtenidos`);
       let clientes = profiles.map(p => ({
         id: p.id, whatsapp: p.phone || '', nombreNegocio: p.business_name || '', nombreResponsable: p.full_name || '',
@@ -180,22 +181,8 @@ router.get('/:businessId', async (req, res) => {
         estado: 'ACTIVO', tipoEnvio: '', empresaEnvio: '', localEnvio: '',
         direccionEnvio: '', distritoEnvio: '', departamentoEnvio: '', notas: ''
       }));
-      if (buscar) {
-        const s = buscar.toLowerCase();
-        clientes = clientes.filter(c =>
-          c.nombreNegocio.toLowerCase().includes(s) ||
-          c.nombreResponsable.toLowerCase().includes(s) ||
-          c.whatsapp.includes(buscar) ||
-          c.email.toLowerCase().includes(s)
-        );
-      }
       if (ordenar === 'nombre') clientes.sort((a, b) => a.nombreNegocio.localeCompare(b.nombreNegocio));
-      const total = clientes.length;
-      const paginaNum = parseInt(pagina) || 1;
-      const limiteNum = parseInt(limite) || 50;
-      const totalPaginas = Math.ceil(total / limiteNum);
-      const inicio = (paginaNum - 1) * limiteNum;
-      return res.json({ total, pagina: paginaNum, totalPaginas, hayMas: paginaNum < totalPaginas, clientes: clientes.slice(inicio, inicio + limiteNum) });
+      return res.json({ total: clientes.length, pagina: 1, totalPaginas: 1, hayMas: false, clientes });
     }
 
     const sheets = new SheetsService(negocio.spreadsheetId);
