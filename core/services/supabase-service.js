@@ -723,6 +723,46 @@ async function deleteAddress(addressId) {
   return true;
 }
 
+async function updateOrderItem(orderNumber, { presentacionId, codigo, cantidad, grind }) {
+  // Look up order by order_number
+  const url = `${base()}/rest/v1/orders?order_number=eq.${encodeURIComponent(orderNumber)}&select=id,subtotal_cents,shipping_cents`;
+  const { data: orders } = await axios.get(url, { headers: headers() });
+  const order = orders[0];
+  if (!order) throw new Error(`Pedido no encontrado: ${orderNumber}`);
+
+  // Find the matching order_item
+  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${order.id}&select=id,unit_price_cents,quantity,line_total_cents${presentacionId ? `&presentation_id=eq.${presentacionId}` : ''}`;
+  const { data: items } = await axios.get(itemsUrl, { headers: headers() });
+
+  let item = items[0];
+  if (!item && codigo) {
+    // fallback: match by product_name contains codigo
+    const allUrl = `${base()}/rest/v1/order_items?order_id=eq.${order.id}&select=id,unit_price_cents,quantity,line_total_cents`;
+    const { data: allItems } = await axios.get(allUrl, { headers: headers() });
+    item = allItems.find(i => i.id === codigo) || allItems[0];
+  }
+  if (!item) throw new Error('Item no encontrado en el pedido');
+
+  const newLineTotalCents = item.unit_price_cents * cantidad;
+  const fields = { quantity: cantidad, line_total_cents: newLineTotalCents };
+  if (grind !== undefined) fields.grind = grind || null;
+
+  await patch('order_items', { id: `eq.${item.id}` }, fields);
+
+  // Recalculate order totals
+  const allItemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${order.id}&select=id,line_total_cents`;
+  const { data: allItems } = await axios.get(allItemsUrl, { headers: headers() });
+  // Replace the updated item's value
+  const newSubtotalCents = allItems.reduce((sum, i) =>
+    sum + (i.id === item.id ? newLineTotalCents : i.line_total_cents), 0);
+  const newTotalCents = newSubtotalCents + (order.shipping_cents || 0);
+  await patch('orders', { id: `eq.${order.id}` }, {
+    subtotal_cents: newSubtotalCents,
+    total_cents: newTotalCents,
+  });
+  return { subtotal: newSubtotalCents / 100, total: newTotalCents / 100 };
+}
+
 async function updateOrderShipping(orderNumber, shippingCents) {
   const shipping = Math.round(shippingCents || 0);
   const url = `${base()}/rest/v1/orders?order_number=eq.${encodeURIComponent(orderNumber)}&select=id,subtotal_cents`;
@@ -776,6 +816,7 @@ module.exports = {
   createAddress,
   updateAddress,
   deleteAddress,
+  updateOrderItem,
   updateOrderShipping,
   getCustomerPrices,
   upsertCustomerPrices,

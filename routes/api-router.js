@@ -409,6 +409,23 @@ router.post('/pedidos/:businessId', async (req, res) => {
   }
 });
 
+router.patch('/pedidos/:businessId/:pedidoId/items', async (req, res) => {
+  try {
+    const { businessId, pedidoId } = req.params;
+    const { presentacionId, codigo, cantidad, grind } = req.body;
+    if (!cantidad || cantidad < 1) return res.status(400).json({ error: 'cantidad requerida' });
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+    if (!negocio.plataformaExterna) return res.status(400).json({ error: 'Solo disponible para pedidos Supabase' });
+    const result = await supabaseService.updateOrderItem(pedidoId, { presentacionId, codigo, cantidad, grind });
+    console.log(`[Items] pedido=${pedidoId} cantidad=${cantidad} grind=${grind} → subtotal=${result.subtotal}`);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('[Items] Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.patch('/pedidos/:businessId/:pedidoId/shipping', async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
