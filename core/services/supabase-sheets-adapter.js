@@ -135,7 +135,9 @@ class SupabaseSheetsAdapter {
       quantity:        p.cantidad || p.quantity || 1,
       unitPriceCents:  Math.round((p.precio || p.price || 0) * 100),
       lineTotalCents:  Math.round((p.subtotal || (p.precio || 0) * (p.cantidad || 1)) * 100),
-      commissionRate:  this.farm?.commission_rate || 0.10
+      commissionRate:  this.farm?.commission_rate || 0.10,
+      presentacionId:  p.presentacionId || null,
+      grind:           p.grind || null
     }));
 
     const order = await supabase.createOrder({
@@ -159,7 +161,19 @@ class SupabaseSheetsAdapter {
       shippingCents: Math.round((parseFloat(datosPedido.costoEnvio) || 0) * 100)
     });
 
-    return order ? { id: order.order_number, supabaseId: order.id, ...datosPedido } : null;
+    if (!order) return null;
+    const { fecha, hora } = (() => {
+      const d = new Date(order.created_at || Date.now());
+      const lima = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).formatToParts(d);
+      const get = t => (lima.find(p => p.type === t) || {}).value || '';
+      return { fecha: `${get('day')}/${get('month')}/${get('year')}`, hora: `${get('hour')}:${get('minute')}` };
+    })();
+    return {
+      id: order.order_number, supabaseId: order.id,
+      fecha, hora,
+      estado: 'PENDIENTE',
+      ...datosPedido
+    };
   }
 
   async getPedidosByWhatsapp(whatsapp) {

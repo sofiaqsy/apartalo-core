@@ -495,6 +495,8 @@ function mapOrder(o, items = [], payments = []) {
       presentacionId: i.presentation_id || null,
       grind: i.grind || null,
     })),
+    subtotal: (o.subtotal_cents || 0) / 100,
+    costoEnvio: (o.shipping_cents || 0) / 100,
     total: o.total_cents / 100,
     estado: fromStatus(o.status), _status: o.status,
     observaciones: o.notes || '', origen: 'APP',

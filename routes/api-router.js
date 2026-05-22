@@ -297,9 +297,14 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
 router.get('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado } = req.query;
+    const { estado, vista, cliente, pagina = 1, limite = 50 } = req.query;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, cliente, pagina, limite });
+      return res.json(result);
+    }
 
     const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Pedidos!A:S');
@@ -340,6 +345,56 @@ router.post('/pedidos/:businessId', async (req, res) => {
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const totalNumeroGlobal = parseDecimal(total);
+    const costoEnvioGlobal  = parseDecimal(costoEnvio);
+    const estadoFinalGlobal = estado || 'PENDIENTE';
+    const origenFinalGlobal = origen || 'APP';
+
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const sheets = await getSheetsService(negocio);
+      const productosDetalle = Array.isArray(productos) ? productos.map(p => ({
+        codigo: p.codigo || p.id,
+        nombre: p.nombre || p.name,
+        precio: p.precio || p.price || 0,
+        cantidad: p.cantidad || p.quantity || 1,
+        subtotal: p.subtotal || (p.precio || 0) * (p.cantidad || 1),
+        unit: p.unit || p.unidad || 'unidad',
+        presentacionId: p.presentacionId || null,
+        grind: p.grind || null
+      })) : [];
+
+      const result = await sheets.crearPedido({
+        whatsapp, cliente, telefono, direccion, ciudad, departamento,
+        tipoEnvio, empresaEnvio, observaciones, origen: origenFinalGlobal,
+        costoEnvio: costoEnvioGlobal,
+        total: totalNumeroGlobal,
+        productosDetalle
+      });
+
+      if (!result) return res.status(500).json({ error: 'Error creando pedido' });
+
+      try {
+        await firebaseService.initialize();
+        await firebaseService.enviarNotificacion(businessId, {
+          title: '🛒 Nuevo Pedido',
+          body: `${cliente || 'Cliente'} - S/ ${totalNumeroGlobal.toFixed(2)}`,
+          data: { type: 'nuevo_pedido', pedidoId: result.id, cliente: cliente || '', total: totalNumeroGlobal.toString(), whatsapp }
+        });
+      } catch (e) { console.log('⚠️ Error push notification:', e.message); }
+
+      console.log(`✅ Pedido Supabase: ${result.id} - ${result.estado}`);
+      return res.status(201).json({
+        success: true, mensaje: 'Pedido creado',
+        pedido: {
+          ...result,
+          productos: productosDetalle.map(p => `${p.cantidad}x ${p.nombre} - S/${(p.precio * p.cantidad).toFixed(2)}`).join(', '),
+          productosDetalle,
+          costoEnvio: costoEnvioGlobal,
+          subtotal: totalNumeroGlobal - costoEnvioGlobal
+        }
+      });
+    }
 
     const sheets = await getSheetsService(negocio);
 
@@ -402,7 +457,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     ).catch(e => console.error('⚠️ [Delivery] Error en hook API:', e.message));
 
     console.log(`✅ Pedido creado: ${pedidoId} - ${estadoFinal} - ${origenFinal}`);
-    res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha: fechaPeru, hora: horaPeru, whatsapp, cliente, productos: productosStr, total: totalNumero, estado: estadoFinal, origen: origenFinal } });
+    res.status(201).json({ success: true, mensaje: 'Pedido creado', pedido: { id: pedidoId, fecha: fechaPeru, hora: horaPeru, whatsapp, cliente, productos: productosStr, total: totalNumero, costoEnvio: costoEnvioNumero, subtotal: totalNumero - costoEnvioNumero, estado: estadoFinal, origen: origenFinal } });
   } catch (error) {
     console.error('❌ Error creando pedido:', error);
     res.status(500).json({ error: error.message });
