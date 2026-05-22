@@ -505,7 +505,7 @@ function mapOrder(o, items = [], payments = []) {
     fechaPago: o.paid_at ? new Date(o.paid_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
     pagos: payments.map(p => ({
       id: p.id, monto: p.amount_cents / 100,
-      fecha: new Date(p.created_at).toLocaleString('es-PE', { timeZone: 'America/Lima' }),
+      fecha: p.created_at, // UTC ISO — el cliente convierte a zona horaria local
       nota: p.notes || ''
     })),
     evidencias,
