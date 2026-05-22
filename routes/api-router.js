@@ -541,6 +541,37 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
   }
 });
 
+// DELETE /pedidos/:businessId/:pedidoId/pagos/:pagoId
+router.delete('/pedidos/:businessId/:pedidoId/pagos/:pagoId', async (req, res) => {
+  try {
+    const { businessId, pedidoId, pagoId } = req.params;
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+      // Eliminar el pago (y sus comprobantes en cascada); recalcula payment_status internamente
+      await supabaseService.deleteOrderPayment(pagoId, pedido.supabaseId);
+
+      // Devolver orden actualizada para que el cliente refresque estado sin extra-fetch
+      const updated = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      return res.json({
+        success: true,
+        estadoPago:   updated.estadoPago,
+        montoPagado:  updated.montoPagado,
+        pagos:        updated.pagos,
+        evidencias:   updated.evidencias,
+      });
+    }
+
+    res.status(400).json({ error: 'Operación no soportada para este negocio' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // CLIENTES
 router.get('/clientes/:businessId', async (req, res) => {
   try {
