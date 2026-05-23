@@ -450,13 +450,14 @@ async function deleteCustomerPrice(customerId, presentationId) {
 
 const ESTADO_TO_STATUS = {
   PENDIENTE: 'pending_payment', CONFIRMADO: 'paid',
-  EN_PREPARACION: 'preparing',  LISTO: 'preparing',
+  EN_PREPARACION: 'preparing',  LISTO: 'ready',
   ENVIADO: 'shipped', ENTREGADO: 'delivered',
   COMPLETADO: 'delivered', CANCELADO: 'cancelled'
 };
 const STATUS_TO_ESTADO = {
   pending_payment: 'PENDIENTE', paid: 'CONFIRMADO', preparing: 'EN_PREPARACION',
-  shipped: 'ENVIADO', delivered: 'COMPLETADO', cancelled: 'CANCELADO', refunded: 'CANCELADO'
+  ready: 'LISTO', shipped: 'ENVIADO', delivered: 'COMPLETADO',
+  cancelled: 'CANCELADO', refunded: 'CANCELADO'
 };
 const ESTADOPAGO_TO_PS = { PENDIENTE_PAGO: 'pending', PARCIAL: 'partial', PAGADO: 'paid' };
 const PS_TO_ESTADOPAGO = { pending: 'PENDIENTE_PAGO', partial: 'PARCIAL', paid: 'PAGADO' };
