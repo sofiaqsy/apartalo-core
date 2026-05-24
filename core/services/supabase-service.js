@@ -1002,9 +1002,11 @@ async function getEventOffers(farmId) {
  * Crea una pre-orden: reserva kg en event_offers y crea la order + order_item
  * con source_event_id para trazabilidad.
  */
-async function createPreorden({ farmId, offerId, sourceEventId, presentationId, cliente }) {
-  // 1. Leer la offer para obtener producto + precio + kg
-  const offerUrl = `${base()}/rest/v1/event_offers?id=eq.${offerId}&select=id,kg_offered,kg_reserved,product_id,product:products(id,name,price_cents,currency,farm_id,product_presentations(id,pack_size,unit,price_cents))`;
+async function createPreorden({ farmId, offerId, sourceEventId, presentationId, cantidad = 1, cliente }) {
+  const qty = Math.max(1, Math.round(Number(cantidad) || 1));
+
+  // 1. Leer la offer + producto desde Supabase (2-step, igual que getEventOffers)
+  const offerUrl = `${base()}/rest/v1/event_offers?id=eq.${offerId}&select=id,kg_offered,kg_reserved,product_id`;
   const { data: offerRows } = await axios.get(offerUrl, { headers: headers() });
   const offer = offerRows?.[0];
   if (!offer) throw new Error('Offer no encontrada');
@@ -1012,8 +1014,11 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
   const remaining = Number(offer.kg_offered) - Number(offer.kg_reserved);
   if (remaining <= 0) throw new Error('Sin capacidad disponible para esta pre-venta');
 
-  // Resolver presentación
-  const product = Array.isArray(offer.product) ? offer.product[0] : offer.product;
+  // Fetch product + presentations separately
+  const pSelect = 'id,name,price_cents,currency,farm_id,product_presentations(id,pack_size,unit,price_cents)';
+  const pUrl = `${base()}/rest/v1/products?id=eq.${offer.product_id}&select=${encodeURIComponent(pSelect)}`;
+  const { data: productRows } = await axios.get(pUrl, { headers: headers() });
+  const product = productRows?.[0];
   if (!product) throw new Error('Producto de la offer no encontrado');
 
   const presentations = product.product_presentations || [];
@@ -1022,29 +1027,34 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
     : presentations.find(p => p.is_default) || presentations[0];
   if (!pres) throw new Error('Presentación no encontrada');
 
-  const kgPerUnit = pres.unit === 'kg' ? Number(pres.pack_size) : Number(pres.pack_size) / 1000;
-  if (kgPerUnit <= 0) throw new Error('Presentación inválida');
-  if (kgPerUnit > remaining) throw new Error(`Solo quedan ${remaining.toFixed(2)} kg disponibles`);
+  const kgPerUnit  = pres.unit === 'kg' ? Number(pres.pack_size) : Number(pres.pack_size) / 1000;
+  if (kgPerUnit <= 0) throw new Error('Presentación inválida (kg por unidad = 0)');
 
-  const priceCents = pres.price_cents || product.price_cents;
-  const currency   = product.currency || 'PEN';
+  const kgToReserve = kgPerUnit * qty;
+  if (kgToReserve > remaining) {
+    throw new Error(`Solo quedan ${remaining.toFixed(2)} kg disponibles (pediste ${kgToReserve.toFixed(2)} kg)`);
+  }
 
-  // 2. Reservar kg atómicamente vía RPC
+  const unitPriceCents = pres.price_cents || product.price_cents;
+  const lineTotalCents = unitPriceCents * qty;
+  const currency       = product.currency || 'PEN';
+
+  // 2. Reservar kg totales atómicamente vía RPC
   await axios.post(
     `${base()}/rest/v1/rpc/reserve_offer_kg`,
-    { p_offer_id: offerId, p_kg: kgPerUnit },
+    { p_offer_id: offerId, p_kg: kgToReserve },
     { headers: headers() }
   );
 
   // 3. Crear orden en Supabase
   const orderRows = await post('orders', {
-    customer_id:    cliente.id   || null,
+    customer_id:    cliente.id    || null,
     customer_email: cliente.email || `guest-${Date.now()}@fincas.app`,
     customer_name:  cliente.nombre,
     customer_phone: cliente.whatsapp,
-    subtotal_cents: priceCents,
+    subtotal_cents: lineTotalCents,
     shipping_cents: 0,
-    total_cents:    priceCents,
+    total_cents:    lineTotalCents,
     currency,
     status:         'pending_payment',
     payment_method: 'pending',
@@ -1053,7 +1063,7 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
   const order = orderRows[0];
   if (!order) throw new Error('No se pudo crear la orden');
 
-  // 4. Crear order_item con source_event_id
+  // 4. Crear order_item con source_event_id y cantidad correcta
   await post('order_items', [{
     order_id:           order.id,
     farm_id:            farmId,
@@ -1062,12 +1072,12 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
     product_name:       product.name,
     unit:               pres.unit,
     pack_size:          pres.pack_size,
-    quantity:           1,
-    unit_price_cents:   priceCents,
-    line_total_cents:   priceCents,
+    quantity:           qty,
+    unit_price_cents:   unitPriceCents,
+    line_total_cents:   lineTotalCents,
     commission_rate:    0.10,
-    commission_cents:   Math.round(priceCents * 0.10),
-    payout_cents:       Math.round(priceCents * 0.90),
+    commission_cents:   Math.round(lineTotalCents * 0.10),
+    payout_cents:       Math.round(lineTotalCents * 0.90),
     source_event_id:    sourceEventId,
     fulfillment_status: 'pending_payment'
   }]);

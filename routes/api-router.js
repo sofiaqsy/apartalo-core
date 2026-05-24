@@ -1716,7 +1716,7 @@ router.post('/preventas/:businessId', async (req, res) => {
     if (!negocio.plataformaExterna || !negocio.farmId) {
       return res.status(400).json({ error: 'Negocio no compatible con pre-ventas' });
     }
-    const { offerId, sourceEventId, presentationId, cliente } = req.body;
+    const { offerId, sourceEventId, presentationId, cantidad, cliente } = req.body;
     if (!offerId || !sourceEventId || !cliente?.nombre || !cliente?.whatsapp) {
       return res.status(400).json({ error: 'Faltan campos: offerId, sourceEventId, cliente.nombre, cliente.whatsapp' });
     }
@@ -1725,6 +1725,7 @@ router.post('/preventas/:businessId', async (req, res) => {
       offerId,
       sourceEventId,
       presentationId: presentationId || null,
+      cantidad:       cantidad || 1,
       cliente
     });
     res.json({ success: true, ...result });
