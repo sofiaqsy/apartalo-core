@@ -980,7 +980,7 @@ async function getEventOffers(farmId) {
   if (!productIds.length) return [];
 
   // Step 3: fetch products + presentations in one round-trip
-  const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order)';
+  const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order,grind)';
   const pUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`;
   const { data: products } = await axios.get(pUrl, { headers: headers() });
 
