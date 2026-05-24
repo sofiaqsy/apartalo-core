@@ -589,7 +589,129 @@ async function updateOrderStatus(supabaseId, estado) {
   if (up === 'ENVIADO')        fields.shipped_at = now;
   if (up === 'ENTREGADO')      fields.delivered_at = now;
   const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
+
+  // Deduct stock only when the order is confirmed (CONFIRMADO → paid).
+  // Same rules as fincas checkout/pay: pre-orders skip (already reserved),
+  // green coffee → green_lots, roasted coffee → FIFO product_lot_assignments,
+  // everything else → product_presentations.stock or products.stock.
+  if (up === 'CONFIRMADO') {
+    deductStockOnConfirm(supabaseId).catch(err =>
+      console.error('[stock] deductStockOnConfirm failed', supabaseId, err.message)
+    );
+  }
+
   return rows[0] || null;
+}
+
+/**
+ * Mirrors fincas /api/checkout/[token]/pay stock-deduction logic.
+ * Called exactly once: when an order transitions to CONFIRMADO (paid).
+ * Uses fulfillment_status = 'paid' on order_items as idempotency guard.
+ */
+async function deductStockOnConfirm(supabaseOrderId) {
+  // 1. Fetch only items not yet fulfilled (guard against double-call)
+  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=neq.paid&select=id,product_id,presentation_id,quantity,unit,pack_size,source_event_id`;
+  const { data: items } = await axios.get(itemsUrl, { headers: headers() });
+  if (!items?.length) return;
+
+  // 2. Batch-fetch products for green_lot_id
+  const productIds = [...new Set(items.map(i => i.product_id).filter(Boolean))];
+  const prodUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=id,green_lot_id`;
+  const { data: productRows } = await axios.get(prodUrl, { headers: headers() });
+  const greenLotByProduct = {};
+  for (const p of (productRows || [])) {
+    if (p.green_lot_id) greenLotByProduct[p.id] = p.green_lot_id;
+  }
+
+  // 3. Batch-fetch presentation grind (grind was moved to product_presentations in 0031)
+  const presentationIds = [...new Set(items.map(i => i.presentation_id).filter(Boolean))];
+  const grindByPresentation = {};
+  if (presentationIds.length) {
+    const presUrl = `${base()}/rest/v1/product_presentations?id=in.(${presentationIds.join(',')})&select=id,grind`;
+    const { data: presRows } = await axios.get(presUrl, { headers: headers() });
+    for (const p of (presRows || [])) grindByPresentation[p.id] = p.grind || [];
+  }
+
+  for (const item of items) {
+    try {
+      // ── Pre-order: kg already reserved via reserve_offer_kg at creation ──
+      if (item.source_event_id) {
+        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+        continue;
+      }
+
+      const kgPerUnit = item.unit === 'kg' ? Number(item.pack_size || 0) :
+                        item.unit === 'g'  ? Number(item.pack_size || 0) / 1000 : 0;
+      const kgNeeded  = kgPerUnit * Number(item.quantity);
+
+      // ── Green coffee: decrement green_lots.current_kg ──────────────────
+      const presGrind  = item.presentation_id ? (grindByPresentation[item.presentation_id] || []) : [];
+      const isGreen    = Array.isArray(presGrind) ? presGrind.includes('green') : presGrind === 'green';
+      const greenLotId = greenLotByProduct[item.product_id];
+
+      if (isGreen && greenLotId && kgNeeded > 0) {
+        const glRows = await get('green_lots', { id: `eq.${greenLotId}`, select: 'current_kg' });
+        if (glRows[0]) {
+          await patch('green_lots', { id: `eq.${greenLotId}` }, {
+            current_kg: Math.max(0, Number(glRows[0].current_kg) - kgNeeded)
+          });
+        }
+        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+        continue;
+      }
+
+      // ── Roasted coffee: FIFO on product_lot_assignments ────────────────
+      if (kgNeeded > 0) {
+        const assignUrl = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${item.product_id}&select=id,output_lot_id,kg_assigned,kg_sold&order=created_at.asc`;
+        const { data: assignments } = await axios.get(assignUrl, { headers: headers() });
+        if (assignments?.length) {
+          // Find the oldest lot with remaining capacity (FIFO)
+          const fifo = assignments.find(a => Number(a.kg_assigned) - Number(a.kg_sold) > 0);
+          if (fifo) {
+            await patch('product_lot_assignments', { id: `eq.${fifo.id}` }, {
+              kg_sold: Number(fifo.kg_sold) + kgNeeded
+            });
+            await patch('order_items', { id: `eq.${item.id}` }, {
+              output_lot_id: fifo.output_lot_id,
+              fulfillment_status: 'paid'
+            });
+          } else {
+            // Coffee product but no available lot — mark paid anyway, log it
+            console.warn('[stock] No FIFO lot available for product', item.product_id, `(${kgNeeded} kg needed)`);
+            await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+          }
+          continue; // coffee product handled
+        }
+      }
+
+      // ── Regular stock (non-coffee): unit-quantity based ────────────────
+      if (item.presentation_id) {
+        const presStockRows = await get('product_presentations', {
+          id: `eq.${item.presentation_id}`,
+          select: 'stock'
+        });
+        if (presStockRows[0]) {
+          await patch('product_presentations', { id: `eq.${item.presentation_id}` }, {
+            stock: Math.max(0, Number(presStockRows[0].stock) - Number(item.quantity))
+          });
+        }
+      } else {
+        const prodStockRows = await get('products', {
+          id: `eq.${item.product_id}`,
+          select: 'stock'
+        });
+        if (prodStockRows[0]) {
+          await patch('products', { id: `eq.${item.product_id}` }, {
+            stock: Math.max(0, Number(prodStockRows[0].stock) - Number(item.quantity))
+          });
+        }
+      }
+      await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+
+    } catch (itemErr) {
+      console.error('[stock] Error processing item', item.id, itemErr.message);
+    }
+  }
 }
 
 async function updateOrderFields(supabaseId, fields) {
