@@ -845,20 +845,33 @@ module.exports = {
  * tienen capacidad disponible (kg_offered > kg_reserved).
  */
 async function getEventOffers(farmId) {
-  const select = [
-    'id,roasted_at,status,cached_lot_code,cached_harvest_year',
-    'event_offers(id,kg_offered,kg_reserved,product:products(id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order)))'
-  ].join(',');
-  const url = `${base()}/rest/v1/roast_events?farm_id=eq.${farmId}&status=in.(planned,in_progress)&select=${encodeURIComponent(select)}&order=roasted_at.asc`;
-  const { data } = await axios.get(url, { headers: headers() });
+  // Step 1: events + offers (product_id only — avoid fragile triple-nested join)
+  const evSelect = 'id,roasted_at,status,cached_lot_code,cached_harvest_year,event_offers(id,kg_offered,kg_reserved,product_id)';
+  const evUrl = `${base()}/rest/v1/roast_events?farm_id=eq.${farmId}&status=in.(planned,in_progress)&select=${encodeURIComponent(evSelect)}&order=roasted_at.asc`;
+  const { data: events } = await axios.get(evUrl, { headers: headers() });
+  if (!events?.length) return [];
 
-  // Filtrar solo eventos que tengan al menos 1 offer con capacidad
-  return (data || [])
+  // Step 2: collect unique product_ids across all offers
+  const productIds = [...new Set(
+    events.flatMap(ev => (ev.event_offers || []).map(o => o.product_id).filter(Boolean))
+  )];
+  if (!productIds.length) return [];
+
+  // Step 3: fetch products + presentations in one round-trip
+  const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order)';
+  const pUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`;
+  const { data: products } = await axios.get(pUrl, { headers: headers() });
+
+  const productMap = {};
+  for (const p of (products || [])) productMap[p.id] = p;
+
+  // Step 4: merge, attach product, filter for available capacity
+  return events
     .map(ev => ({
       ...ev,
-      event_offers: (ev.event_offers || []).filter(
-        o => Number(o.kg_offered) - Number(o.kg_reserved) > 0
-      )
+      event_offers: (ev.event_offers || [])
+        .map(o => ({ ...o, product: productMap[o.product_id] || null }))
+        .filter(o => o.product && (Number(o.kg_offered) - Number(o.kg_reserved)) > 0)
     }))
     .filter(ev => ev.event_offers.length > 0);
 }
