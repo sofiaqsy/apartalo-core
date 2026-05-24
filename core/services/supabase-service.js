@@ -152,11 +152,39 @@ async function getProductsWithPresentations(farmId) {
     }
   }
 
+  // Derive available kg from product_lot_assignments (for coffee products managed via FIFO pool).
+  // Only count assignments whose output_lot belongs to a 'completed' roast event.
+  const lotSelect = 'product_id,kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
+  const lotUrl = `${base()}/rest/v1/product_lot_assignments?product_id=in.(${ids.join(',')})&select=${encodeURIComponent(lotSelect)}`;
+  let lotRows = [];
+  try {
+    const { data } = await axios.get(lotUrl, { headers: headers() });
+    lotRows = data || [];
+  } catch (_) { /* non-fatal — fall back to raw stock */ }
+
+  // availableKgByProduct[id] = kg available in the FIFO pool (only set if product has assignments)
+  const availableKgByProduct = {};
+  for (const a of lotRows) {
+    const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+    if (ev?.status !== 'completed') continue;
+    const avail = Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+    availableKgByProduct[a.product_id] = (availableKgByProduct[a.product_id] || 0) + avail;
+  }
+
   const presMap = {};
   for (const pp of presentations) {
     if (!presMap[pp.product_id]) presMap[pp.product_id] = [];
+    let derivedStock = pp.stock || 0;
+    // If this product has lot assignments, derive stock from available kg pool
+    if (availableKgByProduct[pp.product_id] !== undefined) {
+      const availKg = availableKgByProduct[pp.product_id];
+      const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
+                        pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
+      derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
+    }
     presMap[pp.product_id].push({
       ...pp,
+      stock: derivedStock,
       image_url: presImageMap[pp.id] || null
     });
   }
@@ -302,6 +330,45 @@ async function updateCustomer(profileId, fields) {
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 
 async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0 }) {
+  // ── Stock validation — same rules as fincas checkout/create ──────────────
+  for (const item of items) {
+    const kgPerUnit = item.unit === 'kg' ? Number(item.pack_size || 0) :
+                      item.unit === 'g'  ? Number(item.pack_size || 0) / 1000 : 0;
+    const kgNeeded  = kgPerUnit * Number(item.quantity);
+
+    // 1. Coffee (roasted): check FIFO lot pool
+    if (kgNeeded > 0 && item.productId) {
+      const assignUrl = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${item.productId}&select=kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))`;
+      const { data: assignments } = await axios.get(assignUrl, { headers: headers() });
+      if (assignments?.length) {
+        const availableKg = assignments.reduce((sum, a) => {
+          const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+          if (ev?.status !== 'completed') return sum;
+          return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+        }, 0);
+        if (kgNeeded > availableKg + 0.001) {
+          throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${availableKg.toFixed(2)} kg, pedido: ${kgNeeded.toFixed(2)} kg)`);
+        }
+        continue; // coffee — no further stock check needed
+      }
+    }
+
+    // 2. Regular stock: check presentation or product stock
+    if (item.presentacionId) {
+      const presRows = await get('product_presentations', { id: `eq.${item.presentacionId}`, select: 'stock,pack_size,unit' });
+      const pres = presRows[0];
+      if (pres && Number(pres.stock) < Number(item.quantity)) {
+        throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${pres.stock} uds)`);
+      }
+    } else if (item.productId) {
+      const prodRows = await get('products', { id: `eq.${item.productId}`, select: 'stock,name' });
+      const prod = prodRows[0];
+      if (prod && Number(prod.stock) < Number(item.quantity)) {
+        throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${prod.stock} uds)`);
+      }
+    }
+  }
+
   const subtotalCents = items.reduce((sum, i) => sum + i.lineTotalCents, 0);
   const shipping = Math.round(shippingCents || 0);
 
