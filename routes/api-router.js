@@ -1691,4 +1691,46 @@ router.get('/recetas/:businessId/plan/:pedidoId', async (req, res) => {
   }
 });
 
+// ─── PRE-VENTAS ───────────────────────────────────────────────────────────────
+
+// GET /api/preventas/:businessId/eventos
+// Lista los eventos con offers disponibles para la farm del negocio
+router.get('/preventas/:businessId/eventos', async (req, res) => {
+  try {
+    const negocio = negociosService.getById(req.params.businessId);
+    if (!negocio.plataformaExterna || !negocio.farmId) {
+      return res.status(400).json({ error: 'Negocio no compatible con pre-ventas' });
+    }
+    const eventos = await supabaseService.getEventOffers(negocio.farmId);
+    res.json(eventos);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/preventas/:businessId
+// Crea una pre-orden para un cliente
+router.post('/preventas/:businessId', async (req, res) => {
+  try {
+    const negocio = negociosService.getById(req.params.businessId);
+    if (!negocio.plataformaExterna || !negocio.farmId) {
+      return res.status(400).json({ error: 'Negocio no compatible con pre-ventas' });
+    }
+    const { offerId, sourceEventId, presentationId, cliente } = req.body;
+    if (!offerId || !sourceEventId || !cliente?.nombre || !cliente?.whatsapp) {
+      return res.status(400).json({ error: 'Faltan campos: offerId, sourceEventId, cliente.nombre, cliente.whatsapp' });
+    }
+    const result = await supabaseService.createPreorden({
+      farmId:         negocio.farmId,
+      offerId,
+      sourceEventId,
+      presentationId: presentationId || null,
+      cliente
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 module.exports = router;

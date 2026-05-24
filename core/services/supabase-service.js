@@ -833,5 +833,109 @@ module.exports = {
   deleteOrderPayment,
   addPaymentProof,
   verifyPaymentProof,
-  deletePaymentProof
+  deletePaymentProof,
+  getEventOffers,
+  createPreorden
 };
+
+// ─── PRE-VENTAS ───────────────────────────────────────────────────────────────
+
+/**
+ * Retorna eventos planned/in_progress de una farm con sus offers que aún
+ * tienen capacidad disponible (kg_offered > kg_reserved).
+ */
+async function getEventOffers(farmId) {
+  const select = [
+    'id,roasted_at,status,cached_lot_code,cached_harvest_year',
+    'event_offers(id,kg_offered,kg_reserved,product:products(id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order)))'
+  ].join(',');
+  const url = `${base()}/rest/v1/roast_events?farm_id=eq.${farmId}&status=in.(planned,in_progress)&select=${encodeURIComponent(select)}&order=roasted_at.asc`;
+  const { data } = await axios.get(url, { headers: headers() });
+
+  // Filtrar solo eventos que tengan al menos 1 offer con capacidad
+  return (data || [])
+    .map(ev => ({
+      ...ev,
+      event_offers: (ev.event_offers || []).filter(
+        o => Number(o.kg_offered) - Number(o.kg_reserved) > 0
+      )
+    }))
+    .filter(ev => ev.event_offers.length > 0);
+}
+
+/**
+ * Crea una pre-orden: reserva kg en event_offers y crea la order + order_item
+ * con source_event_id para trazabilidad.
+ */
+async function createPreorden({ farmId, offerId, sourceEventId, presentationId, cliente }) {
+  // 1. Leer la offer para obtener producto + precio + kg
+  const offerUrl = `${base()}/rest/v1/event_offers?id=eq.${offerId}&select=id,kg_offered,kg_reserved,product_id,product:products(id,name,price_cents,currency,farm_id,product_presentations(id,pack_size,unit,price_cents))`;
+  const { data: offerRows } = await axios.get(offerUrl, { headers: headers() });
+  const offer = offerRows?.[0];
+  if (!offer) throw new Error('Offer no encontrada');
+
+  const remaining = Number(offer.kg_offered) - Number(offer.kg_reserved);
+  if (remaining <= 0) throw new Error('Sin capacidad disponible para esta pre-venta');
+
+  // Resolver presentación
+  const product = Array.isArray(offer.product) ? offer.product[0] : offer.product;
+  if (!product) throw new Error('Producto de la offer no encontrado');
+
+  const presentations = product.product_presentations || [];
+  const pres = presentationId
+    ? presentations.find(p => p.id === presentationId)
+    : presentations.find(p => p.is_default) || presentations[0];
+  if (!pres) throw new Error('Presentación no encontrada');
+
+  const kgPerUnit = pres.unit === 'kg' ? Number(pres.pack_size) : Number(pres.pack_size) / 1000;
+  if (kgPerUnit <= 0) throw new Error('Presentación inválida');
+  if (kgPerUnit > remaining) throw new Error(`Solo quedan ${remaining.toFixed(2)} kg disponibles`);
+
+  const priceCents = pres.price_cents || product.price_cents;
+  const currency   = product.currency || 'PEN';
+
+  // 2. Reservar kg atómicamente vía RPC
+  await axios.post(
+    `${base()}/rest/v1/rpc/reserve_offer_kg`,
+    { p_offer_id: offerId, p_kg: kgPerUnit },
+    { headers: headers() }
+  );
+
+  // 3. Crear orden en Supabase
+  const orderRows = await post('orders', {
+    customer_id:    cliente.id   || null,
+    customer_email: cliente.email || `guest-${Date.now()}@fincas.app`,
+    customer_name:  cliente.nombre,
+    customer_phone: cliente.whatsapp,
+    subtotal_cents: priceCents,
+    shipping_cents: 0,
+    total_cents:    priceCents,
+    currency,
+    status:         'pending_payment',
+    payment_method: 'pending',
+    notes:          `Pre-orden de tueste programado`
+  });
+  const order = orderRows[0];
+  if (!order) throw new Error('No se pudo crear la orden');
+
+  // 4. Crear order_item con source_event_id
+  await post('order_items', [{
+    order_id:           order.id,
+    farm_id:            farmId,
+    product_id:         product.id,
+    presentation_id:    pres.id,
+    product_name:       product.name,
+    unit:               pres.unit,
+    pack_size:          pres.pack_size,
+    quantity:           1,
+    unit_price_cents:   priceCents,
+    line_total_cents:   priceCents,
+    commission_rate:    0.10,
+    commission_cents:   Math.round(priceCents * 0.10),
+    payout_cents:       Math.round(priceCents * 0.90),
+    source_event_id:    sourceEventId,
+    fulfillment_status: 'pending_payment'
+  }]);
+
+  return { orderId: order.id, orderNumber: order.order_number };
+}
