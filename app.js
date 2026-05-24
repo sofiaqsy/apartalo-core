@@ -33,6 +33,7 @@ const botConversationsRouter = require('./routes/bot-conversations-router');
 const ocrRouter = require('./routes/ocr-router');
 const trackRouter    = require('./routes/track-router');
 const deliveryRouter = require('./routes/delivery-router');
+const tostadorRouter = require('./routes/tostador-router');
 
 // Inicializar Express
 const app = express();
@@ -125,6 +126,9 @@ app.use('/api', apiRouter);
 
 // Track API (public — no auth required)
 app.use('/api/track', trackRouter);
+
+// Tostador App API
+app.use('/api/tostador', tostadorRouter);
 
 // Tracking page — serves HTML; JS inside fetches /api/track/:businessId/:pedidoId
 app.get('/track/:businessId/:pedidoId', (req, res) => {
