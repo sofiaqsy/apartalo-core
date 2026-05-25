@@ -199,8 +199,11 @@ router.post('/events/:id/start', async (req, res) => {
 router.post('/events/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
-    const { profileId, notesText } = req.body;
+    const { profileId, notesText, outKg } = req.body;
     if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    if (outKg === undefined || outKg === null || isNaN(Number(outKg))) {
+      return res.status(400).json({ error: 'outKg requerido (kg de café tostado)' });
+    }
 
     const { data: [event] } = await axios.get(
       rest('/roast_events') + `?select=id,farm_id,status,notes&id=eq.${id}`,
@@ -225,7 +228,13 @@ router.post('/events/:id/complete', async (req, res) => {
 
     await axios.patch(
       rest('/roast_events') + `?id=eq.${id}`,
-      { status: 'completed', completed_at: completedAt, updated_at: completedAt, notes: newNotes },
+      {
+        status: 'completed',
+        completed_at: completedAt,
+        updated_at: completedAt,
+        notes: newNotes,
+        roasted_out_kg: Number(outKg),
+      },
       { headers: headers() }
     );
 
