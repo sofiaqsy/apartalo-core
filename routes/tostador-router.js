@@ -300,8 +300,11 @@ router.post('/events/:id/media/sign', async (req, res) => {
       }
     );
 
-    // signRes.data.signedURL = "/storage/v1/object/upload/sign/farm-assets/...?token=..."
-    const signedUrl = `${base()}${signRes.data.signedURL}`;
+    // Supabase devuelve { url: "/object/upload/sign/farm-assets/...?token=..." }
+    // El path es relativo a /storage/v1 — hay que prefijar correctamente.
+    const rawPath   = signRes.data.signedURL || signRes.data.url || signRes.data.signedUrl;
+    if (!rawPath) throw new Error('Supabase no retornó URL firmada: ' + JSON.stringify(signRes.data));
+    const signedUrl = rawPath.startsWith('http') ? rawPath : `${base()}/storage/v1${rawPath}`;
     const publicUrl = `${base()}/storage/v1/object/public/farm-assets/${storagePath}`;
 
     res.json({ signedUrl, publicUrl, path: storagePath });

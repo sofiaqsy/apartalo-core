@@ -67,15 +67,21 @@ router.post('/:businessId/sign', async (req, res) => {
 
     console.log(`[upload/sign] Supabase response status=${signRes.status} data=`, JSON.stringify(signRes.data));
 
-    // signRes.data.signedURL = "/storage/v1/object/upload/sign/farm-assets/...?token=..."
-    const rawSignedUrl = signRes.data.signedURL || signRes.data.url || signRes.data.signedUrl;
-    if (!rawSignedUrl) {
+    // Supabase devuelve { url: "/object/upload/sign/farm-assets/...?token=..." }
+    // El path es relativo a /storage/v1 — hay que prefijar correctamente.
+    const rawPath = signRes.data.signedURL || signRes.data.url || signRes.data.signedUrl;
+    if (!rawPath) {
       console.error('[upload/sign] Supabase no retornó signedURL. data:', JSON.stringify(signRes.data));
       return res.status(500).json({ error: 'Supabase no retornó URL firmada', debug: signRes.data });
     }
 
-    const signedUrl = rawSignedUrl.startsWith('http') ? rawSignedUrl : `${base}${rawSignedUrl}`;
+    // Si ya es URL completa la usamos; si es relativa prefijamos base + /storage/v1
+    const signedUrl = rawPath.startsWith('http')
+      ? rawPath
+      : `${base}/storage/v1${rawPath}`;
     const publicUrl = `${base}/storage/v1/object/public/${BUCKET}/${storagePath}`;
+
+    console.log(`[upload/sign] rawPath=${rawPath}`);
 
     console.log(`[upload/sign] signedUrl=${signedUrl}`);
     console.log(`[upload/sign] publicUrl=${publicUrl}`);
