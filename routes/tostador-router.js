@@ -261,14 +261,66 @@ router.post('/events/:id/complete', async (req, res) => {
   }
 });
 
-// ── POST /api/tostador/events/:id/media ──────────────────────────────────────
-// Body JSON: { profileId, base64: "data:image/jpeg;base64,...", filename? }
-router.post('/events/:id/media', async (req, res) => {
+// ── POST /api/tostador/events/:id/media/sign ─────────────────────────────────
+// Genera una URL firmada de Supabase Storage para que Flutter suba directo.
+// Body: { profileId, filename, mimeType }
+// Returns: { signedUrl, publicUrl, path }
+router.post('/events/:id/media/sign', async (req, res) => {
   try {
     const { id } = req.params;
-    const { profileId, base64, filename } = req.body;
+    const { profileId, filename, mimeType } = req.body;
     if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
-    if (!base64)    return res.status(400).json({ error: 'base64 requerido' });
+    if (!filename)  return res.status(400).json({ error: 'filename requerido' });
+
+    const { data: [event] } = await axios.get(
+      rest('/roast_events') + `?select=id,farm_id&id=eq.${id}`,
+      { headers: headers() }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+
+    const { data: fm } = await axios.get(
+      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${event.farm_id}`,
+      { headers: headers() }
+    );
+    if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
+
+    const storagePath = `roast-events/${id}/${filename}`;
+    const storageKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // Pedir URL firmada a Supabase Storage (válida 120 segundos)
+    const signRes = await axios.post(
+      `${base()}/storage/v1/object/upload/sign/farm-assets/${storagePath}`,
+      {},
+      {
+        headers: {
+          apikey: storageKey,
+          Authorization: `Bearer ${storageKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    // signRes.data.signedURL = "/storage/v1/object/upload/sign/farm-assets/...?token=..."
+    const signedUrl = `${base()}${signRes.data.signedURL}`;
+    const publicUrl = `${base()}/storage/v1/object/public/farm-assets/${storagePath}`;
+
+    res.json({ signedUrl, publicUrl, path: storagePath });
+  } catch (err) {
+    console.error('[tostador/media/sign]', err.message, err.response?.data);
+    res.status(500).json({ error: 'Error generando URL firmada' });
+  }
+});
+
+// ── POST /api/tostador/events/:id/media/register ──────────────────────────────
+// Registra una URL ya subida a Storage en el campo notes del evento.
+// Body: { profileId, url }
+// Returns: { ok, url, media_urls }
+router.post('/events/:id/media/register', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { profileId, url } = req.body;
+    if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    if (!url)       return res.status(400).json({ error: 'url requerido' });
 
     const { data: [event] } = await axios.get(
       rest('/roast_events') + `?select=id,farm_id,notes&id=eq.${id}`,
@@ -282,33 +334,9 @@ router.post('/events/:id/media', async (req, res) => {
     );
     if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
 
-    // Parse base64
-    const matches = base64.match(/^data:([^;]+);base64,(.+)$/s);
-    if (!matches) return res.status(400).json({ error: 'base64 inválido' });
-    const mimeType   = matches[1];
-    const fileBuffer = Buffer.from(matches[2], 'base64');
-    const ext        = mimeType.split('/')[1]?.split('+')[0] || 'jpg';
-    const fname      = filename || `${Date.now()}.${ext}`;
-    const storagePath = `roast-events/${id}/${fname}`;
-
-    // Upload to Supabase Storage (farm-assets bucket)
-    const storageUrl = `${base()}/storage/v1/object/farm-assets/${storagePath}`;
-    await axios.post(storageUrl, fileBuffer, {
-      headers: {
-        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-        'Content-Type': mimeType,
-        'x-upsert': 'true',
-      },
-      maxBodyLength: Infinity,
-    });
-
-    const publicUrl = `${base()}/storage/v1/object/public/farm-assets/${storagePath}`;
-
-    // Append to notes JSON
-    const existing = parseNotes(event.notes);
-    existing.media = [...(existing.media || []), publicUrl];
-    const newNotes = serializeNotes(existing);
+    const existing  = parseNotes(event.notes);
+    existing.media  = [...(existing.media || []), url];
+    const newNotes  = serializeNotes(existing);
 
     await axios.patch(
       rest('/roast_events') + `?id=eq.${id}`,
@@ -316,10 +344,10 @@ router.post('/events/:id/media', async (req, res) => {
       { headers: headers() }
     );
 
-    res.json({ ok: true, url: publicUrl, media_urls: existing.media });
+    res.json({ ok: true, url, media_urls: existing.media });
   } catch (err) {
-    console.error('[tostador/events/media]', err.message, err.response?.data);
-    res.status(500).json({ error: 'Error subiendo media' });
+    console.error('[tostador/media/register]', err.message);
+    res.status(500).json({ error: 'Error registrando media' });
   }
 });
 
