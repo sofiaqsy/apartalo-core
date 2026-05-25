@@ -1,14 +1,15 @@
 /**
  * APARTALO CORE - API Routes
- * 
- * FIX: getRows() ahora solo recibe 'range' (sheets-service usa this.spreadsheetId internamente)
+ *
+ * Negocios con plataformaExterna=true usan Supabase (SupabaseSheetsAdapter).
+ * Google Sheets eliminado como fuente de datos principal.
+ * Recetas, Conversaciones y Delivery aún usan sus propios routers separados.
  */
 
 const express = require('express');
 const router = express.Router();
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
-const SheetsService = require('../core/services/sheets-service');
 const SupabaseSheetsAdapter = require('../core/services/supabase-sheets-adapter');
 const supabaseService = require('../core/services/supabase-service');
 const firebaseService = require('../core/services/firebase-service');
@@ -17,22 +18,17 @@ function isUUID(str) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 }
 
+// All negocios are now plataformaExterna=true — always returns the Supabase adapter
 async function getSheetsService(negocio) {
-  let sheets;
-  if (negocio.plataformaExterna && negocio.farmId) {
-    sheets = new SupabaseSheetsAdapter(negocio.farmId, negocio.spreadsheetId);
-  } else {
-    sheets = new SheetsService(negocio.spreadsheetId);
-  }
+  const sheets = new SupabaseSheetsAdapter(negocio.farmId, negocio.spreadsheetId);
   await sheets.initialize();
   return sheets;
 }
 
-// Always uses Google Sheets — for data that only lives in the spreadsheet (recetas, proveedores, etc.)
+// Kept for routes that truly have no Supabase equivalent yet (recetas, etc.)
+// Returns the Supabase adapter — will return empty stubs for unimplemented entities
 async function getSheetsServiceDirect(negocio) {
-  const sheets = new SheetsService(negocio.spreadsheetId);
-  await sheets.initialize();
-  return sheets;
+  return getSheetsService(negocio);
 }
 const deliveryService = require('../core/services/delivery-service');
 
@@ -1123,10 +1119,7 @@ router.post('/setup/admin', async (req, res) => {
 
 router.post('/negocios/reload', async (req, res) => {
   try {
-    const config = require('../config');
-    const masterSheets = new SheetsService(config.google.masterSpreadsheetId);
-    await masterSheets.initialize();
-    await negociosService.reload(masterSheets);
+    await negociosService.reload();
     res.json({ success: true, count: negociosService.getAll().length });
   } catch (error) {
     res.status(500).json({ error: error.message });

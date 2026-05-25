@@ -18,7 +18,6 @@ const config = require('./config');
 const negociosService = require('./config/negocios');
 
 // Servicios core
-const SheetsService = require('./core/services/sheets-service');
 const DriveService = require('./core/services/drive-service');
 const firebaseService = require('./core/services/firebase-service');
 const stateManager = require('./core/services/state-manager');
@@ -208,21 +207,9 @@ async function initialize() {
   const firebaseOk = await firebaseService.initialize();
   console.log(`   ${firebaseOk ? '✅' : '⚠️'} Firebase (Firestore + FCM)`);
 
-  // 2. Cargar negocios
+  // 2. Cargar negocios (desde config local — Sheets eliminado)
   console.log('\n🏪 Cargando negocios...');
-  
-  if (config.google.masterSpreadsheetId) {
-    const masterSheets = new SheetsService(config.google.masterSpreadsheetId);
-    const sheetsOk = await masterSheets.initialize();
-    
-    if (sheetsOk) {
-      await negociosService.initialize(masterSheets);
-    } else {
-      negociosService.loadFromLocal();
-    }
-  } else {
-    negociosService.loadFromLocal();
-  }
+  await negociosService.initialize();
 
   // Mostrar negocios cargados
   const negocios = negociosService.getAll();
