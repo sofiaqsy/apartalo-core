@@ -1,179 +1,175 @@
 /**
  * APARTALO CORE - Upload Routes
- * 
- * Endpoints para subir archivos a Google Drive
- * Soporta imágenes de productos, vouchers, etc.
+ *
+ * Subida de archivos a Supabase Storage (farm-assets).
+ * Reemplaza Google Drive con signed-URL approach para evitar base64 en tránsito.
+ *
+ * Flujo:
+ *  1. POST /:businessId/sign  → valida y devuelve { signedUrl, publicUrl }
+ *  2. Cliente sube bytes directamente al signed URL (PUT)
+ *  3. Cliente usa publicUrl para mostrar / guardar en la DB
+ *
+ * Se mantiene POST /:businessId (legacy base64) para compatibilidad con
+ * flujos que aún no se han migrado (WhatsApp bot, etc.).
  */
 
 const express = require('express');
-const router = express.Router();
-const DriveService = require('../core/services/drive-service');
+const router  = express.Router();
+const axios   = require('axios');
 
-// Instancia del servicio de Drive
-const driveService = new DriveService();
+// ── helpers Supabase ─────��────────────────────────────────────────────────────
+function supabaseBase() {
+  return (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, '');
+}
+function storageHeaders() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY not set');
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+  };
+}
 
-/**
- * POST /api/upload/:businessId
- * 
- * Subir imagen a Google Drive
- * Body: multipart/form-data con campo 'image' o JSON con base64
- * 
- * Soporta:
- * 1. multipart/form-data (archivo directo)
- * 2. application/json con { image: 'base64...' }
- */
+const BUCKET     = 'farm-assets';
+const ALLOWED    = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const MAX_BYTES  = 10 * 1024 * 1024; // 10 MB
+
+// ── POST /api/upload/:businessId/sign ─────────────────────────────────────────
+// Genera URL firmada de Supabase Storage para que el cliente suba directo.
+// Body: { filename, mimeType, folder? }
+// Returns: { signedUrl, publicUrl, path }
+router.post('/:businessId/sign', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    const { filename, mimeType, folder } = req.body;
+
+    if (!filename) return res.status(400).json({ error: 'filename requerido' });
+
+    const mime = mimeType || 'image/jpeg';
+    if (!ALLOWED.includes(mime)) {
+      return res.status(400).json({ error: 'Tipo no permitido', allowedTypes: ALLOWED });
+    }
+
+    const prefix      = folder || `payment-proofs/${businessId}`;
+    const storagePath = `${prefix}/${Date.now()}_${filename}`;
+    const base        = supabaseBase();
+
+    const signRes = await axios.post(
+      `${base}/storage/v1/object/upload/sign/${BUCKET}/${storagePath}`,
+      {},
+      { headers: storageHeaders() }
+    );
+
+    // signRes.data.signedURL = "/storage/v1/object/upload/sign/farm-assets/...?token=..."
+    const signedUrl = `${base}${signRes.data.signedURL}`;
+    const publicUrl = `${base}/storage/v1/object/public/${BUCKET}/${storagePath}`;
+
+    res.json({ signedUrl, publicUrl, path: storagePath });
+  } catch (error) {
+    console.error('❌ Error generando signed URL:', error.message, error.response?.data);
+    res.status(500).json({ error: 'Error generando URL firmada', details: error.message });
+  }
+});
+
+// ── POST /api/upload/:businessId (legacy — acepta base64) ─────────────────────
+// Mantenido para flujos que aún envían base64 (WhatsApp bot, etc.).
+// Sube directamente a Supabase Storage desde el backend.
 router.post('/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
     const contentType = req.headers['content-type'] || '';
 
     let fileBuffer;
-    let fileName;
     let mimeType;
+    let fileName;
 
-    // Opción 1: JSON con base64
     if (contentType.includes('application/json')) {
       const { image, filename, type } = req.body;
+      if (!image) return res.status(400).json({ error: 'Campo requerido: image (base64)' });
 
-      if (!image) {
-        return res.status(400).json({ error: 'Campo requerido: image (base64)' });
-      }
-
-      // Decodificar base64
-      // Formato esperado: "data:image/jpeg;base64,/9j/4AAQ..." o solo el base64
       let base64Data = image;
-      
       if (image.includes('base64,')) {
         const parts = image.split('base64,');
         base64Data = parts[1];
-        
-        // Extraer mimeType del prefijo
-        const mimeMatch = parts[0].match(/data:([^;]+);/);
-        mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const m = parts[0].match(/data:([^;]+);/);
+        mimeType = m ? m[1] : 'image/jpeg';
       } else {
         mimeType = type || 'image/jpeg';
       }
-
       fileBuffer = Buffer.from(base64Data, 'base64');
-      fileName = filename || `producto_${Date.now()}.jpg`;
+      fileName   = filename || `upload_${Date.now()}.jpg`;
 
-    } 
-    // Opción 2: Raw binary
-    else if (contentType.includes('image/')) {
+    } else if (contentType.includes('image/')) {
       const chunks = [];
-      
-      for await (const chunk of req) {
-        chunks.push(chunk);
-      }
-      
+      for await (const chunk of req) chunks.push(chunk);
       fileBuffer = Buffer.concat(chunks);
-      mimeType = contentType.split(';')[0];
-      fileName = `producto_${Date.now()}.${mimeType.split('/')[1] || 'jpg'}`;
-    }
-    // Opción 3: Multipart (requiere body-parser específico)
-    else {
-      // Si llegó como form-data procesado por un middleware
-      if (req.file) {
-        fileBuffer = req.file.buffer;
-        fileName = req.file.originalname || `producto_${Date.now()}.jpg`;
-        mimeType = req.file.mimetype || 'image/jpeg';
-      } else if (req.body && req.body.image) {
-        // Fallback: intentar como base64 en form-urlencoded
-        const base64Data = req.body.image.replace(/^data:image\/\w+;base64,/, '');
-        fileBuffer = Buffer.from(base64Data, 'base64');
-        mimeType = 'image/jpeg';
-        fileName = `producto_${Date.now()}.jpg`;
-      } else {
-        return res.status(400).json({ 
-          error: 'No se encontró imagen',
-          hint: 'Envía como JSON { image: "base64..." } o como binary con Content-Type image/*'
-        });
-      }
+      mimeType   = contentType.split(';')[0];
+      fileName   = `upload_${Date.now()}.${mimeType.split('/')[1] || 'jpg'}`;
+
+    } else if (req.file) {
+      fileBuffer = req.file.buffer;
+      fileName   = req.file.originalname || `upload_${Date.now()}.jpg`;
+      mimeType   = req.file.mimetype || 'image/jpeg';
+
+    } else {
+      return res.status(400).json({ error: 'No se encontró imagen' });
     }
 
-    // Validar tamaño (max 10MB)
-    if (fileBuffer.length > 10 * 1024 * 1024) {
+    if (fileBuffer.length > MAX_BYTES) {
       return res.status(400).json({ error: 'Imagen muy grande (max 10MB)' });
     }
-
-    // Validar tipo
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (!allowedTypes.includes(mimeType)) {
-      return res.status(400).json({ 
-        error: 'Tipo de archivo no permitido',
-        allowedTypes 
-      });
+    if (!ALLOWED.includes(mimeType)) {
+      return res.status(400).json({ error: 'Tipo no permitido', allowedTypes: ALLOWED });
     }
 
-    // Subir a Google Drive
-    const result = await driveService.uploadImage(
+    const storagePath = `payment-proofs/${businessId}/${Date.now()}_${fileName}`;
+    const base        = supabaseBase();
+    const key         = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    await axios.post(
+      `${base}/storage/v1/object/${BUCKET}/${storagePath}`,
       fileBuffer,
-      fileName,
-      mimeType,
-      businessId
+      {
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${key}`,
+          'Content-Type': mimeType,
+          'x-upsert': 'true',
+        },
+        maxBodyLength: Infinity,
+      }
     );
 
-    res.json({
-      success: true,
-      url: result.url,
-      fileId: result.fileId,
-      name: result.name
-    });
+    const publicUrl = `${base}/storage/v1/object/public/${BUCKET}/${storagePath}`;
 
+    res.json({ success: true, url: publicUrl, path: storagePath });
   } catch (error) {
-    console.error('❌ Error en upload:', error);
-    res.status(500).json({ 
-      error: 'Error subiendo imagen',
-      details: error.message 
-    });
+    console.error('❌ Error en upload (legacy):', error.message, error.response?.data);
+    res.status(500).json({ error: 'Error subiendo imagen', details: error.message });
   }
 });
 
-/**
- * GET /api/upload/:businessId
- * 
- * Listar imágenes de un negocio
- */
-router.get('/:businessId', async (req, res) => {
+// ── DELETE /api/upload/:businessId/:encodedPath ───────────────────────────────
+// Eliminar un archivo de Supabase Storage.
+// :encodedPath debe ir URL-encoded (el path dentro del bucket).
+router.delete('/:businessId/*', async (req, res) => {
   try {
-    const { businessId } = req.params;
-    const { limit } = req.query;
+    const storagePath = req.params[0]; // todo lo después de /:businessId/
+    if (!storagePath) return res.status(400).json({ error: 'path requerido' });
 
-    const files = await driveService.listFiles(
-      businessId, 
-      parseInt(limit) || 50
+    const base = supabaseBase();
+    const key  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    await axios.delete(
+      `${base}/storage/v1/object/${BUCKET}/${storagePath}`,
+      { headers: { apikey: key, Authorization: `Bearer ${key}` } }
     );
 
-    res.json({
-      total: files.length,
-      files
-    });
-
+    res.json({ success: true, path: storagePath });
   } catch (error) {
-    console.error('❌ Error listando archivos:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * DELETE /api/upload/:businessId/:fileId
- * 
- * Eliminar imagen
- */
-router.delete('/:businessId/:fileId', async (req, res) => {
-  try {
-    const { fileId } = req.params;
-
-    const deleted = await driveService.deleteFile(fileId);
-
-    res.json({
-      success: deleted,
-      fileId
-    });
-
-  } catch (error) {
-    console.error('❌ Error eliminando archivo:', error);
-    res.status(500).json({ error: error.message });
+    console.error('❌ Error eliminando archivo:', error.message);
+    res.status(500).json({ error: 'Error eliminando archivo', details: error.message });
   }
 });
 
