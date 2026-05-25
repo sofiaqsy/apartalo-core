@@ -43,6 +43,7 @@ router.post('/:businessId/sign', async (req, res) => {
   try {
     const { businessId } = req.params;
     const { filename, mimeType, folder } = req.body;
+    console.log(`[upload/sign] businessId=${businessId} filename=${filename} mimeType=${mimeType} folder=${folder}`);
 
     if (!filename) return res.status(400).json({ error: 'filename requerido' });
 
@@ -55,19 +56,34 @@ router.post('/:businessId/sign', async (req, res) => {
     const storagePath = `${prefix}/${Date.now()}_${filename}`;
     const base        = supabaseBase();
 
+    console.log(`[upload/sign] storagePath=${storagePath}`);
+    console.log(`[upload/sign] POST ${base}/storage/v1/object/upload/sign/${BUCKET}/${storagePath}`);
+
     const signRes = await axios.post(
       `${base}/storage/v1/object/upload/sign/${BUCKET}/${storagePath}`,
       {},
       { headers: storageHeaders() }
     );
 
+    console.log(`[upload/sign] Supabase response status=${signRes.status} data=`, JSON.stringify(signRes.data));
+
     // signRes.data.signedURL = "/storage/v1/object/upload/sign/farm-assets/...?token=..."
-    const signedUrl = `${base}${signRes.data.signedURL}`;
+    const rawSignedUrl = signRes.data.signedURL || signRes.data.url || signRes.data.signedUrl;
+    if (!rawSignedUrl) {
+      console.error('[upload/sign] Supabase no retornó signedURL. data:', JSON.stringify(signRes.data));
+      return res.status(500).json({ error: 'Supabase no retornó URL firmada', debug: signRes.data });
+    }
+
+    const signedUrl = rawSignedUrl.startsWith('http') ? rawSignedUrl : `${base}${rawSignedUrl}`;
     const publicUrl = `${base}/storage/v1/object/public/${BUCKET}/${storagePath}`;
+
+    console.log(`[upload/sign] signedUrl=${signedUrl}`);
+    console.log(`[upload/sign] publicUrl=${publicUrl}`);
 
     res.json({ signedUrl, publicUrl, path: storagePath });
   } catch (error) {
-    console.error('❌ Error generando signed URL:', error.message, error.response?.data);
+    console.error('❌ [upload/sign] Error:', error.message);
+    console.error('❌ [upload/sign] Supabase response:', JSON.stringify(error.response?.data));
     res.status(500).json({ error: 'Error generando URL firmada', details: error.message });
   }
 });
