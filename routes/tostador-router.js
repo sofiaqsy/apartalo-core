@@ -298,4 +298,63 @@ router.post('/events/:id/media', async (req, res) => {
   }
 });
 
+// ── DELETE /api/tostador/events/:id/media ─────────────────────────────────────
+// Body: { profileId, url }   — elimina solo si el evento NO está completado
+router.delete('/events/:id/media', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { profileId, url } = req.body;
+    if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    if (!url)       return res.status(400).json({ error: 'url requerido' });
+
+    // Fetch event
+    const { data: [event] } = await axios.get(
+      rest('/roast_events') + `?select=id,farm_id,status,notes&id=eq.${id}`,
+      { headers: headers() }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+    if (event.status === 'completed' || event.status === 'discarded') {
+      return res.status(400).json({ error: 'No se puede eliminar media de un evento cerrado' });
+    }
+
+    // Verify farm membership
+    const { data: fm } = await axios.get(
+      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${event.farm_id}`,
+      { headers: headers() }
+    );
+    if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
+
+    // Remove URL from notes JSON
+    const existing = parseNotes(event.notes);
+    const newMedia  = (existing.media || []).filter(u => u !== url);
+    const newNotes  = serializeNotes({ ...existing, media: newMedia });
+
+    await axios.patch(
+      rest('/roast_events') + `?id=eq.${id}`,
+      { notes: newNotes, updated_at: new Date().toISOString() },
+      { headers: headers() }
+    );
+
+    // Best-effort: delete the file from Supabase Storage
+    try {
+      // URL format: .../storage/v1/object/public/farm-assets/roast-events/{id}/{file}
+      const marker    = '/farm-assets/';
+      const storagePath = url.includes(marker) ? url.split(marker)[1] : null;
+      if (storagePath) {
+        await axios.delete(
+          `${base()}/storage/v1/object/farm-assets/${storagePath}`,
+          { headers: headers() }
+        );
+      }
+    } catch (storageErr) {
+      console.warn('[tostador/media/delete] Storage delete failed (non-fatal):', storageErr.message);
+    }
+
+    res.json({ ok: true, media_urls: newMedia });
+  } catch (err) {
+    console.error('[tostador/events/media/delete]', err.message);
+    res.status(500).json({ error: 'Error eliminando media' });
+  }
+});
+
 module.exports = router;
