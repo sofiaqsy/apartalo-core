@@ -225,25 +225,34 @@ router.post('/events/:id/complete', async (req, res) => {
     const roastedOutKg  = Number(outKg);
     const greenInKg     = Number(event.green_in_kg);
     const weightLossPct = greenInKg > 0
-      ? Math.round(((greenInKg - roastedOutKg) / greenInKg) * 10000) / 100  // 2 decimales
+      ? Math.round(((greenInKg - roastedOutKg) / greenInKg) * 10000) / 100
       : null;
 
     // Preserve existing media URLs, update text
     const existing = parseNotes(event.notes);
     const newNotes = serializeNotes({ text: notesText || existing.text, media: existing.media });
 
-    await axios.patch(
-      rest('/roast_events') + `?id=eq.${id}`,
-      {
-        status: 'completed',
-        completed_at: completedAt,
-        updated_at: completedAt,
-        notes: newNotes,
-        roasted_out_kg: roastedOutKg,
-        ...(weightLossPct !== null && { weight_loss_pct: weightLossPct }),
-      },
-      { headers: headers() }
-    );
+    const patchBody = {
+      status: 'completed',
+      completed_at: completedAt,
+      updated_at: completedAt,
+      notes: newNotes,
+      roasted_out_kg: roastedOutKg,
+      ...(weightLossPct !== null && { weight_loss_pct: weightLossPct }),
+    };
+    console.log('[complete] outKg recibido:', outKg, '→ roastedOutKg:', roastedOutKg);
+    console.log('[complete] PATCH body:', JSON.stringify(patchBody));
+
+    try {
+      await axios.patch(
+        rest('/roast_events') + `?id=eq.${id}`,
+        patchBody,
+        { headers: headers() }
+      );
+    } catch (patchErr) {
+      console.error('[complete] Supabase PATCH 400 data:', JSON.stringify(patchErr.response?.data));
+      throw patchErr;
+    }
 
     res.json({
       ok: true,
