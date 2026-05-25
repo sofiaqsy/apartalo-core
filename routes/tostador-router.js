@@ -88,7 +88,7 @@ router.get('/events', async (req, res) => {
       : ['planned', 'in_progress'];
 
     const evUrl = rest('/roast_events')
-      + `?select=id,farm_id,status,roasted_at,completed_at,green_in_kg,cached_lot_code,cached_harvest_year,notes,created_at`
+      + `?select=id,farm_id,status,roasted_at,completed_at,green_in_kg,roasted_out_kg,weight_loss_pct,cached_lot_code,cached_harvest_year,notes,created_at`
       + `&farm_id=in.(${farmIds.join(',')})&status=in.(${statusList.join(',')})`
       + `&order=roasted_at.asc`;
 
@@ -135,7 +135,7 @@ router.get('/history', async (req, res) => {
     const offset  = parseInt(page) * 20;
 
     const evUrl = rest('/roast_events')
-      + `?select=id,farm_id,status,roasted_at,completed_at,green_in_kg,cached_lot_code,cached_harvest_year,notes,created_at`
+      + `?select=id,farm_id,status,roasted_at,completed_at,green_in_kg,roasted_out_kg,weight_loss_pct,cached_lot_code,cached_harvest_year,notes,created_at`
       + `&farm_id=in.(${farmIds.join(',')})&status=eq.completed`
       + `&order=completed_at.desc&limit=20&offset=${offset}`;
 
@@ -206,7 +206,7 @@ router.post('/events/:id/complete', async (req, res) => {
     }
 
     const { data: [event] } = await axios.get(
-      rest('/roast_events') + `?select=id,farm_id,status,notes&id=eq.${id}`,
+      rest('/roast_events') + `?select=id,farm_id,status,notes,green_in_kg&id=eq.${id}`,
       { headers: headers() }
     );
     if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
@@ -218,9 +218,15 @@ router.post('/events/:id/complete', async (req, res) => {
     );
     if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
 
-    const completedAt = new Date().toISOString();
-    const expiresAt   = new Date();
+    const completedAt  = new Date().toISOString();
+    const expiresAt    = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 6);
+
+    const roastedOutKg  = Number(outKg);
+    const greenInKg     = Number(event.green_in_kg);
+    const weightLossPct = greenInKg > 0
+      ? Math.round(((greenInKg - roastedOutKg) / greenInKg) * 10000) / 100  // 2 decimales
+      : null;
 
     // Preserve existing media URLs, update text
     const existing = parseNotes(event.notes);
@@ -233,12 +239,19 @@ router.post('/events/:id/complete', async (req, res) => {
         completed_at: completedAt,
         updated_at: completedAt,
         notes: newNotes,
-        roasted_out_kg: Number(outKg),
+        roasted_out_kg: roastedOutKg,
+        ...(weightLossPct !== null && { weight_loss_pct: weightLossPct }),
       },
       { headers: headers() }
     );
 
-    res.json({ ok: true, completed_at: completedAt, expires_at: expiresAt.toISOString() });
+    res.json({
+      ok: true,
+      completed_at: completedAt,
+      expires_at: expiresAt.toISOString(),
+      roasted_out_kg: roastedOutKg,
+      weight_loss_pct: weightLossPct,
+    });
   } catch (err) {
     console.error('[tostador/events/complete]', err.message);
     res.status(500).json({ error: 'Error finalizando tueste' });
