@@ -222,26 +222,21 @@ router.post('/events/:id/complete', async (req, res) => {
     const expiresAt    = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + 6);
 
-    const roastedOutKg  = Number(outKg);
-    const greenInKg     = Number(event.green_in_kg);
-    const weightLossPct = greenInKg > 0
-      ? Math.round(((greenInKg - roastedOutKg) / greenInKg) * 10000) / 100
-      : null;
+    const roastedOutKg = Number(outKg);
 
     // Preserve existing media URLs, update text
     const existing = parseNotes(event.notes);
     const newNotes = serializeNotes({ text: notesText || existing.text, media: existing.media });
 
+    // weight_loss_pct es columna generada en Postgres — se calcula sola, no se escribe
     const patchBody = {
       status: 'completed',
       completed_at: completedAt,
       updated_at: completedAt,
       notes: newNotes,
       roasted_out_kg: roastedOutKg,
-      ...(weightLossPct !== null && { weight_loss_pct: weightLossPct }),
     };
-    console.log('[complete] outKg recibido:', outKg, '→ roastedOutKg:', roastedOutKg);
-    console.log('[complete] PATCH body:', JSON.stringify(patchBody));
+    console.log('[complete] outKg recibido:', outKg, '→ roastedOutKg:', roastedOutKg, '| merma calculada por DB');
 
     try {
       await axios.patch(
@@ -259,7 +254,6 @@ router.post('/events/:id/complete', async (req, res) => {
       completed_at: completedAt,
       expires_at: expiresAt.toISOString(),
       roasted_out_kg: roastedOutKg,
-      weight_loss_pct: weightLossPct,
     });
   } catch (err) {
     console.error('[tostador/events/complete]', err.message);
