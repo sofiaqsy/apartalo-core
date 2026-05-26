@@ -1396,20 +1396,49 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
 
     const supabaseService = require('../core/services/supabase-service');
     const presentations = await supabaseService.getPresentations(productId);
-    res.json({ presentaciones: presentations.map(pp => ({
-      id:           pp.id,
-      contenido:    pp.pack_size,
-      unidad:       pp.unit,
-      precio:       pp.price_cents / 100,
-      precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
-      cantidadB2b:  pp.min_qty_for_b2b || null,
-      stock:        pp.stock || 0,
-      pedidoMinimo: pp.min_order_qty || 1,
-      orden:        pp.sort_order || 0,
-      predeterminada: pp.is_default || false,
-      molienda:     pp.grind || [],
-      imageUrl:     pp.image_url || null
-    })) });
+
+    // Derive stock from FIFO lot pool (same logic as getProductsWithPresentations)
+    let availableKg = null;
+    try {
+      const axios = require('axios');
+      const base = () => process.env.SUPABASE_URL;
+      const hdrs = () => ({ apikey: process.env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' });
+      const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
+      const { data: lots } = await axios.get(
+        `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`,
+        { headers: hdrs() }
+      );
+      if (lots?.length) {
+        availableKg = lots.reduce((sum, a) => {
+          const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+          if (ev?.status !== 'completed') return sum;
+          return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+        }, 0);
+      }
+    } catch (_) { /* non-fatal — fall back to pp.stock */ }
+
+    res.json({ presentaciones: presentations.map(pp => {
+      let stock = pp.stock || 0;
+      if (availableKg !== null) {
+        const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
+                          pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
+        stock = kgPerUnit > 0 ? Math.max(0, Math.floor(availableKg / kgPerUnit)) : 0;
+      }
+      return {
+        id:           pp.id,
+        contenido:    pp.pack_size,
+        unidad:       pp.unit,
+        precio:       pp.price_cents / 100,
+        precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+        cantidadB2b:  pp.min_qty_for_b2b || null,
+        stock,
+        pedidoMinimo: pp.min_order_qty || 1,
+        orden:        pp.sort_order || 0,
+        predeterminada: pp.is_default || false,
+        molienda:     pp.grind || [],
+        imageUrl:     pp.image_url || null
+      };
+    }) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
