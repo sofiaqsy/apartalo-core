@@ -1742,4 +1742,49 @@ router.post('/preventas/:businessId', async (req, res) => {
   }
 });
 
+// ── POST /upload/voucher — sube imagen base64 a Supabase storage ──────────────
+// Body: { imageBase64: 'data:image/png;base64,...', filename?: 'receipt.png' }
+// Returns: { url: 'https://...' }
+router.post('/upload/voucher', async (req, res) => {
+  try {
+    const { imageBase64, filename } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: 'Campo requerido: imageBase64' });
+
+    // Strip data URL prefix → raw base64
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer     = Buffer.from(base64Data, 'base64');
+    const ext        = (imageBase64.match(/^data:image\/(\w+);/) || [])[1] || 'png';
+    const fname      = filename || `bcp-receipt-${Date.now()}.${ext}`;
+
+    const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, '');
+    const key         = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const bucket      = 'farm-assets';
+    const path        = `vouchers/${fname}`;
+
+    const axios = require('axios');
+
+    // Upload to Supabase storage
+    const uploadRes = await axios.post(
+      `${supabaseUrl}/storage/v1/object/${bucket}/${path}`,
+      buffer,
+      {
+        headers: {
+          apikey:          key,
+          Authorization:   `Bearer ${key}`,
+          'Content-Type':  `image/${ext}`,
+          'x-upsert':      'true'
+        },
+        maxBodyLength: Infinity
+      }
+    );
+
+    // Public URL
+    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+    res.json({ success: true, url: publicUrl });
+  } catch (error) {
+    console.error('❌ Error uploading voucher:', error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
