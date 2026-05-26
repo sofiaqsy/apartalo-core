@@ -1402,7 +1402,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     try {
       const axios = require('axios');
       const base = () => process.env.SUPABASE_URL;
-      const hdrs = () => ({ apikey: process.env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' });
+      const hdrs = () => ({ apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' });
       const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
       const { data: lots } = await axios.get(
         `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`,
