@@ -999,6 +999,23 @@ async function deleteRow(path, params) {
   await axios.delete(url, { headers: headers() });
 }
 
+/**
+ * Returns total kg available in the FIFO lot pool for a product.
+ * Only counts assignments whose roast event is 'completed'.
+ * Returns null if no lot assignments exist (product uses manual stock).
+ */
+async function getProductAvailableKg(productId) {
+  const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
+  const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`;
+  const { data: lots } = await axios.get(url, { headers: headers() });
+  if (!lots?.length) return null;
+  return lots.reduce((sum, a) => {
+    const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+    if (ev?.status !== 'completed') return sum;
+    return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+  }, 0);
+}
+
 module.exports = {
   getRawSalesCounts,
   getAdminFarmsByPhone,
@@ -1006,6 +1023,7 @@ module.exports = {
   getProducts,
   getAllProducts,
   getProductsWithPresentations,
+  getProductAvailableKg,
   createProduct,
   updateProduct,
   getProductById,

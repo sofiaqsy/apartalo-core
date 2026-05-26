@@ -1400,21 +1400,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     // Derive stock from FIFO lot pool (same logic as getProductsWithPresentations)
     let availableKg = null;
     try {
-      const axios = require('axios');
-      const base = () => process.env.SUPABASE_URL;
-      const hdrs = () => ({ apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' });
-      const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
-      const { data: lots } = await axios.get(
-        `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`,
-        { headers: hdrs() }
-      );
-      if (lots?.length) {
-        availableKg = lots.reduce((sum, a) => {
-          const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
-          if (ev?.status !== 'completed') return sum;
-          return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
-        }, 0);
-      }
+      availableKg = await supabaseService.getProductAvailableKg(productId);
     } catch (_) { /* non-fatal — fall back to pp.stock */ }
 
     res.json({ availableKg, presentaciones: presentations.map(pp => {
