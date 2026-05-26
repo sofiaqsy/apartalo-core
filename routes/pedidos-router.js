@@ -61,7 +61,7 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
     const { businessId, pedidoId } = req.params;
     const { url, tipo, descripcion } = req.body;
 
-    if (!url) return res.status(400).json({ error: 'Campo requerido: url' });
+    // url es opcional para evidencias BCP auto-generadas (sin imagen de voucher)
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
@@ -112,7 +112,7 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
     const { businessId, pedidoId, evidenciaId } = req.params;
     const { operacionBCP, montoVerificado, fechaOperacion } = req.body;
 
-    if (!operacionBCP) return res.status(400).json({ error: 'Campo requerido: operacionBCP' });
+    // operacionBCP puede ser vacío si el banco no incluyó número de operación
 
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
