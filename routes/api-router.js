@@ -1417,7 +1417,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
       }
     } catch (_) { /* non-fatal — fall back to pp.stock */ }
 
-    res.json({ presentaciones: presentations.map(pp => {
+    res.json({ availableKg, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       if (availableKg !== null) {
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
