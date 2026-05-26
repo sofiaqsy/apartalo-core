@@ -390,21 +390,39 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
   const order = orders[0];
   if (!order) throw new Error('Order creation failed');
 
-  const orderItems = items.map(i => ({
-    order_id:         order.id,
-    farm_id:          farmId,
-    product_id:       i.productId,
-    product_name:     i.productName,
-    unit:             i.unit,
-    presentation_id:  i.presentacionId || null,
-    grind:            i.grind || null,
-    quantity:         i.quantity,
-    unit_price_cents: i.unitPriceCents,
-    line_total_cents: i.lineTotalCents,
-    commission_rate:  i.commissionRate || 0.10,
-    commission_cents: Math.round(i.lineTotalCents * (i.commissionRate || 0.10)),
-    payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10)))
-  }));
+  // Batch-fetch pack_size + unit from product_presentations so deductStockOnConfirm
+  // can calculate kgNeeded correctly for coffee FIFO deduction.
+  const presIds = [...new Set(items.map(i => i.presentacionId).filter(Boolean))];
+  const presPackMap = {}; // presentationId → { pack_size, unit }
+  if (presIds.length) {
+    try {
+      const presRows = await get('product_presentations', {
+        id: `in.(${presIds.join(',')})`,
+        select: 'id,pack_size,unit'
+      });
+      for (const r of presRows) presPackMap[r.id] = { pack_size: r.pack_size, unit: r.unit };
+    } catch (_) { /* non-fatal — pack_size stays null */ }
+  }
+
+  const orderItems = items.map(i => {
+    const pres = i.presentacionId ? presPackMap[i.presentacionId] : null;
+    return {
+      order_id:         order.id,
+      farm_id:          farmId,
+      product_id:       i.productId,
+      product_name:     i.productName,
+      unit:             pres?.unit || i.unit,
+      pack_size:        pres?.pack_size ?? i.packSize ?? null,
+      presentation_id:  i.presentacionId || null,
+      grind:            i.grind || null,
+      quantity:         i.quantity,
+      unit_price_cents: i.unitPriceCents,
+      line_total_cents: i.lineTotalCents,
+      commission_rate:  i.commissionRate || 0.10,
+      commission_cents: Math.round(i.lineTotalCents * (i.commissionRate || 0.10)),
+      payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10)))
+    };
+  });
 
   await post('order_items', orderItems);
   return order;
