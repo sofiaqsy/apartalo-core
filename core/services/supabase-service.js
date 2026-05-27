@@ -1071,7 +1071,7 @@ module.exports = {
  */
 async function getEventOffers(farmId) {
   // Step 1: events + offers (product_id only — avoid fragile triple-nested join)
-  const evSelect = 'id,roasted_at,status,cached_lot_code,cached_harvest_year,event_offers(id,kg_offered,kg_reserved,product_id)';
+  const evSelect = 'id,roasted_at,status,cached_lot_code,cached_harvest_year,green_in_kg,roasted_out_kg,weight_loss_pct,event_offers(id,kg_offered,kg_reserved,product_id)';
   const evUrl = `${base()}/rest/v1/roast_events?farm_id=eq.${farmId}&status=in.(planned,in_progress)&select=${encodeURIComponent(evSelect)}&order=roasted_at.asc`;
   const { data: events } = await axios.get(evUrl, { headers: headers() });
   if (!events?.length) return [];
@@ -1090,10 +1090,26 @@ async function getEventOffers(farmId) {
   const productMap = {};
   for (const p of (products || [])) productMap[p.id] = p;
 
+  // Calcular kg estimados de salida del tueste
+  // Si ya tiene roasted_out_kg (tueste en progreso) lo usa directamente.
+  // Si solo tiene green_in_kg lo aplica con weight_loss_pct o merma estándar (18%).
+  function estimatedKgOut(ev) {
+    if (ev.roasted_out_kg != null) return Number(ev.roasted_out_kg);
+    if (ev.green_in_kg != null) {
+      const loss = ev.weight_loss_pct != null ? Number(ev.weight_loss_pct) / 100 : 0.18;
+      return Math.round(Number(ev.green_in_kg) * (1 - loss) * 100) / 100;
+    }
+    return null;
+  }
+
   // Step 4: merge, attach product, filter for available capacity
   return events
     .map(ev => ({
       ...ev,
+      green_in_kg:    ev.green_in_kg    != null ? Number(ev.green_in_kg)    : null,
+      roasted_out_kg: ev.roasted_out_kg != null ? Number(ev.roasted_out_kg) : null,
+      weight_loss_pct: ev.weight_loss_pct != null ? Number(ev.weight_loss_pct) : null,
+      estimated_kg_out: estimatedKgOut(ev),
       event_offers: (ev.event_offers || [])
         .map(o => ({ ...o, product: productMap[o.product_id] || null }))
         .filter(o => o.product && (Number(o.kg_offered) - Number(o.kg_reserved)) > 0)
