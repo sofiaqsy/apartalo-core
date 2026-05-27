@@ -333,7 +333,7 @@ router.get('/pedidos/:businessId', async (req, res) => {
 router.post('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { whatsapp, cliente, telefono, direccion, productos, total, observaciones, estado, origen, notificarCliente, departamento, ciudad, tipoEnvio, empresaEnvio, costoEnvio } = req.body;
+    const { whatsapp, cliente, telefono, direccion, productos, total, observaciones, estado, origen, notificarCliente, departamento, ciudad, tipoEnvio, empresaEnvio, costoEnvio, tipo, sourceEventId } = req.body;
 
     if (!whatsapp || !productos || total === undefined) {
       return res.status(400).json({ error: 'Campos requeridos: whatsapp, productos, total' });
@@ -346,6 +346,12 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const costoEnvioGlobal  = parseDecimal(costoEnvio);
     const estadoFinalGlobal = estado || 'PENDIENTE';
     const origenFinalGlobal = origen || 'APP';
+
+    // Prefijo en observaciones para trazabilidad de pre-ventas
+    const esPreventa = tipo === 'PREVENTA';
+    const notasPreventa = esPreventa
+      ? `[PRE-VENTA:${sourceEventId || ''}] ${observaciones || ''}`.trim()
+      : observaciones;
 
     if (negocio.plataformaExterna && negocio.farmId) {
       const sheets = await getSheetsService(negocio);
@@ -362,7 +368,8 @@ router.post('/pedidos/:businessId', async (req, res) => {
 
       const result = await sheets.crearPedido({
         whatsapp, cliente, telefono, direccion, ciudad, departamento,
-        tipoEnvio, empresaEnvio, observaciones, origen: origenFinalGlobal,
+        tipoEnvio, empresaEnvio, observaciones: notasPreventa,
+        origen: origenFinalGlobal,
         costoEnvio: costoEnvioGlobal,
         total: totalNumeroGlobal,
         productosDetalle
@@ -412,7 +419,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
     const valores = [
       pedidoId, fechaPeru, horaPeru, (whatsapp || '').toString().replace(/[^0-9]/g, ''),
       cliente || '', telefono || '', direccion || '', productosStr, totalNumero, estadoFinal,
-      '', observaciones || '', tipoEnvio || '', empresaEnvio || '', origenFinal
+      '', notasPreventa || '', tipoEnvio || '', empresaEnvio || '', origenFinal
     ];
 
     await sheets.appendRow('Pedidos', valores);
