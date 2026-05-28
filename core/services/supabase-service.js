@@ -1083,15 +1083,15 @@ async function getEventOffers(farmId) {
   const productIds = [...new Set(
     events.flatMap(ev => (ev.event_offers || []).map(o => o.product_id).filter(Boolean))
   )];
-  if (!productIds.length) return [];
 
-  // Step 3: fetch products + presentations in one round-trip
-  const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order,grind)';
-  const pUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`;
-  const { data: products } = await axios.get(pUrl, { headers: headers() });
-
+  // Step 3: fetch products + presentations (solo si hay offers con productos)
   const productMap = {};
-  for (const p of (products || [])) productMap[p.id] = p;
+  if (productIds.length) {
+    const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order,grind)';
+    const pUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`;
+    const { data: products } = await axios.get(pUrl, { headers: headers() });
+    for (const p of (products || [])) productMap[p.id] = p;
+  }
 
   // Calcular kg estimados de salida del tueste
   // Si ya tiene roasted_out_kg (tueste en progreso) lo usa directamente.
@@ -1105,19 +1105,20 @@ async function getEventOffers(farmId) {
     return null;
   }
 
-  // Step 4: merge, attach product, filter for available capacity
+  // Step 4: merge y attach product.
+  // Se muestran TODOS los eventos planned/in_progress (incluso sin kg disponible)
+  // para que la pantalla de pre-ventas los liste; la disponibilidad se indica visualmente.
   return events
     .map(ev => ({
       ...ev,
-      green_in_kg:    ev.green_in_kg    != null ? Number(ev.green_in_kg)    : null,
-      roasted_out_kg: ev.roasted_out_kg != null ? Number(ev.roasted_out_kg) : null,
+      green_in_kg:     ev.green_in_kg     != null ? Number(ev.green_in_kg)     : null,
+      roasted_out_kg:  ev.roasted_out_kg  != null ? Number(ev.roasted_out_kg)  : null,
       weight_loss_pct: ev.weight_loss_pct != null ? Number(ev.weight_loss_pct) : null,
       estimated_kg_out: estimatedKgOut(ev),
       event_offers: (ev.event_offers || [])
         .map(o => ({ ...o, product: productMap[o.product_id] || null }))
-        .filter(o => o.product && (Number(o.kg_offered) - Number(o.kg_reserved)) > 0)
-    }))
-    .filter(ev => ev.event_offers.length > 0);
+        .filter(o => o.product) // solo excluir offers sin producto
+    }));
 }
 
 /**
