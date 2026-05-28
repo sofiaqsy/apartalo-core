@@ -207,10 +207,11 @@ router.post('/:businessId', async (req, res) => {
         tipo: tipoEnvioFinal,
         courier: empresaEnvio || ''
       },
-      notes: notasFinal,
+      notes:          notasFinal,
       esPreventa,
-      paymentMethod: null,
-      currency: 'PEN'
+      sourceEventId:  esPreventa ? (sourceEventId || null) : null,
+      paymentMethod:  null,
+      currency:       'PEN'
     });
 
     if (!order) return res.status(500).json({ error: 'Error creando pedido en Supabase' });
@@ -315,6 +316,7 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
       return res.status(403).json({ error: 'Solo se pueden eliminar pedidos en estado PENDIENTE', estadoActual: pedido.estado, pedidoId });
     }
 
+    await supabaseService.restoreStockOnCancel(pedido.supabaseId);
     await supabaseService.updateOrderFields(pedido.supabaseId, { status: 'cancelled' });
     return res.json({ success: true, mensaje: 'Pedido cancelado/eliminado', pedidoId });
   } catch (error) {

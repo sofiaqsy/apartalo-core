@@ -329,7 +329,7 @@ async function updateCustomer(profileId, fields) {
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 
-async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0, esPreventa = false }) {
+async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0, esPreventa = false, sourceEventId = null }) {
   // ── Stock validation — skipped for pre-ventas (product not yet roasted) ──
   if (!esPreventa) for (const item of items) {
     const kgPerUnit = item.unit === 'kg' ? Number(item.pack_size || 0) :
@@ -420,11 +420,21 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
       line_total_cents: i.lineTotalCents,
       commission_rate:  i.commissionRate || 0.10,
       commission_cents: Math.round(i.lineTotalCents * (i.commissionRate || 0.10)),
-      payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10)))
+      payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10))),
+      // Mark pre-venta items so deductStockOnConfirm skips them (kg already reserved)
+      source_event_id:  esPreventa && sourceEventId ? sourceEventId : null,
     };
   });
 
   await post('order_items', orderItems);
+
+  // Reserve kg in event_offers for pre-ventas
+  if (esPreventa && sourceEventId) {
+    adjustKgReservedForOrder(order.id, sourceEventId, +1).catch(err =>
+      console.error('[stock] adjustKgReserved on create failed:', err.message)
+    );
+  }
+
   return order;
 }
 
@@ -666,6 +676,123 @@ async function getOrderByIdOrNumber(idOrNumber) {
   return mapOrder(o, items, payments);
 }
 
+/**
+ * Increment (delta=+1) or decrement (delta=-1) kg_reserved in event_offers
+ * for all items belonging to a pre-venta order.
+ */
+async function adjustKgReservedForOrder(supabaseOrderId, sourceEventId, delta) {
+  try {
+    const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&select=product_id,quantity,pack_size,unit`;
+    const { data: items } = await axios.get(itemsUrl, { headers: headers() });
+    if (!items?.length) return;
+
+    // Get event offers via the roast_event (avoids needing to know FK column name)
+    const evUrl = `${base()}/rest/v1/roast_events?id=eq.${sourceEventId}&select=event_offers(id,product_id,kg_reserved)`;
+    const { data: evRows } = await axios.get(evUrl, { headers: headers() });
+    const offers = evRows?.[0]?.event_offers || [];
+    if (!offers.length) return;
+
+    const offerByProduct = {};
+    for (const o of offers) offerByProduct[o.product_id] = o;
+
+    for (const item of items) {
+      const offer = offerByProduct[item.product_id];
+      if (!offer) continue;
+
+      const ps = Number(item.pack_size || 0);
+      const unit = (item.unit || '').toLowerCase();
+      const kgPerUnit = unit === 'kg' ? ps
+                      : unit === 'g'  ? ps / 1000
+                      : unit === 'lb' ? ps * 0.453592 : 0;
+      const kg = kgPerUnit * Number(item.quantity);
+      if (kg <= 0) continue;
+
+      const current = Number(offer.kg_reserved || 0);
+      const updated = Math.max(0, Math.round((current + delta * kg) * 1000) / 1000);
+      await patch('event_offers', { id: `eq.${offer.id}` }, { kg_reserved: updated });
+      offer.kg_reserved = updated; // update local cache for subsequent items on same offer
+    }
+  } catch (err) {
+    console.error('[stock] adjustKgReservedForOrder error:', err.message);
+  }
+}
+
+/**
+ * Reverse deductStockOnConfirm: restore stock for fulfilled order_items.
+ * Called when a previously confirmed order is cancelled.
+ */
+async function restoreStockItems(supabaseOrderId) {
+  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=eq.paid&select=id,product_id,presentation_id,quantity,unit,pack_size,output_lot_id`;
+  const { data: items } = await axios.get(itemsUrl, { headers: headers() });
+  if (!items?.length) return;
+
+  for (const item of items) {
+    try {
+      const ps = Number(item.pack_size || 0);
+      const unit = (item.unit || '').toLowerCase();
+      const kgAmount = (unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0) * Number(item.quantity);
+
+      if (item.output_lot_id && kgAmount > 0) {
+        // Roasted coffee — reverse FIFO lot deduction
+        const lotRows = await get('product_lot_assignments', {
+          output_lot_id: `eq.${item.output_lot_id}`,
+          product_id:    `eq.${item.product_id}`,
+          select:        'id,kg_sold'
+        });
+        if (lotRows[0]) {
+          await patch('product_lot_assignments', { id: `eq.${lotRows[0].id}` }, {
+            kg_sold: Math.max(0, Number(lotRows[0].kg_sold) - kgAmount)
+          });
+        }
+      } else if (item.presentation_id) {
+        const presRows = await get('product_presentations', { id: `eq.${item.presentation_id}`, select: 'stock' });
+        if (presRows[0]) {
+          await patch('product_presentations', { id: `eq.${item.presentation_id}` }, {
+            stock: Number(presRows[0].stock) + Number(item.quantity)
+          });
+        }
+      } else if (item.product_id) {
+        const prodRows = await get('products', { id: `eq.${item.product_id}`, select: 'stock' });
+        if (prodRows[0]) {
+          await patch('products', { id: `eq.${item.product_id}` }, {
+            stock: Number(prodRows[0].stock) + Number(item.quantity)
+          });
+        }
+      }
+      // Reset fulfillment flag
+      await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: null, output_lot_id: null });
+    } catch (itemErr) {
+      console.error('[stock] Error restoring item', item.id, itemErr.message);
+    }
+  }
+}
+
+/**
+ * Called when any order is cancelled.
+ * – Pre-venta orders: decrements kg_reserved in event_offers
+ * – Regular confirmed orders: restores presentation / lot stock
+ */
+async function restoreStockOnCancel(supabaseOrderId) {
+  try {
+    const orderRows = await get('orders', { id: `eq.${supabaseOrderId}`, select: 'id,notes,status' });
+    const order = orderRows[0];
+    if (!order) return;
+
+    // Detect pre-venta from notes prefix
+    const preVentaMatch = (order.notes || '').match(/^\[PRE-VENTA:([^\]]*)\]/);
+    const sourceEventId  = preVentaMatch?.[1] || null;
+
+    if (sourceEventId) {
+      await adjustKgReservedForOrder(supabaseOrderId, sourceEventId, -1);
+    } else if (['paid', 'preparing', 'ready', 'shipped', 'delivered'].includes(order.status)) {
+      // Regular order already confirmed → restore stock
+      await restoreStockItems(supabaseOrderId);
+    }
+  } catch (err) {
+    console.error('[stock] restoreStockOnCancel error:', err.message);
+  }
+}
+
 async function updateOrderStatus(supabaseId, estado) {
   const status = toStatus(estado);
   const fields = { status };
@@ -678,13 +805,14 @@ async function updateOrderStatus(supabaseId, estado) {
   if (up === 'ENTREGADO')      fields.delivered_at = now;
   const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
 
-  // Deduct stock only when the order is confirmed (CONFIRMADO → paid).
-  // Same rules as fincas checkout/pay: pre-orders skip (already reserved),
-  // green coffee → green_lots, roasted coffee → FIFO product_lot_assignments,
-  // everything else → product_presentations.stock or products.stock.
   if (up === 'CONFIRMADO') {
     deductStockOnConfirm(supabaseId).catch(err =>
       console.error('[stock] deductStockOnConfirm failed', supabaseId, err.message)
+    );
+  }
+  if (up === 'CANCELADO') {
+    restoreStockOnCancel(supabaseId).catch(err =>
+      console.error('[stock] restoreStockOnCancel failed', supabaseId, err.message)
     );
   }
 
@@ -1063,7 +1191,8 @@ module.exports = {
   verifyPaymentProof,
   deletePaymentProof,
   getEventOffers,
-  createPreorden
+  createPreorden,
+  restoreStockOnCancel
 };
 
 // ─── PRE-VENTAS ───────────────────────────────────────────────────────────────
