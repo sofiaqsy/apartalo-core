@@ -249,15 +249,59 @@ router.post('/events/:id/complete', async (req, res) => {
       throw patchErr;
     }
 
+    // ── Confirmar pre-ventas asociadas a este evento ──────────────────────────
+    let preventasConfirmadas = 0;
+    try {
+      const preventasUrl = rest('/orders')
+        + `?select=id,status&notes=like.[PRE-VENTA:${id}]%&status=in.(pending_payment,paid)`;
+      const { data: preventas } = await axios.get(preventasUrl, { headers: headers() });
+
+      if (preventas && preventas.length > 0) {
+        // Update each pending/paid pre-venta order to 'paid' (CONFIRMADO)
+        await axios.patch(
+          rest('/orders') + `?notes=like.[PRE-VENTA:${id}]%&status=in.(pending_payment,paid)`,
+          { status: 'paid', updated_at: completedAt },
+          { headers: headers() }
+        );
+        preventasConfirmadas = preventas.length;
+        console.log(`[complete] Confirmadas ${preventasConfirmadas} pre-ventas para evento ${id}`);
+      }
+    } catch (preventaErr) {
+      // Non-fatal: log but don't fail the completion
+      console.error('[complete] Error confirmando pre-ventas:', preventaErr.message);
+    }
+
     res.json({
       ok: true,
       completed_at: completedAt,
       expires_at: expiresAt.toISOString(),
       roasted_out_kg: roastedOutKg,
+      preventasConfirmadas,
     });
   } catch (err) {
     console.error('[tostador/events/complete]', err.message);
     res.status(500).json({ error: 'Error finalizando tueste' });
+  }
+});
+
+// ── GET /api/tostador/events/:eventId/preventas ──────────────────────────────
+// Returns all orders that are pre-ventas for this roast event.
+// Includes nested order_items for product detail.
+router.get('/events/:eventId/preventas', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+
+    const url = rest('/orders')
+      + `?select=id,order_number,customer_name,customer_phone,total_cents,status,notes,order_items(product_name,quantity,unit,pack_size)`
+      + `&notes=like.[PRE-VENTA:${eventId}]%`
+      + `&order=created_at.desc`;
+
+    const { data: orders } = await axios.get(url, { headers: headers() });
+
+    res.json(orders || []);
+  } catch (err) {
+    console.error('[tostador/events/preventas]', err.message);
+    res.status(500).json({ error: 'Error obteniendo pre-ventas' });
   }
 });
 
