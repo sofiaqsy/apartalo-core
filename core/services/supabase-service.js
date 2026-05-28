@@ -1084,13 +1084,34 @@ async function getEventOffers(farmId) {
     events.flatMap(ev => (ev.event_offers || []).map(o => o.product_id).filter(Boolean))
   )];
 
-  // Step 3: fetch products + presentations (solo si hay offers con productos)
+  // Step 3: fetch products + presentations + media images (solo si hay offers con productos)
   const productMap = {};
   if (productIds.length) {
-    const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,is_default,is_visible,sort_order,grind)';
-    const pUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`;
-    const { data: products } = await axios.get(pUrl, { headers: headers() });
-    for (const p of (products || [])) productMap[p.id] = p;
+    const pSelect = 'id,name,currency,price_cents,product_presentations(id,pack_size,unit,price_cents,min_order_qty,stock,is_default,is_visible,sort_order,grind)';
+    const [productRows, mediaRows] = await Promise.all([
+      axios.get(`${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=${encodeURIComponent(pSelect)}`, { headers: headers() }),
+      get('media', {
+        owner_id: `in.(${productIds.join(',')})`,
+        select:   'presentation_id,url,sort_order',
+        order:    'sort_order.asc'
+      })
+    ]);
+    // Build presentation → image_url map (first image per presentation)
+    const presImageMap = {};
+    for (const m of (mediaRows || [])) {
+      if (m.presentation_id && !presImageMap[m.presentation_id]) {
+        presImageMap[m.presentation_id] = m.url;
+      }
+    }
+    for (const p of (productRows.data || [])) {
+      productMap[p.id] = {
+        ...p,
+        product_presentations: (p.product_presentations || []).map(pp => ({
+          ...pp,
+          image_url: presImageMap[pp.id] || null
+        }))
+      };
+    }
   }
 
   // Calcular kg estimados de salida del tueste
