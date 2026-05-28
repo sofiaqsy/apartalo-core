@@ -329,9 +329,9 @@ async function updateCustomer(profileId, fields) {
 
 // ─── ORDERS ───────────────────────────────────────────────────────────────────
 
-async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0 }) {
-  // ── Stock validation — same rules as fincas checkout/create ──────────────
-  for (const item of items) {
+async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0, esPreventa = false }) {
+  // ── Stock validation — skipped for pre-ventas (product not yet roasted) ──
+  if (!esPreventa) for (const item of items) {
     const kgPerUnit = item.unit === 'kg' ? Number(item.pack_size || 0) :
                       item.unit === 'g'  ? Number(item.pack_size || 0) / 1000 : 0;
     const kgNeeded  = kgPerUnit * Number(item.quantity);

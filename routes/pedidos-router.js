@@ -153,7 +153,7 @@ router.post('/:businessId', async (req, res) => {
       whatsapp, cliente, telefono, direccion, productos, total,
       observaciones, tipoEnvio, empresaEnvio, notificarCliente,
       estadoPago, montoPagado, ciudad, departamento,
-      tipo, negocioSolicitante
+      tipo, sourceEventId, negocioSolicitante
     } = req.body;
 
     if (!whatsapp) return res.status(400).json({ error: 'Campo requerido: whatsapp' });
@@ -186,6 +186,11 @@ router.post('/:businessId', async (req, res) => {
       commissionRate:  negocio.commission_rate || 0.10
     }));
 
+    const esPreventa = tipo === 'PREVENTA';
+    const notasFinal = esPreventa
+      ? `[PRE-VENTA:${sourceEventId || ''}] ${observaciones || ''}`.trim()
+      : (observaciones || '');
+
     const order = await supabaseService.createOrder({
       customer: {
         id: customer?.id || null,
@@ -202,7 +207,8 @@ router.post('/:businessId', async (req, res) => {
         tipo: tipoEnvioFinal,
         courier: empresaEnvio || ''
       },
-      notes: observaciones || '',
+      notes: notasFinal,
+      esPreventa,
       paymentMethod: null,
       currency: 'PEN'
     });
