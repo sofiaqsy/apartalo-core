@@ -1404,17 +1404,22 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     const supabaseService = require('../core/services/supabase-service');
     const presentations = await supabaseService.getPresentations(productId);
 
-    // Derive stock from FIFO lot pool, split by source
-    let availableKg = null, roastedKg = 0, manualKg = 0;
+    // Derive stock from FIFO lot pool + upcoming event info
+    let availableKg = null, roastedKg = 0, completedLots = [];
+    let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
     try {
       const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
-      roastedKg  = lotBreakdown.roastedKg;
-      manualKg   = lotBreakdown.manualKg;
-      availableKg = roastedKg + manualKg;
+      roastedKg       = lotBreakdown.roastedKg;
+      completedLots   = lotBreakdown.completedLots || [];
+      availableKg     = roastedKg;
       if (availableKg === 0 && lotBreakdown.hasNoLots) availableKg = null;
+      nextEventKg     = lotBreakdown.nextEventKg;
+      nextEventDate   = lotBreakdown.nextEventDate;
+      nextEventStatus = lotBreakdown.nextEventStatus;
+      nextEventLotCode= lotBreakdown.nextEventLotCode;
     } catch (_) { /* non-fatal */ }
 
-    res.json({ availableKg, roastedKg, manualKg, presentaciones: presentations.map(pp => {
+    res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       if (availableKg !== null) {
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :

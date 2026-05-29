@@ -1203,39 +1203,75 @@ async function updateProductLotKg(productId, kgDisponible) {
 
 /**
  * Returns available kg split by source:
- *   roastedKg — from completed roast events (product_lot_assignments)
- *   manualKg  — from products.stock (initial/manual stock set by user)
- *   hasNoLots — true when no roast lots AND stock = 0
+ *   roastedKg       — total kg disponible de eventos completados
+ *   completedLots   — array de lotes completados: [{ kg, roastedAt, lotCode }]
+ *   hasNoLots       — true when no completed roast lots
+ *   nextEventKg     — kg_offered in the next planned/in_progress event
+ *   nextEventDate   — roasted_at ISO string of that event (null if none)
+ *   nextEventStatus — 'planned' | 'in_progress' | null
+ *   nextEventLotCode— cached_lot_code of that event (null if none)
  */
 async function getProductAvailableKgBreakdown(productId) {
-  const [lotsRes, productRes] = await Promise.all([
+  const [lotsRes, nextEventRes] = await Promise.all([
     axios.get(
-      `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent('kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))')}`,
+      `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent('kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status,roasted_at,cached_lot_code))')}`,
       { headers: headers() }
     ).catch(() => ({ data: [] })),
     axios.get(
-      `${base()}/rest/v1/products?id=eq.${productId}&select=stock`,
+      `${base()}/rest/v1/event_offers?product_id=eq.${productId}&select=${encodeURIComponent('kg_offered,event:roast_events(id,roasted_at,status,cached_lot_code)')}`,
       { headers: headers() }
     ).catch(() => ({ data: [] })),
   ]);
 
-  const lots     = lotsRes.data || [];
-  const manualKg = Number(productRes.data?.[0]?.stock) || 0;
+  const lots = lotsRes.data || [];
 
-  const roastedKg = lots.reduce((sum, a) => {
+  // Build per-lot breakdown for completed events
+  const completedLots = [];
+  let roastedKg = 0;
+  for (const a of lots) {
     const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
-    if (ev?.status !== 'completed') return sum;
-    return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
-  }, 0);
+    if (ev?.status !== 'completed') continue;
+    const kg = Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+    roastedKg += kg;
+    completedLots.push({
+      kg,
+      roastedAt: ev.roasted_at || null,
+      lotCode:   ev.cached_lot_code || null,
+    });
+  }
+  // Sort oldest → newest
+  completedLots.sort((a, b) => new Date(a.roastedAt || 0) - new Date(b.roastedAt || 0));
 
-  const hasNoLots = lots.length === 0 && manualKg === 0;
-  return { roastedKg, manualKg, hasNoLots };
+  // Find next upcoming event (planned or in_progress), sorted by roasted_at asc
+  const upcomingOffers = (nextEventRes.data || [])
+    .filter(o => {
+      const ev = Array.isArray(o.event) ? o.event[0] : o.event;
+      return ev?.status === 'planned' || ev?.status === 'in_progress';
+    })
+    .sort((a, b) => {
+      const dateA = new Date((Array.isArray(a.event) ? a.event[0] : a.event)?.roasted_at || 0);
+      const dateB = new Date((Array.isArray(b.event) ? b.event[0] : b.event)?.roasted_at || 0);
+      return dateA - dateB;
+    });
+
+  let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
+  if (upcomingOffers.length > 0) {
+    const offer = upcomingOffers[0];
+    const ev = Array.isArray(offer.event) ? offer.event[0] : offer.event;
+    nextEventKg     = Number(offer.kg_offered) || 0;
+    nextEventDate   = ev?.roasted_at || null;
+    nextEventStatus = ev?.status || null;
+    nextEventLotCode= ev?.cached_lot_code || null;
+  }
+
+  const hasNoLots = completedLots.length === 0;
+  return { roastedKg, completedLots, hasNoLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode };
 }
 
 async function getProductAvailableKg(productId) {
-  const { roastedKg, manualKg, hasNoLots } = await getProductAvailableKgBreakdown(productId);
+  const { roastedKg, hasNoLots } = await getProductAvailableKgBreakdown(productId);
   if (hasNoLots) return null;
-  return roastedKg + manualKg;
+  return roastedKg;
 }
 
 module.exports = {
