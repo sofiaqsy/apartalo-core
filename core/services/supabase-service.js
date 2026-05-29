@@ -1236,6 +1236,31 @@ async function updateProductLotKg(productId, kgDisponible) {
   }
 }
 
+/**
+ * Returns available kg split by source:
+ *   roastedKg — from completed roast events
+ *   manualKg  — from manual lot (no output_lot_id)
+ *   hasNoLots — true when product has zero lot records
+ */
+async function getProductAvailableKgBreakdown(productId) {
+  const lotSelect = 'kg_assigned,kg_sold,output_lot_id,output_lot:roast_output_lots(event:roast_events(status))';
+  const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`;
+  const { data: lots } = await axios.get(url, { headers: headers() });
+  if (!lots?.length) return { roastedKg: 0, manualKg: 0, hasNoLots: true };
+
+  let roastedKg = 0, manualKg = 0;
+  for (const a of lots) {
+    const avail = Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+    if (!a.output_lot_id) {
+      manualKg += avail;
+    } else {
+      const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+      if (ev?.status === 'completed') roastedKg += avail;
+    }
+  }
+  return { roastedKg, manualKg, hasNoLots: false };
+}
+
 async function getProductAvailableKg(productId) {
   const lotSelect = 'kg_assigned,kg_sold,output_lot_id,output_lot:roast_output_lots(event:roast_events(status))';
   const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`;
@@ -1261,6 +1286,7 @@ module.exports = {
   getAllProducts,
   getProductsWithPresentations,
   getProductAvailableKg,
+  getProductAvailableKgBreakdown,
   updateProductLotKg,
   createProduct,
   updateProduct,

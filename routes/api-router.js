@@ -1404,13 +1404,17 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     const supabaseService = require('../core/services/supabase-service');
     const presentations = await supabaseService.getPresentations(productId);
 
-    // Derive stock from FIFO lot pool (same logic as getProductsWithPresentations)
-    let availableKg = null;
+    // Derive stock from FIFO lot pool, split by source
+    let availableKg = null, roastedKg = 0, manualKg = 0;
     try {
-      availableKg = await supabaseService.getProductAvailableKg(productId);
-    } catch (_) { /* non-fatal — fall back to pp.stock */ }
+      const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
+      roastedKg  = lotBreakdown.roastedKg;
+      manualKg   = lotBreakdown.manualKg;
+      availableKg = roastedKg + manualKg;
+      if (availableKg === 0 && lotBreakdown.hasNoLots) availableKg = null;
+    } catch (_) { /* non-fatal */ }
 
-    res.json({ availableKg, presentaciones: presentations.map(pp => {
+    res.json({ availableKg, roastedKg, manualKg, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       if (availableKg !== null) {
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
