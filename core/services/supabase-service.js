@@ -1193,36 +1193,60 @@ async function deleteRow(path, params) {
  * Returns null if no lot assignments exist (product uses manual stock).
  */
 /**
- * Actualiza el kg_assigned del lote activo más reciente para un producto.
- * Mantiene kg_sold intacto; solo ajusta kg_assigned para que:
- *   nuevo_kg_assigned = kg_sold + kg_disponible_deseado
- * Si no existe ningún lote, crea uno manual sin output_lot_id.
+ * Ajusta el disponible TOTAL del producto al valor deseado (kgDisponible).
+ *
+ * Estrategia:
+ *  1. Obtener todos los lotes del producto con su disponible actual.
+ *  2. Calcular el disponible en lotes "de tostado" (con output_lot y evento completed).
+ *  3. Buscar o crear un lote manual (sin output_lot_id) para absorber el ajuste.
+ *  4. kg_manual_assigned = max(0, kgDisponible - disponible_de_tostado)
+ *
+ * Así el total mostrado siempre es exactamente el valor ingresado por el usuario.
  */
 async function updateProductLotKg(productId, kgDisponible) {
-  const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=id,kg_assigned,kg_sold&order=created_at.desc&limit=1`;
+  const lotSelect = 'id,kg_assigned,kg_sold,output_lot_id,output_lot:roast_output_lots(event:roast_events(status))';
+  const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}&order=created_at.asc`;
   const { data: lots } = await axios.get(url, { headers: headers() });
 
-  if (lots?.length) {
-    const lot = lots[0];
-    const kgSold = Number(lot.kg_sold) || 0;
-    const newKgAssigned = kgSold + kgDisponible;
-    await patch('product_lot_assignments', { id: `eq.${lot.id}` }, { kg_assigned: newKgAssigned });
+  // Calcular disponible en lotes de tostado (con evento completed)
+  const roastedAvailable = (lots || []).reduce((sum, a) => {
+    if (!a.output_lot_id) return sum; // lote manual, no contar aquí
+    const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
+    if (ev?.status !== 'completed') return sum;
+    return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+  }, 0);
+
+  // Kg que debe tener el lote manual para que el total sea exactamente kgDisponible
+  const kgManual = Math.max(0, kgDisponible - roastedAvailable);
+
+  // Buscar lote manual existente (sin output_lot_id)
+  const manualLot = (lots || []).find(a => !a.output_lot_id);
+
+  if (manualLot) {
+    await patch('product_lot_assignments', { id: `eq.${manualLot.id}` }, {
+      kg_assigned: kgManual,
+      kg_sold: 0,
+    });
   } else {
-    // Sin lote previo — crear uno manual
     await post('product_lot_assignments', [{
       product_id:  productId,
-      kg_assigned: kgDisponible,
+      kg_assigned: kgManual,
       kg_sold:     0,
     }]);
   }
 }
 
 async function getProductAvailableKg(productId) {
-  const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
+  const lotSelect = 'kg_assigned,kg_sold,output_lot_id,output_lot:roast_output_lots(event:roast_events(status))';
   const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`;
   const { data: lots } = await axios.get(url, { headers: headers() });
   if (!lots?.length) return null;
   return lots.reduce((sum, a) => {
+    // Lote manual (sin output_lot_id) — siempre contar
+    if (!a.output_lot_id) {
+      return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
+    }
+    // Lote de tostado — solo si evento completed
     const ev = Array.isArray(a.output_lot?.event) ? a.output_lot?.event[0] : a.output_lot?.event;
     if (ev?.status !== 'completed') return sum;
     return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
