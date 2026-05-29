@@ -284,7 +284,6 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
         const msgs = {
           CONFIRMADO:     `✅ Tu pedido *${pedido.id}* ha sido confirmado.`,
           EN_PREPARACION: `📦 Tu pedido *${pedido.id}* está en preparación.`,
-          LISTO:          `✅ Tu pedido *${pedido.id}* está listo.`,
           ENVIADO:        `🚚 Tu pedido *${pedido.id}* ha sido enviado.`,
           COMPLETADO:     `✅ Tu pedido *${pedido.id}* ha sido completado. ¡Gracias!`,
           CANCELADO:      `❌ Tu pedido *${pedido.id}* ha sido cancelado.`
