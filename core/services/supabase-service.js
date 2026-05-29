@@ -823,27 +823,32 @@ async function restoreStockOnCancel(supabaseOrderId) {
 async function updateOrderStatus(supabaseId, estado) {
   const up = estado.toUpperCase();
 
-  // ── Bloquear cambios manuales en pre-ventas ────────────────────────────────
-  // El estado de las pre-ventas se actualiza automáticamente al ejecutar el evento.
-  // Solo se permite CANCELADO manualmente.
+  // ── Bloquear cambios manuales en pre-ventas (solo si el evento aún no culminó) ──
+  // Una vez que el evento está completed, se permite gestionar manualmente el pedido.
+  // Solo CANCELADO siempre está permitido.
   if (up !== 'CANCELADO') {
     const orderRows = await get('orders', { id: `eq.${supabaseId}`, select: 'notes' });
     const order = orderRows[0];
     if (order) {
-      const isPreVenta = /^\[PRE-VENTA:/.test(order.notes || '');
-      if (!isPreVenta) {
-        // También revisar items
+      // Detectar si es pre-venta por notes o por source_event_id en items
+      const eventIdFromNotes = (order.notes || '').match(/^\[PRE-VENTA:([^\]]*)\]/)?.[1] || null;
+      let sourceEventId = eventIdFromNotes;
+
+      if (!sourceEventId) {
         const itemRows = await get('order_items', { order_id: `eq.${supabaseId}`, select: 'source_event_id', limit: 1 });
-        const hasSourceEvent = itemRows.some(i => i.source_event_id);
-        if (hasSourceEvent) {
+        sourceEventId = itemRows.find(i => i.source_event_id)?.source_event_id || null;
+      }
+
+      if (sourceEventId) {
+        // Verificar si el evento ya culminó
+        const eventRows = await get('roast_events', { id: `eq.${sourceEventId}`, select: 'status' });
+        const eventStatus = eventRows[0]?.status;
+        if (eventStatus !== 'completed') {
           const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se actualizará automáticamente al ejecutar el evento.');
           err.code = 'PREVENTA_STATUS_LOCKED';
           throw err;
         }
-      } else {
-        const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se actualizará automáticamente al ejecutar el evento.');
-        err.code = 'PREVENTA_STATUS_LOCKED';
-        throw err;
+        // Evento completed → permitir cambios manuales
       }
     }
   }
