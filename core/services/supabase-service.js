@@ -1192,6 +1192,31 @@ async function deleteRow(path, params) {
  * Only counts assignments whose roast event is 'completed'.
  * Returns null if no lot assignments exist (product uses manual stock).
  */
+/**
+ * Actualiza el kg_assigned del lote activo más reciente para un producto.
+ * Mantiene kg_sold intacto; solo ajusta kg_assigned para que:
+ *   nuevo_kg_assigned = kg_sold + kg_disponible_deseado
+ * Si no existe ningún lote, crea uno manual sin output_lot_id.
+ */
+async function updateProductLotKg(productId, kgDisponible) {
+  const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=id,kg_assigned,kg_sold&order=created_at.desc&limit=1`;
+  const { data: lots } = await axios.get(url, { headers: headers() });
+
+  if (lots?.length) {
+    const lot = lots[0];
+    const kgSold = Number(lot.kg_sold) || 0;
+    const newKgAssigned = kgSold + kgDisponible;
+    await patch('product_lot_assignments', { id: `eq.${lot.id}` }, { kg_assigned: newKgAssigned });
+  } else {
+    // Sin lote previo — crear uno manual
+    await post('product_lot_assignments', [{
+      product_id:  productId,
+      kg_assigned: kgDisponible,
+      kg_sold:     0,
+    }]);
+  }
+}
+
 async function getProductAvailableKg(productId) {
   const lotSelect = 'kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))';
   const url = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent(lotSelect)}`;
@@ -1212,6 +1237,7 @@ module.exports = {
   getAllProducts,
   getProductsWithPresentations,
   getProductAvailableKg,
+  updateProductLotKg,
   createProduct,
   updateProduct,
   getProductById,

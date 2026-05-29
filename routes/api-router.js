@@ -1524,6 +1524,31 @@ router.delete('/productos/:businessId/:productId/presentaciones/:presentationId'
   }
 });
 
+// ─── DISPONIBLE EN LOTE ──────────────────────────────────────────────────────
+// PATCH /api/productos/:businessId/:productId/lote
+// Body: { kg_disponible: number }  — actualiza kg_assigned del lote activo más reciente
+router.patch('/productos/:businessId/:productId/lote', async (req, res) => {
+  try {
+    const { businessId, productId } = req.params;
+    const { kg_disponible } = req.body;
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const kgNum = parseFloat(kg_disponible);
+    if (isNaN(kgNum) || kgNum < 0) {
+      return res.status(400).json({ error: 'kg_disponible debe ser un número >= 0' });
+    }
+
+    const supabaseService = require('../core/services/supabase-service');
+    await supabaseService.updateProductLotKg(productId, kgNum);
+    res.json({ success: true, kg_disponible: kgNum });
+  } catch (error) {
+    console.error('❌ Error actualizando lote:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ─── RECETAS ─────────────────────────────────────────────────────────────────
 
 // GET all recipes (optionally filtered by ?codigoDestino=XXX)
