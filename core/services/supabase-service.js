@@ -821,10 +821,36 @@ async function restoreStockOnCancel(supabaseOrderId) {
 }
 
 async function updateOrderStatus(supabaseId, estado) {
+  const up = estado.toUpperCase();
+
+  // ── Bloquear cambios manuales en pre-ventas ────────────────────────────────
+  // El estado de las pre-ventas se actualiza automáticamente al ejecutar el evento.
+  // Solo se permite CANCELADO manualmente.
+  if (up !== 'CANCELADO') {
+    const orderRows = await get('orders', { id: `eq.${supabaseId}`, select: 'notes' });
+    const order = orderRows[0];
+    if (order) {
+      const isPreVenta = /^\[PRE-VENTA:/.test(order.notes || '');
+      if (!isPreVenta) {
+        // También revisar items
+        const itemRows = await get('order_items', { order_id: `eq.${supabaseId}`, select: 'source_event_id', limit: 1 });
+        const hasSourceEvent = itemRows.some(i => i.source_event_id);
+        if (hasSourceEvent) {
+          const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se actualizará automáticamente al ejecutar el evento.');
+          err.code = 'PREVENTA_STATUS_LOCKED';
+          throw err;
+        }
+      } else {
+        const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se actualizará automáticamente al ejecutar el evento.');
+        err.code = 'PREVENTA_STATUS_LOCKED';
+        throw err;
+      }
+    }
+  }
+
   const status = toStatus(estado);
   const fields = { status };
   const now = new Date().toISOString();
-  const up = estado.toUpperCase();
   if (up === 'CONFIRMADO'     || status === 'confirmed') fields.confirmed_at  = now;
   if (up === 'EN_PREPARACION' || status === 'preparing') fields.preparing_at  = now;
   if (up === 'ENVIADO'        || status === 'shipped')   fields.shipped_at    = now;

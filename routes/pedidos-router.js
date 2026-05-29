@@ -297,6 +297,9 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     return res.json({ success: true, mensaje: 'Pedido actualizado', pedidoId });
   } catch (error) {
     console.error('❌ Error actualizando pedido:', error);
+    if (error.code === 'PREVENTA_STATUS_LOCKED') {
+      return res.status(403).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: error.message });
   }
 });
