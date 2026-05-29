@@ -618,20 +618,16 @@ function mapOrder(o, items = [], payments = []) {
         || items.find(i => i.source_event_id)?.source_event_id
         || null,
     origen: 'APP',
-    // Si payment_status es 'pending' pero el status ya pasó al lado pagado,
-    // inferimos PAGADO para no mostrar falso PENDIENTE_PAGO en la app.
+    // Inferir PAGADO desde paid_at (seteo explícito de pago) no desde el status
+    // — confirmar un pedido ≠ haberlo cobrado.
     estadoPago: (() => {
       const ps = o.payment_status;
       if (ps && ps !== 'pending') return fromPayStatus(ps);
-      const paidStatuses = ['paid', 'preparing', 'shipped', 'delivered'];
-      if (paidStatuses.includes(o.status)) return 'PAGADO';
+      // paid_at indica que hubo un cobro real (checkout, evidencia verificada, etc.)
+      if (o.paid_at) return 'PAGADO';
       return fromPayStatus(ps);
     })(),
-    montoPagado: montoCents > 0 ? montoCents / 100 : (() => {
-      // Si no hay pagos registrados pero la orden ya está paid, usar el total
-      const paidStatuses = ['paid', 'preparing', 'shipped', 'delivered'];
-      return paidStatuses.includes(o.status) ? (o.total_cents || 0) / 100 : 0;
-    })(),
+    montoPagado: montoCents > 0 ? montoCents / 100 : (o.paid_at ? (o.total_cents || 0) / 100 : 0),
     fechaPago: o.paid_at ? new Date(o.paid_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
     pagos: payments.map(p => ({
       id: p.id, monto: p.amount_cents / 100,
@@ -829,16 +825,14 @@ async function updateOrderStatus(supabaseId, estado) {
   const fields = { status };
   const now = new Date().toISOString();
   const up = estado.toUpperCase();
-  if (up === 'CONFIRMADO')     fields.confirmed_at = now;
-  if (up === 'EN_PREPARACION') fields.preparing_at = now;
-  if (up === 'LISTO')          fields.ready_at = now;
-  if (up === 'ENVIADO')        fields.shipped_at = now;
-  if (up === 'ENTREGADO')      fields.delivered_at = now;
-  // Sincronizar payment_status cuando el estado implica pago
-  if (['paid', 'preparing', 'shipped', 'delivered'].includes(status)) {
-    fields.payment_status = 'paid';
-    fields.paid_at = fields.paid_at || now;
-  }
+  // Reconocer tanto formato español (CONFIRMADO) como Supabase directo (paid)
+  if (up === 'CONFIRMADO'     || status === 'paid')      fields.confirmed_at  = now;
+  if (up === 'EN_PREPARACION' || status === 'preparing') fields.preparing_at  = now;
+  if (up === 'LISTO'          || status === 'ready')     fields.ready_at      = now;
+  if (up === 'ENVIADO'        || status === 'shipped')   fields.shipped_at    = now;
+  if (up === 'ENTREGADO'      || status === 'delivered') fields.delivered_at  = now;
+  // NO sincronizar payment_status desde el estado del pedido —
+  // el pago se gestiona por separado (updatePaymentStatus / evidencias).
   const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
 
   if (up === 'CONFIRMADO') {
