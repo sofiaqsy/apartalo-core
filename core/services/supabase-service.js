@@ -383,7 +383,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
     shipping_cents:   shipping,
     total_cents:      subtotalCents + shipping,
     currency,
-    status:           'pending_payment',
+    status:           'pending',
     payment_method:   paymentMethod || null
   });
 
@@ -1357,7 +1357,7 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
     shipping_cents: 0,
     total_cents:    lineTotalCents,
     currency,
-    status:         'pending_payment',
+    status:         'pending',
     payment_method: 'pending',
     notes:          `Pre-orden de tueste programado`
   });
@@ -1380,7 +1380,7 @@ async function createPreorden({ farmId, offerId, sourceEventId, presentationId, 
     commission_cents:   Math.round(lineTotalCents * 0.10),
     payout_cents:       Math.round(lineTotalCents * 0.90),
     source_event_id:    sourceEventId,
-    fulfillment_status: 'pending_payment'
+    fulfillment_status: 'pending'
   }]);
 
   return { orderId: order.id, orderNumber: order.order_number };
