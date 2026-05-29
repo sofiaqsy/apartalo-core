@@ -34,6 +34,47 @@ function parseNotes(raw) {
 }
 function serializeNotes(obj) { return JSON.stringify(obj); }
 
+// ── Enriquece un array de eventos con stats de ventas ─────────────────────────
+// Añade: kg_offered, kg_reserved, preventa_count a cada evento.
+async function enrichEventsWithStats(events) {
+  if (!events?.length) return events;
+
+  const eventIds = events.map(e => e.id);
+
+  // Paralelo: event_offers + conteo de pre-ventas por evento
+  const [offersRes, ...preventaCounts] = await Promise.all([
+    axios.get(
+      rest('/event_offers') + `?select=event_id,kg_offered,kg_reserved&event_id=in.(${eventIds.join(',')})`,
+      { headers: headers() }
+    ).catch(() => ({ data: [] })),
+    ...eventIds.map(id =>
+      axios.get(
+        rest('/orders') + `?select=id&notes=like.[PRE-VENTA:${id}]%25&status=neq.cancelled`,
+        { headers: headers() }
+      ).then(r => ({ id, count: r.data?.length ?? 0 }))
+      .catch(() => ({ id, count: 0 }))
+    ),
+  ]);
+
+  // Mapa: eventId → { kg_offered, kg_reserved }
+  const offersMap = {};
+  for (const o of offersRes.data || []) {
+    if (!offersMap[o.event_id]) offersMap[o.event_id] = { kg_offered: 0, kg_reserved: 0 };
+    offersMap[o.event_id].kg_offered  += parseFloat(o.kg_offered)  || 0;
+    offersMap[o.event_id].kg_reserved += parseFloat(o.kg_reserved) || 0;
+  }
+
+  // Mapa: eventId → preventa_count
+  const preventaMap = Object.fromEntries(preventaCounts.map(p => [p.id, p.count]));
+
+  return events.map(ev => ({
+    ...ev,
+    kg_offered:     offersMap[ev.id]?.kg_offered  ?? 0,
+    kg_reserved:    offersMap[ev.id]?.kg_reserved ?? 0,
+    preventa_count: preventaMap[ev.id] ?? 0,
+  }));
+}
+
 // ── POST /api/tostador/login ──────────────────────────────────────────────────
 router.post('/login', async (req, res) => {
   try {
@@ -104,16 +145,17 @@ router.get('/events', async (req, res) => {
       for (const f of (farms || [])) farmMap[f.id] = f.name;
     }
 
-    const result = (events || []).map(ev => {
+    const mapped = (events || []).map(ev => {
       const notes = parseNotes(ev.notes);
       return { ...ev, farm_name: farmMap[ev.farm_id] || 'Finca', notes_text: notes.text, media_urls: notes.media };
     });
 
-    result.sort((a, b) => {
+    mapped.sort((a, b) => {
       const o = { in_progress: 0, planned: 1 };
       return (o[a.status] ?? 2) - (o[b.status] ?? 2);
     });
 
+    const result = await enrichEventsWithStats(mapped);
     res.json(result);
   } catch (err) {
     console.error('[tostador/events]', err.message);
@@ -151,10 +193,12 @@ router.get('/history', async (req, res) => {
       for (const f of (farms || [])) farmMap[f.id] = f.name;
     }
 
-    res.json((events || []).map(ev => {
+    const historyMapped = (events || []).map(ev => {
       const notes = parseNotes(ev.notes);
       return { ...ev, farm_name: farmMap[ev.farm_id] || 'Finca', notes_text: notes.text, media_urls: notes.media };
-    }));
+    });
+    const historyResult = await enrichEventsWithStats(historyMapped);
+    res.json(historyResult);
   } catch (err) {
     console.error('[tostador/history]', err.message);
     res.status(500).json({ error: 'Error obteniendo historial' });
@@ -259,8 +303,8 @@ router.post('/events/:id/complete', async (req, res) => {
       if (preventas && preventas.length > 0) {
         // Update each pending/paid pre-venta order to 'paid' (CONFIRMADO)
         await axios.patch(
-          rest('/orders') + `?notes=like.[PRE-VENTA:${id}]%&status=in.(pending_payment,paid)`,
-          { status: 'paid', updated_at: completedAt },
+          rest('/orders') + `?notes=like.[PRE-VENTA:${id}]%25&status=in.(pending_payment,paid)`,
+          { status: 'paid', payment_status: 'paid', paid_at: completedAt, updated_at: completedAt },
           { headers: headers() }
         );
         preventasConfirmadas = preventas.length;
