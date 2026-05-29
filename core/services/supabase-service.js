@@ -581,8 +581,23 @@ function mapOrder(o, items = [], payments = []) {
     fecha: o.created_at ? new Date(o.created_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
     hora:  o.created_at ? new Date(o.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '',
     whatsapp: o.customer_phone || '', cliente: o.customer_name || '', telefono: o.customer_phone || '',
-    direccion: addr.line1 || addr.address || '', ciudad: addr.city || '', departamento: addr.department || '',
-    tipoEnvio: addr.tipo || '', empresaEnvio: addr.courier || '',
+    // Soporte para delivery_method: 'pickup' (recojo en tienda)
+    ...(() => {
+      const isPickup = addr.delivery_method === 'pickup';
+      return {
+        direccion:    addr.line1 || addr.address || (isPickup ? (addr.pickup_address || '') : ''),
+        ciudad:       addr.city  || (isPickup ? (addr.pickup_city || '') : ''),
+        departamento: addr.department || (isPickup ? (addr.pickup_department || '') : ''),
+        tipoEnvio:    addr.tipo  || (isPickup ? 'SEDE' : ''),
+        empresaEnvio: addr.courier || '',
+        // Campos extra para el widget de entrega
+        pickupName:   isPickup ? (addr.pickup_name || '') : '',
+        pickupAddress: isPickup ? (addr.pickup_address || '') : '',
+        pickupCiudad: isPickup
+          ? [addr.pickup_city, addr.pickup_department].filter(Boolean).join(', ')
+          : '',
+      };
+    })(),
     productos: items.map(i => `${i.quantity}x ${i.product_name} - S/${(i.line_total_cents/100).toFixed(2)}`).join('\n'),
     productosDetalle: items.map(i => ({
       id: i.product_id, codigo: i.product_id, nombre: i.product_name,
