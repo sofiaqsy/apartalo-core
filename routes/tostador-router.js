@@ -297,14 +297,14 @@ router.post('/events/:id/complete', async (req, res) => {
     let preventasConfirmadas = 0;
     try {
       const preventasUrl = rest('/orders')
-        + `?select=id,status&notes=like.[PRE-VENTA:${id}]%&status=in.(pending_payment,paid)`;
+        + `?select=id,status&notes=like.[PRE-VENTA:${id}]%25&status=in.(pending,confirmed)`;
       const { data: preventas } = await axios.get(preventasUrl, { headers: headers() });
 
       if (preventas && preventas.length > 0) {
-        // Update each pending/paid pre-venta order to 'paid' (CONFIRMADO)
+        // Marcar pre-ventas como delivered y pago como paid al completar el evento
         await axios.patch(
-          rest('/orders') + `?notes=like.[PRE-VENTA:${id}]%25&status=in.(pending_payment,paid)`,
-          { status: 'paid', payment_status: 'paid', paid_at: completedAt, updated_at: completedAt },
+          rest('/orders') + `?notes=like.[PRE-VENTA:${id}]%25&status=in.(pending,confirmed)`,
+          { status: 'delivered', payment_status: 'paid', paid_at: completedAt, updated_at: completedAt },
           { headers: headers() }
         );
         preventasConfirmadas = preventas.length;

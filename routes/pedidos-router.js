@@ -312,7 +312,7 @@ router.delete('/:businessId/:pedidoId', async (req, res) => {
     const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
-    if (pedido._status !== 'pending_payment') {
+    if (pedido._status !== 'pending') {
       return res.status(403).json({ error: 'Solo se pueden eliminar pedidos en estado PENDIENTE', estadoActual: pedido.estado, pedidoId });
     }
 

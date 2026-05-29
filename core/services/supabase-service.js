@@ -544,20 +544,20 @@ async function deleteCustomerPrice(customerId, presentationId) {
 // ─── ORDERS (extended) ────────────────────────────────────────────────────────
 
 const ESTADO_TO_STATUS = {
-  PENDIENTE: 'pending_payment', CONFIRMADO: 'paid',
-  EN_PREPARACION: 'preparing',  LISTO: 'ready',
+  PENDIENTE: 'pending', CONFIRMADO: 'confirmed',
+  EN_PREPARACION: 'preparing',
   ENVIADO: 'shipped', ENTREGADO: 'delivered',
   COMPLETADO: 'delivered', CANCELADO: 'cancelled'
 };
 const STATUS_TO_ESTADO = {
-  pending_payment: 'PENDIENTE', paid: 'CONFIRMADO', preparing: 'EN_PREPARACION',
-  ready: 'LISTO', shipped: 'ENVIADO', delivered: 'COMPLETADO',
+  pending: 'PENDIENTE', confirmed: 'CONFIRMADO', preparing: 'EN_PREPARACION',
+  shipped: 'ENVIADO', delivered: 'COMPLETADO',
   cancelled: 'CANCELADO', refunded: 'CANCELADO'
 };
 const ESTADOPAGO_TO_PS = { PENDIENTE_PAGO: 'pending', PARCIAL: 'partial', PAGADO: 'paid' };
 const PS_TO_ESTADOPAGO = { pending: 'PENDIENTE_PAGO', partial: 'PARCIAL', paid: 'PAGADO' };
 
-function toStatus(estado)     { return ESTADO_TO_STATUS[(estado||'').toUpperCase()]  || 'pending_payment'; }
+function toStatus(estado)     { return ESTADO_TO_STATUS[(estado||'').toUpperCase()]  || 'pending'; }
 function fromStatus(s)        { return STATUS_TO_ESTADO[s]   || 'PENDIENTE'; }
 function toPayStatus(ep)      { return ESTADOPAGO_TO_PS[(ep||'').toUpperCase()] || 'pending'; }
 function fromPayStatus(ps)    { return PS_TO_ESTADOPAGO[ps]  || 'PENDIENTE_PAGO'; }
@@ -811,7 +811,7 @@ async function restoreStockOnCancel(supabaseOrderId) {
 
     if (sourceEventId) {
       await adjustKgReservedForOrder(supabaseOrderId, sourceEventId, -1);
-    } else if (['paid', 'preparing', 'ready', 'shipped', 'delivered'].includes(order.status)) {
+    } else if (['confirmed', 'preparing', 'shipped', 'delivered'].includes(order.status)) {
       // Regular order already confirmed → restore stock
       await restoreStockItems(supabaseOrderId);
     }
@@ -825,10 +825,8 @@ async function updateOrderStatus(supabaseId, estado) {
   const fields = { status };
   const now = new Date().toISOString();
   const up = estado.toUpperCase();
-  // Reconocer tanto formato español (CONFIRMADO) como Supabase directo (paid)
-  if (up === 'CONFIRMADO'     || status === 'paid')      fields.confirmed_at  = now;
+  if (up === 'CONFIRMADO'     || status === 'confirmed') fields.confirmed_at  = now;
   if (up === 'EN_PREPARACION' || status === 'preparing') fields.preparing_at  = now;
-  if (up === 'LISTO'          || status === 'ready')     fields.ready_at      = now;
   if (up === 'ENVIADO'        || status === 'shipped')   fields.shipped_at    = now;
   if (up === 'ENTREGADO'      || status === 'delivered') fields.delivered_at  = now;
   // NO sincronizar payment_status desde el estado del pedido —
