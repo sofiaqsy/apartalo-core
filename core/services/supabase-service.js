@@ -823,14 +823,14 @@ async function restoreStockOnCancel(supabaseOrderId) {
 async function updateOrderStatus(supabaseId, estado) {
   const up = estado.toUpperCase();
 
-  // ── Bloquear cambios manuales en pre-ventas (solo si el evento aún no culminó) ──
-  // Una vez que el evento está completed, se permite gestionar manualmente el pedido.
-  // Solo CANCELADO siempre está permitido.
-  if (up !== 'CANCELADO') {
+  // ── Restricciones para pre-ventas ────────────────────────────────────────────
+  // Permitido siempre:   CANCELADO, CONFIRMADO
+  // Bloqueado hasta que el evento culmine: EN_PREPARACION, ENVIADO, ENTREGADO, etc.
+  const ESTADOS_LIBRES_PREVENTA = new Set(['CANCELADO', 'CONFIRMADO']);
+  if (!ESTADOS_LIBRES_PREVENTA.has(up)) {
     const orderRows = await get('orders', { id: `eq.${supabaseId}`, select: 'notes' });
     const order = orderRows[0];
     if (order) {
-      // Detectar si es pre-venta por notes o por source_event_id en items
       const eventIdFromNotes = (order.notes || '').match(/^\[PRE-VENTA:([^\]]*)\]/)?.[1] || null;
       let sourceEventId = eventIdFromNotes;
 
@@ -840,7 +840,6 @@ async function updateOrderStatus(supabaseId, estado) {
       }
 
       if (sourceEventId) {
-        // Verificar si el evento ya culminó
         const eventRows = await get('roast_events', { id: `eq.${sourceEventId}`, select: 'status' });
         const eventStatus = eventRows[0]?.status;
         if (eventStatus !== 'completed') {
@@ -848,7 +847,6 @@ async function updateOrderStatus(supabaseId, estado) {
           err.code = 'PREVENTA_STATUS_LOCKED';
           throw err;
         }
-        // Evento completed → permitir cambios manuales
       }
     }
   }
