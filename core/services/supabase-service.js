@@ -844,7 +844,7 @@ async function updateOrderStatus(supabaseId, estado) {
         const eventRows = await get('roast_events', { id: `eq.${sourceEventId}`, select: 'status' });
         const eventStatus = eventRows[0]?.status;
         if (eventStatus !== 'completed') {
-          const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se actualizará automáticamente al ejecutar el evento.');
+          const err = new Error('Las pre-ventas no permiten cambios manuales de estado. El estado se podrá actualizar cuando el evento de tostado culmine.');
           err.code = 'PREVENTA_STATUS_LOCKED';
           throw err;
         }
