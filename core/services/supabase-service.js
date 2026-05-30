@@ -332,8 +332,18 @@ async function updateCustomer(profileId, fields) {
 async function createOrder({ customer, farmId, items, shippingAddress, notes, paymentMethod, currency = 'USD', shippingCents = 0, esPreventa = false, sourceEventId = null }) {
   // ── Stock validation — skipped for pre-ventas (product not yet roasted) ──
   if (!esPreventa) for (const item of items) {
-    const kgPerUnit = item.unit === 'kg' ? Number(item.pack_size || 0) :
-                      item.unit === 'g'  ? Number(item.pack_size || 0) / 1000 : 0;
+    // pack_size may not be sent by the client; fetch from DB when missing
+    let packSize = item.pack_size;
+    let unit     = item.unit;
+    if ((!packSize || packSize === 0) && item.presentacionId) {
+      try {
+        const rows = await get('product_presentations', { id: `eq.${item.presentacionId}`, select: 'pack_size,unit' });
+        if (rows[0]) { packSize = rows[0].pack_size; unit = rows[0].unit; }
+      } catch (_) {}
+    }
+
+    const kgPerUnit = unit === 'kg' ? Number(packSize || 0) :
+                      unit === 'g'  ? Number(packSize || 0) / 1000 : 0;
     const kgNeeded  = kgPerUnit * Number(item.quantity);
 
     // 1. Coffee (roasted): check FIFO lot pool
