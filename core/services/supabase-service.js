@@ -43,7 +43,7 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images';
+const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images,green_lot_id';
 
 async function getProducts(farmId) {
   return get('products', { farm_id: `eq.${farmId}`, status: 'eq.active', select: PRODUCT_SELECT, order: 'name.asc' });
@@ -169,6 +169,22 @@ async function getProductsWithPresentations(farmId) {
     if (ev?.status !== 'completed') continue;
     const avail = Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
     availableKgByProduct[a.product_id] = (availableKgByProduct[a.product_id] || 0) + avail;
+  }
+
+  // Green coffee: stock comes from green_lots.current_kg
+  const greenLotIds = products.filter(p => p.green_lot_id).map(p => p.green_lot_id);
+  if (greenLotIds.length > 0) {
+    try {
+      const glUrl = `${base()}/rest/v1/green_lots?id=in.(${greenLotIds.join(',')})&select=id,current_kg`;
+      const { data: glRows } = await axios.get(glUrl, { headers: headers() });
+      const glMap = {};
+      for (const gl of (glRows || [])) glMap[gl.id] = Number(gl.current_kg || 0);
+      for (const p of products) {
+        if (p.green_lot_id && glMap[p.green_lot_id] !== undefined) {
+          availableKgByProduct[p.id] = Math.max(0, glMap[p.green_lot_id]);
+        }
+      }
+    } catch (_) { /* non-fatal */ }
   }
 
   const presMap = {};
