@@ -1222,7 +1222,7 @@ async function updateProductLotKg(productId, kgDisponible) {
  *   nextEventLotCode— cached_lot_code of that event (null if none)
  */
 async function getProductAvailableKgBreakdown(productId) {
-  const [lotsRes, nextEventRes] = await Promise.all([
+  const [lotsRes, nextEventRes, productRes] = await Promise.all([
     axios.get(
       `${base()}/rest/v1/product_lot_assignments?product_id=eq.${productId}&select=${encodeURIComponent('kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status,roasted_at,cached_lot_code))')}`,
       { headers: headers() }
@@ -1231,7 +1231,33 @@ async function getProductAvailableKgBreakdown(productId) {
       `${base()}/rest/v1/event_offers?product_id=eq.${productId}&select=${encodeURIComponent('kg_offered,event:roast_events(id,roasted_at,status,cached_lot_code)')}`,
       { headers: headers() }
     ).catch(() => ({ data: [] })),
+    axios.get(
+      `${base()}/rest/v1/products?id=eq.${productId}&select=green_lot_id`,
+      { headers: headers() }
+    ).catch(() => ({ data: [] })),
   ]);
+
+  // ── Green coffee: stock comes from green_lots.current_kg ──────────────
+  const greenLotId = (productRes.data?.[0])?.green_lot_id || null;
+  if (greenLotId) {
+    const glRes = await axios.get(
+      `${base()}/rest/v1/green_lots?id=eq.${greenLotId}&select=current_kg,lot_code`,
+      { headers: headers() }
+    ).catch(() => ({ data: [] }));
+    const gl = glRes.data?.[0];
+    const greenKg = Math.max(0, Number(gl?.current_kg || 0));
+    return {
+      roastedKg: 0,
+      completedLots: [],
+      hasNoLots: true,
+      nextEventKg: 0,
+      nextEventDate: null,
+      nextEventStatus: null,
+      nextEventLotCode: null,
+      greenKg,
+      isGreenCoffee: true,
+    };
+  }
 
   const lots = lotsRes.data || [];
 

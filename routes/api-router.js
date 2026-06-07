@@ -1407,16 +1407,23 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     // Derive stock from FIFO lot pool + upcoming event info
     let availableKg = null, roastedKg = 0, completedLots = [];
     let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
+    let isGreenCoffee = false;
     try {
       const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
-      roastedKg       = lotBreakdown.roastedKg;
-      completedLots   = lotBreakdown.completedLots || [];
-      availableKg     = roastedKg;
-      if (availableKg === 0 && lotBreakdown.hasNoLots) availableKg = null;
-      nextEventKg     = lotBreakdown.nextEventKg;
-      nextEventDate   = lotBreakdown.nextEventDate;
-      nextEventStatus = lotBreakdown.nextEventStatus;
-      nextEventLotCode= lotBreakdown.nextEventLotCode;
+      isGreenCoffee   = lotBreakdown.isGreenCoffee || false;
+      if (isGreenCoffee) {
+        // Green coffee: stock from green_lots.current_kg
+        availableKg = lotBreakdown.greenKg;
+      } else {
+        roastedKg       = lotBreakdown.roastedKg;
+        completedLots   = lotBreakdown.completedLots || [];
+        availableKg     = roastedKg;
+        if (availableKg === 0 && lotBreakdown.hasNoLots) availableKg = null;
+        nextEventKg     = lotBreakdown.nextEventKg;
+        nextEventDate   = lotBreakdown.nextEventDate;
+        nextEventStatus = lotBreakdown.nextEventStatus;
+        nextEventLotCode= lotBreakdown.nextEventLotCode;
+      }
     } catch (_) { /* non-fatal */ }
 
     res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, presentaciones: presentations.map(pp => {
