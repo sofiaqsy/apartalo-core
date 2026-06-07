@@ -1426,12 +1426,25 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
       }
     } catch (_) { /* non-fatal */ }
 
+    const greenKg = isGreenCoffee ? availableKg : null;
     res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
-      if (availableKg !== null) {
+      const grindArr = Array.isArray(pp.grind) ? pp.grind : (pp.grind ? [pp.grind] : []);
+      const isGreenPres = grindArr.some(g => g === 'green' || g === 'verde');
+
+      if (isGreenPres && greenKg !== null) {
+        // Verde presentation → green lot kg
+        const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
+                          pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
+        stock = kgPerUnit > 0 ? Math.max(0, Math.floor(greenKg / kgPerUnit)) : 0;
+      } else if (!isGreenPres && !isGreenCoffee && availableKg !== null) {
+        // Tostado presentation → roasted kg
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                           pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
         stock = kgPerUnit > 0 ? Math.max(0, Math.floor(availableKg / kgPerUnit)) : 0;
+      } else if (!isGreenPres && isGreenCoffee) {
+        // Non-verde presentation on a green-coffee product → 0
+        stock = 0;
       }
       return {
         id:           pp.id,

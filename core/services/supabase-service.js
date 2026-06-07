@@ -171,7 +171,8 @@ async function getProductsWithPresentations(farmId) {
     availableKgByProduct[a.product_id] = (availableKgByProduct[a.product_id] || 0) + avail;
   }
 
-  // Green coffee: stock comes from green_lots.current_kg
+  // Green coffee: stock comes from green_lots.current_kg (separate map, only for 'verde' grind)
+  const greenKgByProduct = {};
   const greenLotIds = products.filter(p => p.green_lot_id).map(p => p.green_lot_id);
   if (greenLotIds.length > 0) {
     try {
@@ -181,7 +182,7 @@ async function getProductsWithPresentations(farmId) {
       for (const gl of (glRows || [])) glMap[gl.id] = Number(gl.current_kg || 0);
       for (const p of products) {
         if (p.green_lot_id && glMap[p.green_lot_id] !== undefined) {
-          availableKgByProduct[p.id] = Math.max(0, glMap[p.green_lot_id]);
+          greenKgByProduct[p.id] = Math.max(0, glMap[p.green_lot_id]);
         }
       }
     } catch (_) { /* non-fatal */ }
@@ -191,13 +192,24 @@ async function getProductsWithPresentations(farmId) {
   for (const pp of presentations) {
     if (!presMap[pp.product_id]) presMap[pp.product_id] = [];
     let derivedStock = pp.stock || 0;
-    // If this product has lot assignments, derive stock from available kg pool
-    if (availableKgByProduct[pp.product_id] !== undefined) {
+
+    const grindArr = Array.isArray(pp.grind) ? pp.grind : (pp.grind ? [pp.grind] : []);
+    const isGreenPresentation = grindArr.some(g => g === 'green' || g === 'verde');
+
+    if (isGreenPresentation && greenKgByProduct[pp.product_id] !== undefined) {
+      // Verde presentation → use green lot kg
+      const availKg = greenKgByProduct[pp.product_id];
+      const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
+                        pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
+      derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
+    } else if (!isGreenPresentation && availableKgByProduct[pp.product_id] !== undefined) {
+      // Tostado presentation → use roasted FIFO lot kg
       const availKg = availableKgByProduct[pp.product_id];
       const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                         pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
       derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
     }
+
     presMap[pp.product_id].push({
       ...pp,
       stock: derivedStock,
