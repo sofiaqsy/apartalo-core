@@ -61,7 +61,7 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const pedido = await supabaseService.getOrderByIdOrNumber(businessId, pedidoId);
+    const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
     const productos    = parseProductosPublico(pedido.productos);
@@ -126,7 +126,7 @@ router.post('/:businessId/:pedidoId/confirmar', async (req, res) => {
     }
 
     // Read current state
-    const pedido = await supabaseService.getOrderByIdOrNumber(businessId, pedidoId);
+    const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
     const nuevoEstado  = tipo === 'entrega' ? 'ENTREGADO' : 'RECIBIDO';
