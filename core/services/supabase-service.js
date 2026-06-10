@@ -1274,6 +1274,7 @@ async function getProductAvailableKgBreakdown(productId) {
     ).catch(() => ({ data: [] }));
     const gl = glRes.data?.[0];
     const greenKg = Math.max(0, Number(gl?.current_kg || 0));
+    const greenLotCode = gl?.lot_code || null;
     return {
       roastedKg: 0,
       completedLots: [],
@@ -1283,6 +1284,7 @@ async function getProductAvailableKgBreakdown(productId) {
       nextEventStatus: null,
       nextEventLotCode: null,
       greenKg,
+      greenLotCode,
       isGreenCoffee: true,
     };
   }

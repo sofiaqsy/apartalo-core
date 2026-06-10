@@ -1407,13 +1407,14 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     // Derive stock from FIFO lot pool + upcoming event info
     let availableKg = null, roastedKg = 0, completedLots = [];
     let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
-    let isGreenCoffee = false;
+    let isGreenCoffee = false, greenLotCodeVal = null;
     try {
       const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
       isGreenCoffee   = lotBreakdown.isGreenCoffee || false;
       if (isGreenCoffee) {
         // Green coffee: stock from green_lots.current_kg
         availableKg = lotBreakdown.greenKg;
+        greenLotCodeVal = lotBreakdown.greenLotCode || null;
       } else {
         roastedKg       = lotBreakdown.roastedKg;
         completedLots   = lotBreakdown.completedLots || [];
@@ -1427,7 +1428,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     } catch (_) { /* non-fatal */ }
 
     const greenKg = isGreenCoffee ? availableKg : null;
-    res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, presentaciones: presentations.map(pp => {
+    res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, greenKg, greenLotCode: greenLotCodeVal, isGreenCoffee, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       const grindArr = Array.isArray(pp.grind) ? pp.grind : (pp.grind ? [pp.grind] : []);
       const isGreenPres = grindArr.some(g => g === 'green' || g === 'verde');
