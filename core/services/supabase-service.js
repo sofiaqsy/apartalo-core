@@ -645,6 +645,19 @@ function mapOrder(o, items = [], payments = []) {
       presentacionId: i.presentation_id || null,
       grind: i.grind || null,
     })),
+    fechaTueste: (() => {
+      const dates = items
+        .map(i => {
+          const ev = Array.isArray(i.output_lot?.event) ? i.output_lot.event[0] : i.output_lot?.event;
+          return ev?.roasted_at || null;
+        })
+        .filter(Boolean)
+        .sort()
+        .reverse(); // más reciente primero
+      if (!dates.length) return null;
+      const d = new Date(dates[0]);
+      return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Lima' });
+    })(),
     subtotal: (o.subtotal_cents || 0) / 100,
     costoEnvio: (o.shipping_cents || 0) / 100,
     total: o.total_cents / 100,
@@ -736,7 +749,7 @@ async function getOrderByIdOrNumber(idOrNumber) {
   if (!orders[0]) return null;
   const o = orders[0];
   const [items, payments] = await Promise.all([
-    get('order_items', { order_id: `eq.${o.id}`, select: '*' }),
+    get('order_items', { order_id: `eq.${o.id}`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at))` }),
     get('order_payments', { order_id: `eq.${o.id}`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' })
   ]);
   return mapOrder(o, items, payments);
