@@ -795,7 +795,7 @@ async function adjustKgReservedForOrder(supabaseOrderId, sourceEventId, delta) {
  * Called when a previously confirmed order is cancelled.
  */
 async function restoreStockItems(supabaseOrderId) {
-  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=eq.paid&select=id,product_id,presentation_id,quantity,unit,pack_size,output_lot_id`;
+  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=eq.confirmed&select=id,product_id,presentation_id,quantity,unit,pack_size,output_lot_id`;
   const { data: items } = await axios.get(itemsUrl, { headers: headers() });
   if (!items?.length) return;
 
@@ -925,11 +925,11 @@ async function updateOrderStatus(supabaseId, estado) {
 /**
  * Mirrors fincas /api/checkout/[token]/pay stock-deduction logic.
  * Called exactly once: when an order transitions to CONFIRMADO (paid).
- * Uses fulfillment_status = 'paid' on order_items as idempotency guard.
+ * Uses fulfillment_status = 'confirmed' on order_items as idempotency guard.
  */
 async function deductStockOnConfirm(supabaseOrderId) {
   // 1. Fetch only items not yet fulfilled (guard against double-call)
-  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=neq.paid&select=id,product_id,presentation_id,quantity,unit,pack_size,source_event_id`;
+  const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&fulfillment_status=neq.confirmed&select=id,product_id,presentation_id,quantity,unit,pack_size,source_event_id`;
   const { data: items } = await axios.get(itemsUrl, { headers: headers() });
   if (!items?.length) return;
 
@@ -955,7 +955,7 @@ async function deductStockOnConfirm(supabaseOrderId) {
     try {
       // ── Pre-order: kg already reserved via reserve_offer_kg at creation ──
       if (item.source_event_id) {
-        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
 
@@ -975,7 +975,7 @@ async function deductStockOnConfirm(supabaseOrderId) {
             current_kg: Math.max(0, Number(glRows[0].current_kg) - kgNeeded)
           });
         }
-        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+        await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
 
@@ -992,12 +992,12 @@ async function deductStockOnConfirm(supabaseOrderId) {
             });
             await patch('order_items', { id: `eq.${item.id}` }, {
               output_lot_id: fifo.output_lot_id,
-              fulfillment_status: 'paid'
+              fulfillment_status: 'confirmed'
             });
           } else {
             // Coffee product but no available lot — mark paid anyway, log it
             console.warn('[stock] No FIFO lot available for product', item.product_id, `(${kgNeeded} kg needed)`);
-            await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+            await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
           }
           continue; // coffee product handled
         }
@@ -1025,7 +1025,7 @@ async function deductStockOnConfirm(supabaseOrderId) {
           });
         }
       }
-      await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'paid' });
+      await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
 
     } catch (itemErr) {
       console.error('[stock] Error processing item', item.id, itemErr.message);
