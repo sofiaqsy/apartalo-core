@@ -197,13 +197,13 @@ async function getProductsWithPresentations(farmId) {
     const isGreenPresentation = grindArr.some(g => g === 'green' || g === 'verde');
 
     if (isGreenPresentation && greenKgByProduct[pp.product_id] !== undefined) {
-      // Verde presentation → use green lot kg
+      // Verde presentation on a product linked to a green lot → use green lot kg
       const availKg = greenKgByProduct[pp.product_id];
       const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                         pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
       derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
-    } else if (!isGreenPresentation && availableKgByProduct[pp.product_id] !== undefined) {
-      // Tostado presentation → use roasted FIFO lot kg
+    } else if (availableKgByProduct[pp.product_id] !== undefined) {
+      // Tostado presentation (or verde without a linked green lot) → use roasted FIFO lot kg
       const availKg = availableKgByProduct[pp.product_id];
       const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                         pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
