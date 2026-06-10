@@ -509,6 +509,22 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    // ── Supabase path (plataformaExterna) ─────────────────────────────
+    if (negocio.plataformaExterna) {
+      // Resolve order number → UUID if needed (updateOrderStatus requires UUID)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(pedidoId);
+      let supabaseId = pedidoId;
+      if (!isUUID) {
+        const order = await supabaseService.getOrderByIdOrNumber(pedidoId);
+        if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+        supabaseId = order.supabaseId;
+      }
+      await supabaseService.updateOrderStatus(supabaseId, estado);
+      console.log(`[Pedido] ${pedidoId} → ${estado} (supabaseId: ${supabaseId})`);
+      return res.json({ success: true, pedidoId, nuevoEstado: estado });
+    }
+
+    // ── Google Sheets path (legacy) ───────────────────────────────────
     const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Pedidos!A:L');
 
