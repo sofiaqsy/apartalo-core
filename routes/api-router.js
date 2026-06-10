@@ -1164,6 +1164,61 @@ router.get('/productos/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    // ── Supabase path (plataformaExterna) ─────────────────────────────────────
+    if (negocio.plataformaExterna && negocio.farmId) {
+      let productos = await supabaseService.getProductsWithPresentations(negocio.farmId);
+
+      // Mapear al formato esperado por la app
+      let mapped = productos.map(sp => ({
+        codigo:        sp.id,
+        nombre:        sp.name,
+        descripcion:   sp.description || '',
+        precio:        sp.presentations?.[0]?.price_cents ? sp.presentations[0].price_cents / 100 : 0,
+        imagenUrl:     sp.image_url || '',
+        estado:        sp.status === 'active' ? 'ACTIVO' : 'INACTIVO',
+        disponible:    sp.presentations?.[0]?.stock || 0,
+        presentaciones: (sp.presentations || []).map(pp => ({
+          id:           pp.id,
+          contenido:    pp.pack_size,
+          unidad:       pp.unit,
+          precio:       pp.price_cents / 100,
+          precioB2b:    pp.b2b_price_cents ? pp.b2b_price_cents / 100 : null,
+          cantidadB2b:  pp.min_qty_for_b2b || null,
+          stock:        pp.stock || 0,
+          pedidoMinimo: pp.min_order_qty || 1,
+          orden:        pp.sort_order || 0,
+          predeterminada: pp.is_default || false,
+          molienda:     pp.grind || [],
+          imageUrl:     pp.image_url || null,
+        })),
+        _totalSold: sp.totalSold || 0,
+      }));
+
+      // Filtro estado
+      if (estado) mapped = mapped.filter(p => p.estado === estado.toUpperCase());
+      // Búsqueda
+      if (buscar) {
+        const s = buscar.toLowerCase();
+        mapped = mapped.filter(p => p.nombre.toLowerCase().includes(s) || (p.descripcion || '').toLowerCase().includes(s));
+      }
+      // Ordenamiento
+      if (ordenar === 'precio_asc')  mapped.sort((a, b) => a.precio - b.precio);
+      else if (ordenar === 'precio_desc') mapped.sort((a, b) => b.precio - a.precio);
+      else if (ordenar === 'stock')  mapped.sort((a, b) => b.disponible - a.disponible);
+      else if (ordenar === 'nombre') mapped.sort((a, b) => a.nombre.localeCompare(b.nombre));
+      else mapped.sort((a, b) => (b._totalSold || 0) - (a._totalSold || 0) || a.nombre.localeCompare(b.nombre));
+
+      mapped = mapped.map(({ _totalSold, ...rest }) => rest);
+
+      const total = mapped.length;
+      const paginaNum = parseInt(pagina) || 1;
+      const limiteNum = parseInt(limite) || 20;
+      const totalPaginas = Math.ceil(total / limiteNum);
+      const inicio = (paginaNum - 1) * limiteNum;
+      return res.json({ total, pagina: paginaNum, limite: limiteNum, totalPaginas, hayMas: paginaNum < totalPaginas, productos: mapped.slice(inicio, inicio + limiteNum) });
+    }
+
+    // ── Google Sheets path (legacy) ───────────────────────────────────────────
     const sheets = await getSheetsService(negocio);
 
     let productos = await sheets.getProductos(estado || null);
