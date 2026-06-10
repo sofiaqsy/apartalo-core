@@ -638,26 +638,20 @@ function mapOrder(o, items = [], payments = []) {
       };
     })(),
     productos: items.map(i => `${i.quantity}x ${i.product_name} - S/${(i.line_total_cents/100).toFixed(2)}`).join('\n'),
-    productosDetalle: items.map(i => ({
-      id: i.product_id, codigo: i.product_id, nombre: i.product_name,
-      cantidad: parseFloat(i.quantity), precio: i.unit_price_cents / 100,
-      subtotal: i.line_total_cents / 100, unit: i.unit,
-      presentacionId: i.presentation_id || null,
-      grind: i.grind || null,
-    })),
-    fechaTueste: (() => {
-      const dates = items
-        .map(i => {
-          const ev = Array.isArray(i.output_lot?.event) ? i.output_lot.event[0] : i.output_lot?.event;
-          return ev?.roasted_at || null;
-        })
-        .filter(Boolean)
-        .sort()
-        .reverse(); // más reciente primero
-      if (!dates.length) return null;
-      const d = new Date(dates[0]);
-      return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Lima' });
-    })(),
+    productosDetalle: items.map(i => {
+      const ev = Array.isArray(i.output_lot?.event) ? i.output_lot.event[0] : i.output_lot?.event;
+      const roastedAt = ev?.roasted_at
+        ? new Date(ev.roasted_at).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Lima' })
+        : null;
+      return {
+        id: i.product_id, codigo: i.product_id, nombre: i.product_name,
+        cantidad: parseFloat(i.quantity), precio: i.unit_price_cents / 100,
+        subtotal: i.line_total_cents / 100, unit: i.unit,
+        presentacionId: i.presentation_id || null,
+        grind: i.grind || null,
+        roastedAt,
+      };
+    }),
     subtotal: (o.subtotal_cents || 0) / 100,
     costoEnvio: (o.shipping_cents || 0) / 100,
     total: o.total_cents / 100,
