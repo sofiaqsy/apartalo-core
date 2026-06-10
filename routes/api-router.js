@@ -1404,30 +1404,26 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     const supabaseService = require('../core/services/supabase-service');
     const presentations = await supabaseService.getPresentations(productId);
 
-    // Derive stock from FIFO lot pool + upcoming event info
-    let availableKg = null, roastedKg = 0, completedLots = [];
+    // Derive stock from FIFO lot pool + green lot (a product can have BOTH)
+    let roastedKg = 0, completedLots = [];
     let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
-    let isGreenCoffee = false, greenLotCodeVal = null;
+    let isGreenCoffee = false, greenKg = null, greenLotCodeVal = null;
     try {
       const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
-      isGreenCoffee   = lotBreakdown.isGreenCoffee || false;
-      if (isGreenCoffee) {
-        // Green coffee: stock from green_lots.current_kg
-        availableKg = lotBreakdown.greenKg;
-        greenLotCodeVal = lotBreakdown.greenLotCode || null;
-      } else {
-        roastedKg       = lotBreakdown.roastedKg;
-        completedLots   = lotBreakdown.completedLots || [];
-        availableKg     = roastedKg;
-        if (availableKg === 0 && lotBreakdown.hasNoLots) availableKg = null;
-        nextEventKg     = lotBreakdown.nextEventKg;
-        nextEventDate   = lotBreakdown.nextEventDate;
-        nextEventStatus = lotBreakdown.nextEventStatus;
-        nextEventLotCode= lotBreakdown.nextEventLotCode;
-      }
+      // Roasted side (always)
+      roastedKg        = lotBreakdown.roastedKg       || 0;
+      completedLots    = lotBreakdown.completedLots   || [];
+      nextEventKg      = lotBreakdown.nextEventKg     || 0;
+      nextEventDate    = lotBreakdown.nextEventDate    || null;
+      nextEventStatus  = lotBreakdown.nextEventStatus  || null;
+      nextEventLotCode = lotBreakdown.nextEventLotCode || null;
+      // Green side (only if green_lot_id is linked)
+      isGreenCoffee    = lotBreakdown.isGreenCoffee   || false;
+      greenKg          = lotBreakdown.greenKg;          // null if not linked
+      greenLotCodeVal  = lotBreakdown.greenLotCode     || null;
     } catch (_) { /* non-fatal */ }
 
-    const greenKg = isGreenCoffee ? availableKg : null;
+    const availableKg = roastedKg > 0 ? roastedKg : (completedLots.length === 0 ? null : 0);
     res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, greenKg, greenLotCode: greenLotCodeVal, isGreenCoffee, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       const grindArr = Array.isArray(pp.grind) ? pp.grind : (pp.grind ? [pp.grind] : []);
@@ -1438,14 +1434,11 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                           pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
         stock = kgPerUnit > 0 ? Math.max(0, Math.floor(greenKg / kgPerUnit)) : 0;
-      } else if (!isGreenPres && !isGreenCoffee && availableKg !== null) {
-        // Tostado presentation → roasted kg
+      } else if (!isGreenPres && roastedKg > 0) {
+        // Tostado presentation → roasted FIFO kg
         const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                           pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
-        stock = kgPerUnit > 0 ? Math.max(0, Math.floor(availableKg / kgPerUnit)) : 0;
-      } else if (!isGreenPres && isGreenCoffee) {
-        // Non-verde presentation on a green-coffee product → 0
-        stock = 0;
+        stock = kgPerUnit > 0 ? Math.max(0, Math.floor(roastedKg / kgPerUnit)) : 0;
       }
       return {
         id:           pp.id,

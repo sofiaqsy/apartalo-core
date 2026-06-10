@@ -197,18 +197,19 @@ async function getProductsWithPresentations(farmId) {
     const isGreenPresentation = grindArr.some(g => g === 'green' || g === 'verde');
 
     if (isGreenPresentation && greenKgByProduct[pp.product_id] !== undefined) {
-      // Verde presentation on a product linked to a green lot → use green lot kg
+      // Verde presentation linked to a green lot → derive from green_lots.current_kg
       const availKg = greenKgByProduct[pp.product_id];
       const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                         pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
       derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
-    } else if (availableKgByProduct[pp.product_id] !== undefined) {
-      // Tostado presentation (or verde without a linked green lot) → use roasted FIFO lot kg
+    } else if (!isGreenPresentation && availableKgByProduct[pp.product_id] !== undefined) {
+      // Tostado presentation → derive from roasted FIFO lot kg
       const availKg = availableKgByProduct[pp.product_id];
       const kgPerUnit = pp.unit === 'kg' ? Number(pp.pack_size) :
                         pp.unit === 'g'  ? Number(pp.pack_size) / 1000 : 0;
       derivedStock = kgPerUnit > 0 ? Math.max(0, Math.floor(availKg / kgPerUnit)) : 0;
     }
+    // Verde without green_lot_id → pp.stock from DB (exact value, no derivation)
 
     presMap[pp.product_id].push({
       ...pp,
@@ -1265,30 +1266,20 @@ async function getProductAvailableKgBreakdown(productId) {
     ).catch(() => ({ data: [] })),
   ]);
 
-  // ── Green coffee: stock comes from green_lots.current_kg ──────────────
+  // ── Green coffee: fetch green_lots.current_kg if linked ──────────────
   const greenLotId = (productRes.data?.[0])?.green_lot_id || null;
+  let greenKg = null, greenLotCode = null;
   if (greenLotId) {
     const glRes = await axios.get(
       `${base()}/rest/v1/green_lots?id=eq.${greenLotId}&select=current_kg,lot_code`,
       { headers: headers() }
     ).catch(() => ({ data: [] }));
     const gl = glRes.data?.[0];
-    const greenKg = Math.max(0, Number(gl?.current_kg || 0));
-    const greenLotCode = gl?.lot_code || null;
-    return {
-      roastedKg: 0,
-      completedLots: [],
-      hasNoLots: true,
-      nextEventKg: 0,
-      nextEventDate: null,
-      nextEventStatus: null,
-      nextEventLotCode: null,
-      greenKg,
-      greenLotCode,
-      isGreenCoffee: true,
-    };
+    greenKg = Math.max(0, Number(gl?.current_kg || 0));
+    greenLotCode = gl?.lot_code || null;
   }
 
+  // ── Roasted coffee: always compute from product_lot_assignments ───────
   const lots = lotsRes.data || [];
 
   // Build per-lot breakdown for completed events
@@ -1331,7 +1322,13 @@ async function getProductAvailableKgBreakdown(productId) {
   }
 
   const hasNoLots = completedLots.length === 0;
-  return { roastedKg, completedLots, hasNoLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode };
+  return {
+    roastedKg, completedLots, hasNoLots,
+    nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode,
+    greenKg,      // null if no green_lot_id linked
+    greenLotCode, // null if no green_lot_id linked
+    isGreenCoffee: greenLotId !== null,
+  };
 }
 
 async function getProductAvailableKg(productId) {
