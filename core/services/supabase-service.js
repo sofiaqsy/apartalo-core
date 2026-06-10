@@ -702,7 +702,7 @@ async function getOrdersByFarm(farmId, filters = {}) {
   const [orders, allPayments, allItems] = await Promise.all([
     get('orders',       { id: `in.(${idList})`, select: '*', order: 'created_at.desc' }),
     get('order_payments', { order_id: `in.(${idList})`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' }),
-    get('order_items',  { order_id: `in.(${idList})`, select: '*' })
+    get('order_items',  { order_id: `in.(${idList})`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at))` })
   ]);
 
   const payByOrder = {}, itemsByOrder = {};
