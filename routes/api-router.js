@@ -658,39 +658,33 @@ router.get('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsServiceDirect(negocio);
-
-    if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
-      const [profile, sheetRows] = await Promise.all([
-        supabaseService.getCustomerById(clienteId),
-        sheets.getRows('Clientes!A:K')
-      ]);
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const profile = await supabaseService.getCustomerById(clienteId);
       if (!profile) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-      const sheetRow = sheetRows.slice(1).find(r => (r[0] || '').trim() === clienteId) || [];
       const cliente = {
         id:            profile.id,
-        whatsapp:      profile.phone  || '',
-        nombre:        profile.full_name || '',
-        telefono:      profile.phone  || '',
-        email:         profile.email  || '',
-        direccion:     '',
-        fechaRegistro: sheetRow[5]  || '',
-        ultimaCompra:  sheetRow[6]  || '',
-        departamento:  sheetRow[7]  || '',
-        ciudad:        sheetRow[8]  || '',
-        empresa:       sheetRow[9]  || '',
-        notas:         sheetRow[10] || ''
+        whatsapp:      profile.phone       || '',
+        nombre:        profile.full_name   || '',
+        telefono:      profile.phone       || '',
+        email:         profile.email       || '',
+        empresa:       profile.business_name || '',
+        direccion: '', fechaRegistro: '', ultimaCompra: '',
+        departamento: '', ciudad: '', notas: ''
       };
 
-      const pedidos = await sheets.getPedidosByWhatsapp(profile.phone || '');
-      return res.json({
-        cliente, pedidos: pedidos.slice(0, 20),
-        estadisticas: { totalPedidos: pedidos.length, totalComprado: pedidos.reduce((sum, p) => sum + p.total, 0), pedidosActivos: pedidos.filter(p => !['ENTREGADO', 'CANCELADO'].includes(p.estado)).length }
-      });
+      const ordersResult = await supabaseService.getOrdersByFarm(negocio.farmId, { cliente: profile.phone, limite: 20 });
+      const pedidos = (ordersResult.pedidos || []).map(o => ({
+        id: o.id, fecha: o.fecha, estado: o.estado, total: o.total,
+        productos: (o.productosDetalle || []).map(p => `${p.cantidad} ${p.nombre}`).join(', ')
+      }));
+      const totalComprado = pedidos.reduce((s, p) => s + (p.total || 0), 0);
+      const pedidosActivos = pedidos.filter(p => !['ENTREGADO', 'COMPLETADO', 'CANCELADO'].includes(p.estado)).length;
+      return res.json({ cliente, pedidos, estadisticas: { totalPedidos: ordersResult.total || pedidos.length, totalComprado, pedidosActivos } });
     }
 
-    // Default: read from sheet
+    // Legacy Sheets path
+    const sheets = await getSheetsServiceDirect(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
     let cliente = null;
     for (let i = 1; i < rows.length; i++) {
@@ -741,10 +735,6 @@ router.post('/clientes/:businessId', async (req, res) => {
         throw e;
       }
       if (!nuevo) return res.status(500).json({ error: 'Error creando cliente en Supabase' });
-
-      // Register UUID in sheet col A only
-      try { await sheets.appendRow('Clientes', [nuevo.id, phone, nombre, '', '', fechaHoy, '', '', '', '', '']); } catch (e) {}
-
       return res.status(201).json({ success: true, mensaje: 'Cliente creado', cliente: { id: nuevo.id, whatsapp: phone, nombre, email: nuevo.email || '', fechaRegistro: fechaHoy } });
     }
 
@@ -769,35 +759,20 @@ router.put('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsServiceDirect(negocio);
-
-    if (negocio.plataformaExterna && negocio.farmId && isUUID(clienteId)) {
-      // Update Supabase for core fields
-      const supabaseUpdates = {};
-      if (nombre !== undefined)   supabaseUpdates.full_name = nombre;
-      if (whatsapp !== undefined)  supabaseUpdates.phone = whatsapp.replace(/[^0-9]/g, '');
-      if (Object.keys(supabaseUpdates).length > 0)
-        await supabaseService.updateCustomer(clienteId, supabaseUpdates).catch(e =>
+    if (negocio.plataformaExterna && negocio.farmId) {
+      const updates = {};
+      if (nombre    !== undefined) updates.full_name     = nombre;
+      if (whatsapp  !== undefined) updates.phone         = whatsapp.replace(/[^0-9]/g, '');
+      if (empresa   !== undefined) updates.business_name = empresa;
+      if (Object.keys(updates).length > 0)
+        await supabaseService.updateCustomer(clienteId, updates).catch(e =>
           console.warn('[Supabase] updateCustomer error:', e.message)
         );
-
-      // Update extra fields in sheet
-      const sheetRows = await sheets.getRows('Clientes!A:K');
-      for (let i = 1; i < sheetRows.length; i++) {
-        if ((sheetRows[i][0] || '').trim() === clienteId) {
-          const updates = [];
-          if (departamento !== undefined) updates.push({ range: `Clientes!H${i + 1}`, value: departamento });
-          if (ciudad !== undefined)       updates.push({ range: `Clientes!I${i + 1}`, value: ciudad });
-          if (empresa !== undefined)      updates.push({ range: `Clientes!J${i + 1}`, value: empresa });
-          if (notas !== undefined)        updates.push({ range: `Clientes!K${i + 1}`, value: notas });
-          if (updates.length > 0) await sheets.batchUpdate(updates);
-          break;
-        }
-      }
       return res.json({ success: true, mensaje: 'Cliente actualizado', clienteId });
     }
 
-    // Default: sheet only
+    // Legacy Sheets path
+    const sheets = await getSheetsServiceDirect(negocio);
     const rows = await sheets.getRows('Clientes!A:K');
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
@@ -826,9 +801,14 @@ router.delete('/clientes/:businessId/:clienteId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
+    if (negocio.plataformaExterna && negocio.farmId) {
+      await supabaseService.deleteRow('profiles', { id: `eq.${clienteId}` });
+      return res.json({ success: true, mensaje: 'Cliente eliminado', clienteId });
+    }
+
+    // Legacy Sheets path
     const sheets = await getSheetsService(negocio);
     const rows = await sheets.getRows('Clientes!A:B');
-
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === clienteId) {
         await sheets.updateCell(`Clientes!A${i + 1}`, `${clienteId}_DELETED_${Date.now()}`);
@@ -850,23 +830,35 @@ router.post('/clientes/:businessId/importar', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const sheets = await getSheetsService(negocio);
-
     const resultados = { creados: [], existentes: [], errores: [] };
 
+    if (negocio.plataformaExterna && negocio.farmId) {
+      for (const cli of clientes) {
+        try {
+          if (!cli.whatsapp || !cli.nombre) { resultados.errores.push({ whatsapp: cli.whatsapp, error: 'Falta whatsapp o nombre' }); continue; }
+          const phone = cli.whatsapp.replace(/[^0-9]/g, '');
+          const existente = await supabaseService.getCustomerByPhone(phone);
+          if (existente) { resultados.existentes.push(phone); continue; }
+          await supabaseService.createCustomer({ fullName: cli.nombre, phone, email: cli.email || null, businessName: cli.empresa || null });
+          resultados.creados.push(phone);
+        } catch (e) { resultados.errores.push({ whatsapp: cli.whatsapp, error: e.message }); }
+      }
+      return res.json({ success: true, resumen: { total: clientes.length, creados: resultados.creados.length, existentes: resultados.existentes.length, errores: resultados.errores.length }, detalles: resultados });
+    }
+
+    // Legacy Sheets path
+    const sheets = await getSheetsService(negocio);
     for (const cli of clientes) {
       try {
         if (!cli.whatsapp || !cli.nombre) { resultados.errores.push({ whatsapp: cli.whatsapp, error: 'Falta whatsapp o nombre' }); continue; }
         const whatsappLimpio = cli.whatsapp.replace(/[^0-9]/g, '');
         const existente = await sheets.buscarCliente(whatsappLimpio);
         if (existente) { resultados.existentes.push(whatsappLimpio); continue; }
-
         const clienteId = `CLI-${Date.now().toString().slice(-6)}${Math.random().toString(36).slice(-2)}`;
         await sheets.appendRow('Clientes', [clienteId, whatsappLimpio, cli.nombre, cli.telefono || '', cli.direccion || '', formatPeruDate(), '', cli.departamento || '', cli.ciudad || '', cli.empresa || '', cli.notas || '']);
         resultados.creados.push(whatsappLimpio);
       } catch (e) { resultados.errores.push({ whatsapp: cli.whatsapp, error: e.message }); }
     }
-
     res.json({ success: true, resumen: { total: clientes.length, creados: resultados.creados.length, existentes: resultados.existentes.length, errores: resultados.errores.length }, detalles: resultados });
   } catch (error) {
     res.status(500).json({ error: error.message });
