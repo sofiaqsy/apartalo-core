@@ -511,7 +511,9 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
 
     // ── Supabase path (plataformaExterna) ─────────────────────────────
     if (negocio.plataformaExterna) {
-      // Resolve order number → UUID if needed (updateOrderStatus requires UUID)
+      const { estadoPago, nuevoPago, notaPago } = req.body;
+
+      // Resolve order number → UUID if needed
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(pedidoId);
       let supabaseId = pedidoId;
       if (!isUUID) {
@@ -519,9 +521,30 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
         if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
         supabaseId = order.supabaseId;
       }
-      await supabaseService.updateOrderStatus(supabaseId, estado);
-      console.log(`[Pedido] ${pedidoId} → ${estado} (supabaseId: ${supabaseId})`);
-      return res.json({ success: true, pedidoId, nuevoEstado: estado });
+
+      // Registrar pago si viene nuevoPago
+      if (nuevoPago && nuevoPago > 0) {
+        await supabaseService.addOrderPayment(supabaseId, {
+          amountCents: Math.round(nuevoPago * 100),
+          notes: notaPago || null,
+        });
+      }
+
+      // Actualizar estado del pedido si viene estado
+      if (estado) {
+        await supabaseService.updateOrderStatus(supabaseId, estado);
+        console.log(`[Pedido] ${pedidoId} → ${estado} (supabaseId: ${supabaseId})`);
+      }
+
+      // Devolver pagos reales para que el cliente refresque sin usar IDs falsos
+      const updated = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      return res.json({
+        success: true, pedidoId, nuevoEstado: estado,
+        estadoPago:  updated.estadoPago,
+        montoPagado: updated.montoPagado,
+        pagos:       updated.pagos,
+        evidencias:  updated.evidencias,
+      });
     }
 
     // ── Google Sheets path (legacy) ───────────────────────────────────
