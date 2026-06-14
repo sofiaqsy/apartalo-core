@@ -386,7 +386,10 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
           return sum + Math.max(0, Number(a.kg_assigned) - Number(a.kg_sold));
         }, 0);
         if (kgNeeded > availableKg + 0.001) {
-          throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${availableKg.toFixed(2)} kg, pedido: ${kgNeeded.toFixed(2)} kg)`);
+          if (!item.sourceEventId) {
+            throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${availableKg.toFixed(2)} kg, pedido: ${kgNeeded.toFixed(2)} kg)`);
+          }
+          // Per-item pre-venta: overage is covered by the next roast event
         }
         continue; // coffee — no further stock check needed
       }
@@ -461,17 +464,33 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
       commission_cents: Math.round(i.lineTotalCents * (i.commissionRate || 0.10)),
       payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10))),
       // Mark pre-venta items so deductStockOnConfirm skips them (kg already reserved)
-      source_event_id:  esPreventa && sourceEventId ? sourceEventId : null,
+      source_event_id:  item.sourceEventId || (esPreventa && sourceEventId ? sourceEventId : null),
     };
   });
 
   await post('order_items', orderItems);
 
-  // Reserve kg in event_offers for pre-ventas
+  // Reserve kg in event_offers for full pre-venta orders
   if (esPreventa && sourceEventId) {
     adjustKgReservedForOrder(order.id, sourceEventId, +1).catch(err =>
       console.error('[stock] adjustKgReserved on create failed:', err.message)
     );
+  }
+
+  // Reserve kg in event_offers for per-item pre-venta in mixed orders
+  if (!esPreventa) {
+    for (const item of items) {
+      if (!item.sourceEventId) continue;
+      const ps   = Number(item.pack_size || 0);
+      const unit = (item.unit || '').toLowerCase();
+      const kgPerUnit = unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0;
+      const kgToReserve = kgPerUnit * Number(item.quantity);
+      if (kgToReserve > 0) {
+        adjustEventOfferKgReserved(item.sourceEventId, item.productId, kgToReserve).catch(err =>
+          console.error('[stock] adjustEventOfferKgReserved on create failed:', err.message)
+        );
+      }
+    }
   }
 
   return order;
@@ -753,6 +772,24 @@ async function getOrderByIdOrNumber(idOrNumber) {
  * Increment (delta=+1) or decrement (delta=-1) kg_reserved in event_offers
  * for all items belonging to a pre-venta order.
  */
+/**
+ * Increment or decrement kg_reserved on a single event_offer row for a given product.
+ * Used for per-item pre-venta reservations in mixed orders.
+ */
+async function adjustEventOfferKgReserved(eventId, productId, kgDelta) {
+  try {
+    const url = `${base()}/rest/v1/event_offers?event_id=eq.${eventId}&product_id=eq.${productId}&select=id,kg_reserved`;
+    const { data: offers } = await axios.get(url, { headers: headers() });
+    const offer = offers?.[0];
+    if (!offer) return;
+    const current = Number(offer.kg_reserved || 0);
+    const updated = Math.max(0, Math.round((current + kgDelta) * 1000) / 1000);
+    await patch('event_offers', { id: `eq.${offer.id}` }, { kg_reserved: updated });
+  } catch (err) {
+    console.error('[stock] adjustEventOfferKgReserved error:', err.message);
+  }
+}
+
 async function adjustKgReservedForOrder(supabaseOrderId, sourceEventId, delta) {
   try {
     const itemsUrl = `${base()}/rest/v1/order_items?order_id=eq.${supabaseOrderId}&select=product_id,quantity,pack_size,unit`;
@@ -856,10 +893,28 @@ async function restoreStockOnCancel(supabaseOrderId) {
     const sourceEventId  = preVentaMatch?.[1] || null;
 
     if (sourceEventId) {
+      // Full pre-venta order: release all reserved kg
       await adjustKgReservedForOrder(supabaseOrderId, sourceEventId, -1);
-    } else if (['confirmed', 'preparing', 'shipped', 'delivered'].includes(order.status)) {
-      // Regular order already confirmed → restore stock
-      await restoreStockItems(supabaseOrderId);
+    } else {
+      if (['confirmed', 'preparing', 'shipped', 'delivered'].includes(order.status)) {
+        // Regular order already confirmed → restore stock
+        await restoreStockItems(supabaseOrderId);
+      }
+      // Mixed order: release per-item pre-venta reservations
+      const preVentaItemRows = await get('order_items', {
+        order_id: `eq.${supabaseOrderId}`,
+        select: 'product_id,quantity,unit,pack_size,source_event_id'
+      });
+      for (const item of (preVentaItemRows || [])) {
+        if (!item.source_event_id) continue;
+        const ps = Number(item.pack_size || 0);
+        const unit = (item.unit || '').toLowerCase();
+        const kgPerUnit = unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0;
+        const kgToRelease = kgPerUnit * Number(item.quantity);
+        if (kgToRelease > 0) {
+          await adjustEventOfferKgReserved(item.source_event_id, item.product_id, -kgToRelease);
+        }
+      }
     }
   } catch (err) {
     console.error('[stock] restoreStockOnCancel error:', err.message);
@@ -1318,7 +1373,7 @@ async function getProductAvailableKgBreakdown(productId) {
       return dateA - dateB;
     });
 
-  let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
+  let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null, nextEventId = null;
   if (upcomingOffers.length > 0) {
     const offer = upcomingOffers[0];
     const ev = Array.isArray(offer.event) ? offer.event[0] : offer.event;
@@ -1326,12 +1381,13 @@ async function getProductAvailableKgBreakdown(productId) {
     nextEventDate   = ev?.roasted_at || null;
     nextEventStatus = ev?.status || null;
     nextEventLotCode= ev?.cached_lot_code || null;
+    nextEventId     = ev?.id || null;
   }
 
   const hasNoLots = completedLots.length === 0;
   return {
     roastedKg, completedLots, hasNoLots,
-    nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode,
+    nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, nextEventId,
     greenKg,      // null if no green_lot_id linked
     greenLotCode, // null if no green_lot_id linked
     isGreenCoffee: greenLotId !== null,

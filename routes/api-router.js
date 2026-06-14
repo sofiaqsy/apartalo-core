@@ -1492,7 +1492,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
 
     // Derive stock from FIFO lot pool + green lot (a product can have BOTH)
     let roastedKg = 0, completedLots = [];
-    let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null;
+    let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null, nextEventId = null;
     let isGreenCoffee = false, greenKg = null, greenLotCodeVal = null;
     try {
       const lotBreakdown = await supabaseService.getProductAvailableKgBreakdown(productId);
@@ -1503,6 +1503,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
       nextEventDate    = lotBreakdown.nextEventDate    || null;
       nextEventStatus  = lotBreakdown.nextEventStatus  || null;
       nextEventLotCode = lotBreakdown.nextEventLotCode || null;
+      nextEventId      = lotBreakdown.nextEventId      || null;
       // Green side (only if green_lot_id is linked)
       isGreenCoffee    = lotBreakdown.isGreenCoffee   || false;
       greenKg          = lotBreakdown.greenKg;          // null if not linked
@@ -1510,7 +1511,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
     } catch (_) { /* non-fatal */ }
 
     const availableKg = roastedKg > 0 ? roastedKg : (completedLots.length === 0 ? null : 0);
-    res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, greenKg, greenLotCode: greenLotCodeVal, isGreenCoffee, presentaciones: presentations.map(pp => {
+    res.json({ availableKg, roastedKg, completedLots, nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, nextEventId, greenKg, greenLotCode: greenLotCodeVal, isGreenCoffee, presentaciones: presentations.map(pp => {
       let stock = pp.stock || 0;
       const grindArr = Array.isArray(pp.grind) ? pp.grind : (pp.grind ? [pp.grind] : []);
       const isGreenPres = grindArr.some(g => g === 'green' || g === 'verde');
