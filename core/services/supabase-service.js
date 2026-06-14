@@ -1019,6 +1019,7 @@ async function deductStockOnConfirm(supabaseOrderId) {
     try {
       // ── Pre-order: kg already reserved via reserve_offer_kg at creation ──
       if (item.source_event_id) {
+        console.log('[deduct-confirm] pre-venta item, solo marcando confirmed | source_event_id:', item.source_event_id, '| qty:', item.quantity, '| pack_size:', item.pack_size);
         await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
