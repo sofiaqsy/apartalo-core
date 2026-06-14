@@ -1127,6 +1127,16 @@ async function deleteOrderPayment(paymentId, supabaseOrderId) {
   return true;
 }
 
+async function clearOrderPayments(supabaseOrderId) {
+  // Delete all proofs first (FK constraint), then payments
+  const payments = await get('order_payments', { order_id: `eq.${supabaseOrderId}`, select: 'id' });
+  for (const p of (payments || [])) {
+    await deleteRow('order_payment_proofs', { payment_id: `eq.${p.id}` });
+  }
+  await deleteRow('order_payments', { order_id: `eq.${supabaseOrderId}` });
+  await patch('orders', { id: `eq.${supabaseOrderId}` }, { payment_status: 'pending', paid_at: null });
+}
+
 // ─── PAYMENT PROOFS ───────────────────────────────────────────────────────────
 
 async function addPaymentProof(paymentId, { url, source = 'APP', notes }) {
@@ -1446,6 +1456,7 @@ module.exports = {
   recalcPaymentStatus,
   addOrderPayment,
   deleteOrderPayment,
+  clearOrderPayments,
   addPaymentProof,
   verifyPaymentProof,
   deletePaymentProof,

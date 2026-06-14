@@ -278,8 +278,13 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
       });
       pagoRegistrado = true;
     } else if (estadoPago !== undefined) {
-      const psMap = { PAGADO: 'paid', PARCIAL: 'partial', PENDIENTE_PAGO: 'pending' };
-      await supabaseService.updateOrderFields(sid, { payment_status: psMap[estadoPago] || 'pending' });
+      // Revertir a PENDIENTE_PAGO con monto 0 → eliminar todos los pagos y comprobantes
+      if (estadoPago === 'PENDIENTE_PAGO' && parseFloat(montoPagado ?? 1) === 0) {
+        await supabaseService.clearOrderPayments(sid);
+      } else {
+        const psMap = { PAGADO: 'paid', PARCIAL: 'partial', PENDIENTE_PAGO: 'pending' };
+        await supabaseService.updateOrderFields(sid, { payment_status: psMap[estadoPago] || 'pending' });
+      }
     }
 
     if (notificarCliente && estado) {
@@ -297,9 +302,11 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
       } catch (e) { console.error('⚠️ Error notificando:', e.message); }
     }
 
-    // Al registrar un pago, retornar pagos y evidencias actualizados para que
-    // Flutter pueda mostrar la sección de comprobantes sin recargar el pedido
-    if (pagoRegistrado) {
+    // Retornar pagos actualizados cuando se registra o revierte un pago
+    const necesitaRefresh = pagoRegistrado ||
+      (estadoPago === 'PENDIENTE_PAGO' && parseFloat(montoPagado ?? 1) === 0);
+
+    if (necesitaRefresh) {
       const pedidoActualizado = await supabaseService.getOrderByIdOrNumber(pedidoId);
       return res.json({
         success: true,
