@@ -668,6 +668,7 @@ function mapOrder(o, items = [], payments = []) {
         subtotal: i.line_total_cents / 100, unit: i.unit,
         presentacionId: i.presentation_id || null,
         grind: i.grind || null,
+        source_event_id: i.source_event_id || null,
         roastedAt,
       };
     }),
