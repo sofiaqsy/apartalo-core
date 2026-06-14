@@ -904,14 +904,12 @@ async function restoreStockOnCancel(supabaseOrderId) {
       // Mixed order: release per-item pre-venta reservations
       const preVentaItemRows = await get('order_items', {
         order_id: `eq.${supabaseOrderId}`,
-        select: 'product_id,quantity,unit,pack_size,source_event_id'
+        select: 'product_id,quantity,pack_size,source_event_id'
       });
       for (const item of (preVentaItemRows || [])) {
         if (!item.source_event_id) continue;
-        const ps = Number(item.pack_size || 0);
-        const unit = (item.unit || '').toLowerCase();
-        const kgPerUnit = unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0;
-        const kgToRelease = kgPerUnit * Number(item.quantity);
+        // pack_size is stored in kg (same convention as creation path)
+        const kgToRelease = Number(item.pack_size || 0) * Number(item.quantity);
         if (kgToRelease > 0) {
           await adjustEventOfferKgReserved(item.source_event_id, item.product_id, -kgToRelease);
         }
@@ -1011,7 +1009,6 @@ async function deductStockOnConfirm(supabaseOrderId) {
     try {
       // ── Pre-order: kg already reserved via reserve_offer_kg at creation ──
       if (item.source_event_id) {
-        console.log('[deduct-confirm] pre-venta item, solo marcando confirmed | source_event_id:', item.source_event_id, '| qty:', item.quantity, '| pack_size:', item.pack_size);
         await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
@@ -1027,11 +1024,15 @@ async function deductStockOnConfirm(supabaseOrderId) {
 
       if (isGreen && greenLotId && kgNeeded > 0) {
         const glRows = await get('green_lots', { id: `eq.${greenLotId}`, select: 'current_kg' });
-        if (glRows[0]) {
-          await patch('green_lots', { id: `eq.${greenLotId}` }, {
-            current_kg: Math.max(0, Number(glRows[0].current_kg) - kgNeeded)
-          });
+        const currentGreenKg = Number(glRows[0]?.current_kg ?? 0);
+        if (!glRows[0] || currentGreenKg < kgNeeded) {
+          const err = new Error(`Sin stock de café verde (${kgNeeded} kg requeridos, ${currentGreenKg} kg disponibles).`);
+          err.code = 'STOCK_INSUFICIENTE';
+          throw err;
         }
+        await patch('green_lots', { id: `eq.${greenLotId}` }, {
+          current_kg: currentGreenKg - kgNeeded
+        });
         await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
@@ -1066,7 +1067,12 @@ async function deductStockOnConfirm(supabaseOrderId) {
           id: `eq.${item.presentation_id}`,
           select: 'stock'
         });
-        const currentStock = Number(presStockRows[0]?.stock ?? 0);
+        if (!presStockRows[0]) {
+          const err = new Error(`Presentación no encontrada (id: ${item.presentation_id}). Verifica que el producto siga activo.`);
+          err.code = 'STOCK_INSUFICIENTE';
+          throw err;
+        }
+        const currentStock = Number(presStockRows[0].stock ?? 0);
         if (currentStock < Number(item.quantity)) {
           const err = new Error(`Sin stock: se requieren ${item.quantity} unidades pero solo hay ${currentStock} disponibles.`);
           err.code = 'STOCK_INSUFICIENTE';
