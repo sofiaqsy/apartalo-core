@@ -659,8 +659,10 @@ function mapOrder(o, items = [], payments = []) {
     productos: items.map(i => `${i.quantity}x ${i.product_name} - S/${(i.line_total_cents/100).toFixed(2)}`).join('\n'),
     productosDetalle: items.map(i => {
       const ev = Array.isArray(i.output_lot?.event) ? i.output_lot.event[0] : i.output_lot?.event;
-      const roastedAt = ev?.roasted_at
-        ? new Date(ev.roasted_at).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Lima' })
+      const srcEv = Array.isArray(i.source_event) ? i.source_event[0] : i.source_event;
+      const roastDate = ev?.roasted_at || srcEv?.roasted_at || null;
+      const roastedAt = roastDate
+        ? new Date(roastDate).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Lima' })
         : null;
       return {
         id: i.product_id, codigo: i.product_id, nombre: i.product_name,
@@ -722,7 +724,7 @@ async function getOrdersByFarm(farmId, filters = {}) {
   const [orders, allPayments, allItems] = await Promise.all([
     get('orders',       { id: `in.(${idList})`, select: '*', order: 'created_at.desc' }),
     get('order_payments', { order_id: `in.(${idList})`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' }),
-    get('order_items',  { order_id: `in.(${idList})`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at))` })
+    get('order_items',  { order_id: `in.(${idList})`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at)),source_event:roast_events!source_event_id(roasted_at,status)` })
   ]);
 
   const payByOrder = {}, itemsByOrder = {};
@@ -763,7 +765,7 @@ async function getOrderByIdOrNumber(idOrNumber) {
   if (!orders[0]) return null;
   const o = orders[0];
   const [items, payments] = await Promise.all([
-    get('order_items', { order_id: `eq.${o.id}`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at))` }),
+    get('order_items', { order_id: `eq.${o.id}`, select: `*,output_lot:roast_output_lots(event:roast_events(roasted_at)),source_event:roast_events!source_event_id(roasted_at,status)` }),
     get('order_payments', { order_id: `eq.${o.id}`, select: `*,order_payment_proofs(*)`, order: 'created_at.asc' })
   ]);
   return mapOrder(o, items, payments);
