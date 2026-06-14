@@ -485,10 +485,16 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
       const unit = (item.unit || '').toLowerCase();
       const kgPerUnit = unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0;
       const kgToReserve = kgPerUnit * Number(item.quantity);
+      console.log('[preventa-reserve] item:', item.productId,
+        '| packSize:', item.packSize, '| pack_size:', item.pack_size,
+        '| ps:', ps, '| unit:', unit, '| qty:', item.quantity,
+        '| kgToReserve:', kgToReserve, '| eventId:', item.sourceEventId);
       if (kgToReserve > 0) {
         adjustEventOfferKgReserved(item.sourceEventId, item.productId, kgToReserve).catch(err =>
           console.error('[stock] adjustEventOfferKgReserved on create failed:', err.message)
         );
+      } else {
+        console.warn('[preventa-reserve] kgToReserve=0, skipping reservation');
       }
     }
   }
