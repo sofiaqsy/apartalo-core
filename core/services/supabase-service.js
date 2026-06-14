@@ -481,7 +481,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
   if (!esPreventa) {
     for (const item of items) {
       if (!item.sourceEventId) continue;
-      const ps   = Number(item.pack_size || 0);
+      const ps   = Number(item.packSize ?? item.pack_size ?? 0);
       const unit = (item.unit || '').toLowerCase();
       const kgPerUnit = unit === 'kg' ? ps : unit === 'g' ? ps / 1000 : 0;
       const kgToReserve = kgPerUnit * Number(item.quantity);

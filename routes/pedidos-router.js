@@ -185,6 +185,7 @@ router.post('/:businessId', async (req, res) => {
       lineTotalCents:  Math.round(((p.subtotal) || (p.precio || 0) * (p.cantidad || 1)) * 100),
       commissionRate:  negocio.commission_rate || 0.10,
       sourceEventId:   p.sourceEventId || null,
+      packSize:        p.packSize != null ? Number(p.packSize) : null,
     }));
 
     const esPreventa = tipo === 'PREVENTA';
