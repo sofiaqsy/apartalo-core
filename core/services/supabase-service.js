@@ -464,7 +464,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
       commission_cents: Math.round(i.lineTotalCents * (i.commissionRate || 0.10)),
       payout_cents:     Math.round(i.lineTotalCents * (1 - (i.commissionRate || 0.10))),
       // Mark pre-venta items so deductStockOnConfirm skips them (kg already reserved)
-      source_event_id:  item.sourceEventId || (esPreventa && sourceEventId ? sourceEventId : null),
+      source_event_id:  i.sourceEventId || (esPreventa && sourceEventId ? sourceEventId : null),
     };
   });
 
