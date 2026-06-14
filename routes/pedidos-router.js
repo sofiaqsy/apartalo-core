@@ -269,12 +269,14 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     }
     if (Object.keys(orderUpdates).length > 0) await supabaseService.updateOrderFields(sid, orderUpdates);
 
+    let pagoRegistrado = false;
     if (nuevoPago !== undefined && parseFloat(nuevoPago) > 0) {
       await supabaseService.addOrderPayment(sid, {
         amountCents: Math.round(parseFloat(nuevoPago) * 100),
         notes: notaPago || '',
         createdBy: 'APP'
       });
+      pagoRegistrado = true;
     } else if (estadoPago !== undefined) {
       const psMap = { PAGADO: 'paid', PARCIAL: 'partial', PENDIENTE_PAGO: 'pending' };
       await supabaseService.updateOrderFields(sid, { payment_status: psMap[estadoPago] || 'pending' });
@@ -293,6 +295,21 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
         const msg = msgs[estado.toUpperCase()];
         if (msg) await ws.sendMessage(pedido.whatsapp, msg);
       } catch (e) { console.error('⚠️ Error notificando:', e.message); }
+    }
+
+    // Al registrar un pago, retornar pagos y evidencias actualizados para que
+    // Flutter pueda mostrar la sección de comprobantes sin recargar el pedido
+    if (pagoRegistrado) {
+      const pedidoActualizado = await supabaseService.getOrderByIdOrNumber(pedidoId);
+      return res.json({
+        success: true,
+        mensaje: 'Pedido actualizado',
+        pedidoId,
+        estadoPago:  pedidoActualizado?.estadoPago  ?? null,
+        montoPagado: pedidoActualizado?.montoPagado ?? 0,
+        pagos:       pedidoActualizado?.pagos       ?? [],
+        evidencias:  pedidoActualizado?.evidencias  ?? [],
+      });
     }
 
     return res.json({ success: true, mensaje: 'Pedido actualizado', pedidoId });
