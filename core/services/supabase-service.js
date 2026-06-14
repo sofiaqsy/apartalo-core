@@ -955,6 +955,11 @@ async function updateOrderStatus(supabaseId, estado) {
     }
   }
 
+  // Deduct stock BEFORE changing status so a stock error blocks the transition
+  if (up === 'CONFIRMADO') {
+    await deductStockOnConfirm(supabaseId);
+  }
+
   const status = toStatus(estado);
   const fields = { status };
   const now = new Date().toISOString();
@@ -966,11 +971,6 @@ async function updateOrderStatus(supabaseId, estado) {
   // el pago se gestiona por separado (updatePaymentStatus / evidencias).
   const rows = await patch('orders', { id: `eq.${supabaseId}` }, fields);
 
-  if (up === 'CONFIRMADO') {
-    deductStockOnConfirm(supabaseId).catch(err =>
-      console.error('[stock] deductStockOnConfirm failed', supabaseId, err.message)
-    );
-  }
   if (up === 'CANCELADO') {
     restoreStockOnCancel(supabaseId).catch(err =>
       console.error('[stock] restoreStockOnCancel failed', supabaseId, err.message)
@@ -1053,9 +1053,9 @@ async function deductStockOnConfirm(supabaseOrderId) {
               fulfillment_status: 'confirmed'
             });
           } else {
-            // Coffee product but no available lot — mark paid anyway, log it
-            console.warn('[stock] No FIFO lot available for product', item.product_id, `(${kgNeeded} kg needed)`);
-            await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
+            const err = new Error(`Sin stock disponible para este producto (${kgNeeded} kg requeridos). Registra un lote de café tostado antes de confirmar.`);
+            err.code = 'STOCK_INSUFICIENTE';
+            throw err;
           }
           continue; // coffee product handled
         }

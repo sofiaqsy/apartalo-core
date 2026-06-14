@@ -300,6 +300,9 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
     if (error.code === 'PREVENTA_STATUS_LOCKED') {
       return res.status(403).json({ error: error.message, code: error.code });
     }
+    if (error.code === 'STOCK_INSUFICIENTE') {
+      return res.status(409).json({ error: error.message, code: error.code });
+    }
     res.status(500).json({ error: error.message });
   }
 });
