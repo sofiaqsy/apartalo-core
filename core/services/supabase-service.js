@@ -1067,25 +1067,34 @@ async function deductStockOnConfirm(supabaseOrderId) {
           id: `eq.${item.presentation_id}`,
           select: 'stock'
         });
-        if (presStockRows[0]) {
-          await patch('product_presentations', { id: `eq.${item.presentation_id}` }, {
-            stock: Math.max(0, Number(presStockRows[0].stock) - Number(item.quantity))
-          });
+        const currentStock = Number(presStockRows[0]?.stock ?? 0);
+        if (currentStock < Number(item.quantity)) {
+          const err = new Error(`Sin stock: se requieren ${item.quantity} unidades pero solo hay ${currentStock} disponibles.`);
+          err.code = 'STOCK_INSUFICIENTE';
+          throw err;
         }
+        await patch('product_presentations', { id: `eq.${item.presentation_id}` }, {
+          stock: currentStock - Number(item.quantity)
+        });
       } else {
         const prodStockRows = await get('products', {
           id: `eq.${item.product_id}`,
           select: 'stock'
         });
-        if (prodStockRows[0]) {
-          await patch('products', { id: `eq.${item.product_id}` }, {
-            stock: Math.max(0, Number(prodStockRows[0].stock) - Number(item.quantity))
-          });
+        const currentStock = Number(prodStockRows[0]?.stock ?? 0);
+        if (currentStock < Number(item.quantity)) {
+          const err = new Error(`Sin stock: se requieren ${item.quantity} unidades pero solo hay ${currentStock} disponibles.`);
+          err.code = 'STOCK_INSUFICIENTE';
+          throw err;
         }
+        await patch('products', { id: `eq.${item.product_id}` }, {
+          stock: currentStock - Number(item.quantity)
+        });
       }
       await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
 
     } catch (itemErr) {
+      if (itemErr.code === 'STOCK_INSUFICIENTE') throw itemErr; // propagate — blocks status change
       console.error('[stock] Error processing item', item.id, itemErr.message);
     }
   }
