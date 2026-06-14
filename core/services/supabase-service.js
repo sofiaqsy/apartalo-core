@@ -470,26 +470,7 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
 
   await post('order_items', orderItems);
 
-  // Reserve kg in event_offers for full pre-venta orders
-  if (esPreventa && sourceEventId) {
-    adjustKgReservedForOrder(order.id, sourceEventId, +1).catch(err =>
-      console.error('[stock] adjustKgReserved on create failed:', err.message)
-    );
-  }
-
-  // Reserve kg in event_offers for per-item pre-venta in mixed orders
-  if (!esPreventa) {
-    for (const item of items) {
-      if (!item.sourceEventId) continue;
-      // packSize viene en kg desde Flutter (packSizeKg), usarlo directamente
-      const kgToReserve = Number(item.packSize ?? 0) * Number(item.quantity);
-      if (kgToReserve > 0) {
-        adjustEventOfferKgReserved(item.sourceEventId, item.productId, kgToReserve).catch(err =>
-          console.error('[stock] adjustEventOfferKgReserved on create failed:', err.message)
-        );
-      }
-    }
-  }
+  // kg_reserved se reserva al CONFIRMAR, no al crear — ver deductStockOnConfirm
 
   return order;
 }
@@ -901,14 +882,15 @@ async function restoreStockOnCancel(supabaseOrderId) {
         // Regular order already confirmed → restore stock
         await restoreStockItems(supabaseOrderId);
       }
-      // Mixed order: release per-item pre-venta reservations
+      // Mixed order: release per-item pre-venta reservations (solo si fueron confirmados)
       const preVentaItemRows = await get('order_items', {
         order_id: `eq.${supabaseOrderId}`,
+        fulfillment_status: 'eq.confirmed',
         select: 'product_id,quantity,pack_size,source_event_id'
       });
       for (const item of (preVentaItemRows || [])) {
         if (!item.source_event_id) continue;
-        // pack_size is stored in kg (same convention as creation path)
+        // pack_size is stored in kg (same convention as confirmation path)
         const kgToRelease = Number(item.pack_size || 0) * Number(item.quantity);
         if (kgToRelease > 0) {
           await adjustEventOfferKgReserved(item.source_event_id, item.product_id, -kgToRelease);
@@ -1007,8 +989,13 @@ async function deductStockOnConfirm(supabaseOrderId) {
 
   for (const item of items) {
     try {
-      // ── Pre-order: kg already reserved via reserve_offer_kg at creation ──
+      // ── Pre-venta: reservar kg al confirmar y marcar fulfilled ──
       if (item.source_event_id) {
+        const kgToReserve = Number(item.pack_size || 0) * Number(item.quantity);
+        console.log('[stock] pre-venta confirm | source_event_id:', item.source_event_id, '| kgToReserve:', kgToReserve);
+        if (kgToReserve > 0) {
+          await adjustEventOfferKgReserved(item.source_event_id, item.product_id, kgToReserve);
+        }
         await patch('order_items', { id: `eq.${item.id}` }, { fulfillment_status: 'confirmed' });
         continue;
       }
