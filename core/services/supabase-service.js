@@ -716,7 +716,7 @@ async function getOrdersByFarm(farmId, filters = {}) {
     const v = vista.toUpperCase();
     pedidos = pedidos.filter(p => {
       const s = p._status;
-      const esMuestra = p.total === 0 || p.observaciones.toUpperCase().includes('MUESTRA');
+      const esMuestra = p.observaciones.toUpperCase().includes('MUESTRA');
       if (v === 'PENDIENTES') return !['delivered','cancelled','refunded'].includes(s) && !esMuestra;
       if (v === 'HISTORIAL')  return ['delivered','cancelled','refunded'].includes(s);
       if (v === 'POR_COBRAR') return s === 'delivered' && p.estadoPago !== 'PAGADO';
