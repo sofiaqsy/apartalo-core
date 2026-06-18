@@ -375,8 +375,22 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
                       unit === 'g'  ? Number(packSize || 0) / 1000 : 0;
     const kgNeeded  = kgPerUnit * Number(item.quantity);
 
-    // 1. Coffee (roasted): check FIFO lot pool
-    if (kgNeeded > 0 && item.productId) {
+    // 1a. Coffee (green): check green_lots.current_kg
+    if (kgNeeded > 0 && item.grind === 'green' && item.productId) {
+      const prodRows = await get('products', { id: `eq.${item.productId}`, select: 'green_lot_id' });
+      const greenLotId = prodRows[0]?.green_lot_id;
+      if (greenLotId) {
+        const glRows = await get('green_lots', { id: `eq.${greenLotId}`, select: 'current_kg' });
+        const currentGreenKg = Number(glRows[0]?.current_kg || 0);
+        if (kgNeeded > currentGreenKg + 0.001) {
+          throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${currentGreenKg.toFixed(2)} kg, pedido: ${kgNeeded.toFixed(2)} kg)`);
+        }
+        continue; // green coffee — no further stock check needed
+      }
+    }
+
+    // 1b. Coffee (roasted): check FIFO lot pool — skip for green grind
+    if (kgNeeded > 0 && item.productId && item.grind !== 'green') {
       const assignUrl = `${base()}/rest/v1/product_lot_assignments?product_id=eq.${item.productId}&select=kg_assigned,kg_sold,output_lot:roast_output_lots(event:roast_events(status))`;
       const { data: assignments } = await axios.get(assignUrl, { headers: headers() });
       if (assignments?.length) {
