@@ -544,7 +544,7 @@ router.post('/events/create', async (req, res) => {
         status:       'planned',
         sensory_notes: [],
         roaster_id:   '56f794e4-d159-4c6b-9336-87ce97e4e590',
-        operator_id:  'c082bba3-7956-4965-97b7-e5072032e39a',
+        operator_id:  'd0f1b4bb-bf9f-469d-b461-1080e4e80150',
         profile_id:   '1855fce0-2600-45ad-a619-de93ba9dae17',
       },
       { headers: headers() }
