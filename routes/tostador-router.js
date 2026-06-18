@@ -524,7 +524,7 @@ router.get('/green-lots', async (req, res) => {
 // Body: { businessId, green_lot_id, green_in_kg, roasted_at, product_id }
 router.post('/events/create', async (req, res) => {
   try {
-    const { businessId, green_lot_id, green_in_kg, roasted_at, product_id } = req.body;
+    const { businessId, green_lot_id, green_in_kg, roasted_at, product_id, roasted_out_kg } = req.body;
     if (!businessId)   return res.status(400).json({ error: 'businessId requerido' });
     if (!green_lot_id) return res.status(400).json({ error: 'green_lot_id requerido' });
     if (!green_in_kg)  return res.status(400).json({ error: 'green_in_kg requerido' });
@@ -543,9 +543,10 @@ router.post('/events/create', async (req, res) => {
         roasted_at,
         status:       'planned',
         sensory_notes: [],
-        roaster_id:   '56f794e4-d159-4c6b-9336-87ce97e4e590',
-        operator_id:  'd0f1b4bb-bf9f-469d-b461-1080e4e80150',
-        profile_id:   '1855fce0-2600-45ad-a619-de93ba9dae17',
+        roaster_id:      '56f794e4-d159-4c6b-9336-87ce97e4e590',
+        operator_id:     'd0f1b4bb-bf9f-469d-b461-1080e4e80150',
+        profile_id:      '1855fce0-2600-45ad-a619-de93ba9dae17',
+        ...(roasted_out_kg != null ? { roasted_out_kg: parseFloat(roasted_out_kg) } : {}),
       },
       { headers: headers() }
     );
