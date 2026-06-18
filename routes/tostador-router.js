@@ -537,12 +537,15 @@ router.post('/events/create', async (req, res) => {
     const { data: events } = await axios.post(
       rest('/roast_events'),
       {
-        farm_id:     negocio.farmId,
+        farm_id:      negocio.farmId,
         green_lot_id,
-        green_in_kg: parseFloat(green_in_kg),
+        green_in_kg:  parseFloat(green_in_kg),
         roasted_at,
-        status:      'planned',
+        status:       'planned',
         sensory_notes: [],
+        roaster_id:   '56f794e4-d159-4c6b-9336-87ce97e4e590',
+        operator_id:  'c082bba3-7956-4965-97b7-e5072032e39a',
+        profile_id:   '1855fce0-2600-45ad-a619-de93ba9dae17',
       },
       { headers: headers() }
     );
