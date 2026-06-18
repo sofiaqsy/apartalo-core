@@ -505,7 +505,7 @@ router.get('/green-lots', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const url = rest('/green_lots') + `?select=id,lot_code,current_kg,harvest_year&farm_id=eq.${negocio.farmId}&status=eq.available&current_kg=gt.0&order=created_at.desc`;
+    const url = rest('/green_lots') + `?select=id,lot_code,current_kg,harvest_year&roastery_farm_id=eq.${negocio.farmId}&status=eq.available&current_kg=gt.0&order=created_at.desc`;
     console.log('[tostador/green-lots] url:', url);
     const response = await axios.get(url, { headers: headers() });
     console.log('[tostador/green-lots] status:', response.status, 'count:', response.data?.length);
