@@ -555,9 +555,10 @@ router.post('/events/create', async (req, res) => {
 
     // Vincular producto via event_offers si se proporcionó
     if (product_id) {
+      const kgOffered = roasted_out_kg != null ? parseFloat(roasted_out_kg) : parseFloat(green_in_kg);
       await axios.post(
         rest('/event_offers'),
-        { event_id: event.id, product_id, kg_offered: parseFloat(green_in_kg) },
+        { event_id: event.id, product_id, kg_offered: kgOffered },
         { headers: headers() }
       ).catch(e => console.warn('[tostador/events/create] event_offer warn:', e.message));
     }
