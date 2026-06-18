@@ -505,14 +505,16 @@ router.get('/green-lots', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const { data: lots } = await axios.get(
-      rest('/green_lots') + `?select=id,lot_code,current_kg,harvest_year&farm_id=eq.${negocio.farmId}&status=eq.available&current_kg=gt.0&order=created_at.desc`,
-      { headers: headers() }
-    );
+    const url = rest('/green_lots') + `?select=id,lot_code,current_kg,harvest_year&farm_id=eq.${negocio.farmId}&status=eq.available&current_kg=gt.0&order=created_at.desc`;
+    console.log('[tostador/green-lots] url:', url);
+    const response = await axios.get(url, { headers: headers() });
+    console.log('[tostador/green-lots] status:', response.status, 'count:', response.data?.length);
 
-    res.json(lots || []);
+    res.json(response.data || []);
   } catch (err) {
-    console.error('[tostador/green-lots]', err.message);
+    console.error('[tostador/green-lots] error:', err.message);
+    console.error('[tostador/green-lots] response data:', JSON.stringify(err.response?.data));
+    console.error('[tostador/green-lots] response status:', err.response?.status);
     res.status(500).json({ error: 'Error obteniendo lotes verdes' });
   }
 });
