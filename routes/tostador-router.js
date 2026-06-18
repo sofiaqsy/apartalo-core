@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const axios  = require('axios');
+const negociosService = require('../config/negocios');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function base() {
@@ -491,6 +492,74 @@ router.delete('/events/:id/media', async (req, res) => {
   } catch (err) {
     console.error('[tostador/events/media/delete]', err.message);
     res.status(500).json({ error: 'Error eliminando media' });
+  }
+});
+
+// ── GET /api/tostador/green-lots?businessId=... ───────────────────────────────
+// Lista lotes verdes disponibles para el negocio (para crear eventos desde apartalo-app)
+router.get('/green-lots', async (req, res) => {
+  try {
+    const { businessId } = req.query;
+    if (!businessId) return res.status(400).json({ error: 'businessId requerido' });
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const { data: lots } = await axios.get(
+      rest('/green_lots') + `?select=id,lot_code,current_kg,harvest_year&farm_id=eq.${negocio.farmId}&status=eq.available&current_kg=gt.0&order=created_at.desc`,
+      { headers: headers() }
+    );
+
+    res.json(lots || []);
+  } catch (err) {
+    console.error('[tostador/green-lots]', err.message);
+    res.status(500).json({ error: 'Error obteniendo lotes verdes' });
+  }
+});
+
+// ── POST /api/tostador/events/create ─────────────────────────────────────────
+// Crea un evento de tueste planificado y lo vincula al producto via event_offers
+// Body: { businessId, green_lot_id, green_in_kg, roasted_at, product_id }
+router.post('/events/create', async (req, res) => {
+  try {
+    const { businessId, green_lot_id, green_in_kg, roasted_at, product_id } = req.body;
+    if (!businessId)   return res.status(400).json({ error: 'businessId requerido' });
+    if (!green_lot_id) return res.status(400).json({ error: 'green_lot_id requerido' });
+    if (!green_in_kg)  return res.status(400).json({ error: 'green_in_kg requerido' });
+    if (!roasted_at)   return res.status(400).json({ error: 'roasted_at requerido' });
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    // Crear evento planificado
+    const { data: events } = await axios.post(
+      rest('/roast_events'),
+      {
+        farm_id:     negocio.farmId,
+        green_lot_id,
+        green_in_kg: parseFloat(green_in_kg),
+        roasted_at,
+        status:      'planned',
+        sensory_notes: [],
+      },
+      { headers: headers() }
+    );
+    const event = Array.isArray(events) ? events[0] : events;
+    if (!event?.id) return res.status(500).json({ error: 'Error al crear evento' });
+
+    // Vincular producto via event_offers si se proporcionó
+    if (product_id) {
+      await axios.post(
+        rest('/event_offers'),
+        { event_id: event.id, product_id, kg_offered: parseFloat(green_in_kg) },
+        { headers: headers() }
+      ).catch(e => console.warn('[tostador/events/create] event_offer warn:', e.message));
+    }
+
+    res.status(201).json({ ok: true, eventId: event.id });
+  } catch (err) {
+    console.error('[tostador/events/create]', err.message);
+    res.status(500).json({ error: 'Error creando evento' });
   }
 });
 
