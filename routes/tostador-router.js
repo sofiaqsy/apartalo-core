@@ -563,8 +563,9 @@ router.post('/events/create', async (req, res) => {
 
     res.status(201).json({ ok: true, eventId: event.id });
   } catch (err) {
-    console.error('[tostador/events/create]', err.message);
-    res.status(500).json({ error: 'Error creando evento' });
+    console.error('[tostador/events/create] error:', err.message);
+    console.error('[tostador/events/create] response:', JSON.stringify(err.response?.data));
+    res.status(500).json({ error: err.response?.data?.message || 'Error creando evento' });
   }
 });
 
