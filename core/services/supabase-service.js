@@ -1401,21 +1401,32 @@ async function getProductAvailableKgBreakdown(productId) {
       return dateA - dateB;
     });
 
+  // Keep single-event fields for backwards compat, and add full upcomingEvents array
   let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null, nextEventId = null;
-  if (upcomingOffers.length > 0) {
-    const offer = upcomingOffers[0];
+  const upcomingEvents = upcomingOffers.map(offer => {
     const ev = Array.isArray(offer.event) ? offer.event[0] : offer.event;
-    nextEventKg     = Number(offer.kg_offered) || 0;
-    nextEventDate   = ev?.roasted_at || null;
-    nextEventStatus = ev?.status || null;
-    nextEventLotCode= ev?.cached_lot_code || null;
-    nextEventId     = ev?.id || null;
+    return {
+      kg:       Number(offer.kg_offered) || 0,
+      date:     ev?.roasted_at || null,
+      status:   ev?.status || null,
+      lotCode:  ev?.cached_lot_code || null,
+      eventId:  ev?.id || null,
+    };
+  });
+  if (upcomingEvents.length > 0) {
+    const first = upcomingEvents[0];
+    nextEventKg      = first.kg;
+    nextEventDate    = first.date;
+    nextEventStatus  = first.status;
+    nextEventLotCode = first.lotCode;
+    nextEventId      = first.eventId;
   }
 
   const hasNoLots = completedLots.length === 0;
   return {
     roastedKg, completedLots, hasNoLots,
     nextEventKg, nextEventDate, nextEventStatus, nextEventLotCode, nextEventId,
+    upcomingEvents,
     greenKg,      // null if no green_lot_id linked
     greenLotCode, // null if no green_lot_id linked
     isGreenCoffee: greenLotId !== null,
