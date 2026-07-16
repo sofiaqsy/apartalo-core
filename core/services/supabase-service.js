@@ -697,6 +697,7 @@ function mapOrder(o, items = [], payments = []) {
     })),
     evidencias,
     fechaActualizacion: o.updated_at ? new Date(o.updated_at).toLocaleString('es-PE', { timeZone: 'America/Lima' }) : '',
+    fechaCompletado: o.delivered_at || null,
     tracking: {
       creadoEn: o.created_at, confirmedAt: o.confirmed_at,
       preparingAt: o.preparing_at, readyAt: o.ready_at,
