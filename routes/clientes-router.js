@@ -97,14 +97,19 @@ router.get('/:businessId', async (req, res) => {
 
     // Merge guest customers (orders placed without an account)
     try {
+      // Normalize phone: strip leading 51 country code for comparison
+      const normalizePhone = p => String(p || '').replace(/^51/, '');
+      const seen = new Set(profiles.map(p => normalizePhone(p.phone)).filter(Boolean));
+      profiles.forEach(p => p.email && seen.add(String(p.email)));
+
       const guestOrders = await supabaseService.getGuestCustomers(negocio.farmId, { search: buscar });
       if (guestOrders.length) {
-        const seen = new Set(profiles.map(p => p.phone).filter(Boolean));
-        profiles.forEach(p => p.email && seen.add(String(p.email)));
         for (const o of guestOrders) {
-          const key = o.customer_phone || String(o.customer_email || '');
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
+          const phoneKey = normalizePhone(o.customer_phone);
+          const emailKey = String(o.customer_email || '');
+          if ((phoneKey && seen.has(phoneKey)) || (emailKey && seen.has(emailKey))) continue;
+          if (phoneKey) seen.add(phoneKey);
+          if (emailKey) seen.add(emailKey);
           clientes.push(mapGuestCliente(o));
         }
       }
