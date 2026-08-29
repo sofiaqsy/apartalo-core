@@ -508,6 +508,22 @@ async function getAllCustomers({ search, limit = 50 } = {}) {
   return data;
 }
 
+async function getGuestCustomers(farmId, { search, limit = 200 } = {}) {
+  // Orders don't have farm_id directly — find order IDs via order_items
+  const itemRows = await get('order_items', { farm_id: `eq.${farmId}`, select: 'order_id' });
+  if (!itemRows.length) return [];
+  const orderIds = [...new Set(itemRows.map(i => i.order_id))];
+  const idList = orderIds.join(',');
+
+  let url = `${base()}/rest/v1/orders?select=customer_name,customer_phone,customer_email,shipping_address,created_at&id=in.(${idList})&customer_id=is.null&order=created_at.desc&limit=${limit}`;
+  if (search && search.trim().length >= 2) {
+    const s = encodeURIComponent(`*${search.trim()}*`);
+    url += `&or=(customer_name.ilike.${s},customer_phone.ilike.${s},customer_email.ilike.${s})`;
+  }
+  const { data } = await axios.get(url, { headers: headers() });
+  return data || [];
+}
+
 async function getCustomerById(profileId) {
   const rows = await get('profiles', {
     id: `eq.${profileId}`,
@@ -1459,6 +1475,7 @@ module.exports = {
   deletePresentation,
   getCustomerByPhone,
   getAllCustomers,
+  getGuestCustomers,
   getCustomerById,
   getCustomersByIds,
   createCustomer,

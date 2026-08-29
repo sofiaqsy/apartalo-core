@@ -15,6 +15,30 @@ function isUUID(str) {
 
 // ── Helper: map Supabase profile + address → cliente DTO ─────────────────────
 
+function mapGuestCliente(order) {
+  const addr = order.shipping_address || {};
+  return {
+    id:                 `guest:${order.customer_phone || order.customer_email}`,
+    whatsapp:           order.customer_phone || '',
+    nombreNegocio:      '',
+    nombreResponsable:  order.customer_name  || '',
+    telefono:           order.customer_phone || '',
+    email:              String(order.customer_email || ''),
+    fechaRegistro:      order.created_at ? new Date(order.created_at).toLocaleDateString('es-PE') : '',
+    direccion:          addr.line1 || '',
+    distrito:           addr.district || addr.city || '',
+    departamento:       addr.department || '',
+    direccionEnvio:     addr.line1 || '',
+    distritoEnvio:      addr.district || addr.city || '',
+    departamentoEnvio:  addr.department || '',
+    tipoEnvio:          addr.delivery_method === 'pickup' ? 'SEDE' : (addr.line1 ? 'LOCAL' : ''),
+    empresaEnvio: '', localEnvio: '',
+    ultimaCompra: '', totalPedidos: 0, totalComprado: 0, totalKg: 0,
+    totalPorCobrar: 0, pedidosActivos: 0, pedidosPorCobrar: 0, pedidosPagados: 0,
+    estado: 'INVITADO', notas: 'Cliente sin cuenta'
+  };
+}
+
 function mapCliente(p, addr) {
   const courier = Array.isArray(addr?.customer_address_courier)
     ? addr.customer_address_courier[0]
@@ -71,8 +95,25 @@ router.get('/:businessId', async (req, res) => {
 
     let clientes = profiles.map(p => mapCliente(p, addrMap[p.id]));
 
+    // Merge guest customers (orders placed without an account)
+    try {
+      const guestOrders = await supabaseService.getGuestCustomers(negocio.farmId, { search: buscar });
+      if (guestOrders.length) {
+        const seen = new Set(profiles.map(p => p.phone).filter(Boolean));
+        profiles.forEach(p => p.email && seen.add(String(p.email)));
+        for (const o of guestOrders) {
+          const key = o.customer_phone || String(o.customer_email || '');
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          clientes.push(mapGuestCliente(o));
+        }
+      }
+    } catch (e) {
+      console.warn('[Clientes GET] No se pudieron cargar invitados:', e.message);
+    }
+
     if (ordenar === 'nombre') {
-      clientes.sort((a, b) => a.nombreNegocio.localeCompare(b.nombreNegocio));
+      clientes.sort((a, b) => (a.nombreResponsable || a.nombreNegocio).localeCompare(b.nombreResponsable || b.nombreNegocio));
     }
 
     res.json({ total: clientes.length, pagina: 1, totalPaginas: 1, hayMas: false, clientes });
