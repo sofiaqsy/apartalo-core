@@ -648,11 +648,13 @@ function mapOrder(o, items = [], payments = []) {
     fecha: o.created_at ? new Date(o.created_at).toLocaleDateString('es-PE', { timeZone: 'America/Lima' }) : '',
     hora:  o.created_at ? new Date(o.created_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '',
     whatsapp: o.customer_phone || '', cliente: o.customer_name || '', telefono: o.customer_phone || '',
+    clienteId: o.customer_id || null,
     // Soporte para delivery_method: 'pickup' (recojo en tienda)
     ...(() => {
       const isPickup = addr.delivery_method === 'pickup';
       return {
         direccion:    addr.line1 || addr.address || (isPickup ? (addr.pickup_address || '') : ''),
+        referencia:   addr.reference || addr.notes || '',
         ciudad:       addr.city  || (isPickup ? (addr.pickup_city || '') : ''),
         departamento: addr.department || (isPickup ? (addr.pickup_department || '') : ''),
         tipoEnvio:    addr.tipo  || (isPickup ? 'SEDE' : ''),
