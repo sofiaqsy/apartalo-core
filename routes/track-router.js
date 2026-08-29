@@ -77,8 +77,9 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
 
     const destino = {
       nombre:    '',
-      direccion: pedido.direccion || '',
+      direccion: pedido.direccion   || '',
       ciudad:    [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
+      referencia: pedido.referencia || '',
     };
 
     res.json({

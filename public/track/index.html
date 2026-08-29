@@ -442,7 +442,7 @@
       wazeUrl   = 'https://waze.com/ul?q=' + destQ + '&navigate=yes';
       routeHtml =
         '<div class="card-title">Punto de recojo</div>' +
-        routeRow('dest', svgPin, 'RETIRO EN SEDE', destino.nombre || destino.direccion || origen.nombre, destino.direccion, destino.ciudad);
+        routeRow('dest', svgPin, 'RETIRO EN SEDE', destino.nombre || destino.direccion || origen.nombre, destino.direccion, destino.ciudad, destino.referencia);
 
     } else if (tipo === 'NACIONAL') {
       const origQ = encodeURIComponent(origAddr || origen.nombre);
@@ -453,7 +453,7 @@
         '<div class="card-title">Ruta de envío nacional</div>' +
         routeRow('origin', svgPin,   'ORIGEN',         origen.nombre,                   origen.direccion, origen.ciudad) +
         '<div class="route-divider"></div>' +
-        routeRow('dest',   svgTruck, 'AGENCIA COURIER', destino.nombre || destino.direccion || 'Agencia de envío', destino.nombre ? destino.direccion : '', destino.ciudad);
+        routeRow('dest',   svgTruck, 'AGENCIA COURIER', destino.nombre || destino.direccion || 'Agencia de envío', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia);
 
     } else {
       // LOCAL o sin tipo
@@ -465,7 +465,7 @@
         '<div class="card-title">Ruta de entrega</div>' +
         routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,                      origen.direccion, origen.ciudad) +
         '<div class="route-divider"></div>' +
-        routeRow('dest',   svgTruck, 'DESTINO', destino.nombre || destino.direccion || 'Domicilio', destino.nombre ? destino.direccion : '', destino.ciudad);
+        routeRow('dest',   svgTruck, 'DESTINO', destino.nombre || destino.direccion || 'Domicilio', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia);
     }
 
     const routeCard = el('div', 'card');
@@ -533,7 +533,7 @@
   // ── Helpers ──
   function el(tag, cls) { const d = document.createElement(tag); d.className = cls; return d; }
   function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function routeRow(type, icon, label, name, addr, city) {
+  function routeRow(type, icon, label, name, addr, city, ref) {
     return '<div class="route-row">' +
       '<div class="route-icon icon-' + (type === 'origin' ? 'origin' : 'dest') + '">' + icon + '</div>' +
       '<div>' +
@@ -541,6 +541,7 @@
         '<div class="route-name">' + esc(name) + '</div>' +
         (addr ? '<div class="route-addr">' + esc(addr) + '</div>' : '') +
         (city ? '<div class="route-city">' + esc(city) + '</div>' : '') +
+        (ref  ? '<div class="route-addr" style="color:#6b7280;font-style:italic">' + esc(ref) + '</div>' : '') +
       '</div></div>';
   }
 
