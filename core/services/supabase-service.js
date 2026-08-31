@@ -218,12 +218,26 @@ async function getProductsWithPresentations(farmId) {
     });
   }
 
+  // Pending roast events (planned/in_progress) → flag products that need attention
+  const pendingProductIds = new Set();
+  try {
+    const evOfferSelect = 'event_offers(product_id)';
+    const evUrl = `${base()}/rest/v1/roast_events?farm_id=eq.${farmId}&status=in.(planned,in_progress)&select=${encodeURIComponent(evOfferSelect)}`;
+    const { data: pendingEvents } = await axios.get(evUrl, { headers: headers() });
+    for (const ev of (pendingEvents || [])) {
+      for (const offer of (ev.event_offers || [])) {
+        if (offer.product_id) pendingProductIds.add(offer.product_id);
+      }
+    }
+  } catch (_) { /* non-fatal */ }
+
   return products
     .map(p => ({
       ...p,
       presentations: presMap[p.id] || [],
       image_url: productCoverMap[p.id] || null,
-      totalSold: salesMap[p.id] || 0
+      totalSold: salesMap[p.id] || 0,
+      pendingTueste: pendingProductIds.has(p.id),
     }))
     .sort((a, b) => b.totalSold - a.totalSold || a.name.localeCompare(b.name));
 }

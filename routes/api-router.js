@@ -1207,6 +1207,7 @@ router.get('/productos/:businessId', async (req, res) => {
           imageUrl:     pp.image_url || null,
         })),
         _totalSold: sp.totalSold || 0,
+        pendingTueste: sp.pendingTueste || false,
       }));
 
       // Filtro estado
