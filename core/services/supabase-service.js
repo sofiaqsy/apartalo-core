@@ -622,7 +622,7 @@ const STATUS_TO_ESTADO = {
   cancelled: 'CANCELADO', refunded: 'CANCELADO'
 };
 const ESTADOPAGO_TO_PS = { PENDIENTE_PAGO: 'pending', PARCIAL: 'partial', PAGADO: 'paid' };
-const PS_TO_ESTADOPAGO = { pending: 'PENDIENTE_PAGO', partial: 'PARCIAL', paid: 'PAGADO' };
+const PS_TO_ESTADOPAGO = { pending: 'PENDIENTE_PAGO', partial: 'PARCIAL', paid: 'PAGADO', succeeded: 'PAGADO' };
 
 function toStatus(estado)     { return ESTADO_TO_STATUS[(estado||'').toUpperCase()]  || 'pending'; }
 function fromStatus(s)        { return STATUS_TO_ESTADO[s]   || 'PENDIENTE'; }
@@ -685,6 +685,7 @@ function mapOrder(o, items = [], payments = []) {
         roastedAt,
       };
     }),
+    paymentMethod: o.payment_method || null,
     subtotal: (o.subtotal_cents || 0) / 100,
     costoEnvio: (o.shipping_cents || 0) / 100,
     total: o.total_cents / 100,
