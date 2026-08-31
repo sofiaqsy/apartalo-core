@@ -343,6 +343,22 @@ router.get('/events/:eventId/preventas', async (req, res) => {
   }
 });
 
+// ── Auth helper: accepts profileId (tostador) OR businessId (admin) ──────────
+async function hasEventAccess(farmId, { profileId, businessId }) {
+  if (businessId) {
+    const negocio = negociosService.getById(businessId);
+    return negocio?.farmId === farmId;
+  }
+  if (profileId) {
+    const { data: fm } = await axios.get(
+      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${farmId}`,
+      { headers: headers() }
+    );
+    return !!fm?.length;
+  }
+  return false;
+}
+
 // ── POST /api/tostador/events/:id/media/sign ─────────────────────────────────
 // Genera una URL firmada de Supabase Storage para que Flutter suba directo.
 // Body: { profileId, filename, mimeType }
@@ -350,8 +366,8 @@ router.get('/events/:eventId/preventas', async (req, res) => {
 router.post('/events/:id/media/sign', async (req, res) => {
   try {
     const { id } = req.params;
-    const { profileId, filename, mimeType } = req.body;
-    if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    const { profileId, businessId, filename, mimeType } = req.body;
+    if (!profileId && !businessId) return res.status(400).json({ error: 'profileId o businessId requerido' });
     if (!filename)  return res.status(400).json({ error: 'filename requerido' });
 
     const { data: [event] } = await axios.get(
@@ -360,11 +376,9 @@ router.post('/events/:id/media/sign', async (req, res) => {
     );
     if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
 
-    const { data: fm } = await axios.get(
-      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${event.farm_id}`,
-      { headers: headers() }
-    );
-    if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    if (!await hasEventAccess(event.farm_id, { profileId, businessId })) {
+      return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    }
 
     const storagePath = `roast-events/${id}/${filename}`;
     const storageKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -403,8 +417,8 @@ router.post('/events/:id/media/sign', async (req, res) => {
 router.post('/events/:id/media/register', async (req, res) => {
   try {
     const { id } = req.params;
-    const { profileId, url } = req.body;
-    if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    const { profileId, businessId, url } = req.body;
+    if (!profileId && !businessId) return res.status(400).json({ error: 'profileId o businessId requerido' });
     if (!url)       return res.status(400).json({ error: 'url requerido' });
 
     const { data: [event] } = await axios.get(
@@ -413,11 +427,9 @@ router.post('/events/:id/media/register', async (req, res) => {
     );
     if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
 
-    const { data: fm } = await axios.get(
-      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${event.farm_id}`,
-      { headers: headers() }
-    );
-    if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    if (!await hasEventAccess(event.farm_id, { profileId, businessId })) {
+      return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    }
 
     const existing  = parseNotes(event.notes);
     existing.media  = [...(existing.media || []), url];
@@ -441,8 +453,8 @@ router.post('/events/:id/media/register', async (req, res) => {
 router.delete('/events/:id/media', async (req, res) => {
   try {
     const { id } = req.params;
-    const { profileId, url } = req.body;
-    if (!profileId) return res.status(400).json({ error: 'profileId requerido' });
+    const { profileId, businessId, url } = req.body;
+    if (!profileId && !businessId) return res.status(400).json({ error: 'profileId o businessId requerido' });
     if (!url)       return res.status(400).json({ error: 'url requerido' });
 
     // Fetch event
@@ -455,12 +467,9 @@ router.delete('/events/:id/media', async (req, res) => {
       return res.status(400).json({ error: 'No se puede eliminar media de un evento cerrado' });
     }
 
-    // Verify farm membership
-    const { data: fm } = await axios.get(
-      rest('/farm_members') + `?select=farm_id&user_id=eq.${profileId}&farm_id=eq.${event.farm_id}`,
-      { headers: headers() }
-    );
-    if (!fm?.length) return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    if (!await hasEventAccess(event.farm_id, { profileId, businessId })) {
+      return res.status(403).json({ error: 'Sin acceso a esta finca' });
+    }
 
     // Remove URL from notes JSON
     const existing = parseNotes(event.notes);

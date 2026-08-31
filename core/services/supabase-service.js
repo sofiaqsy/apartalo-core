@@ -1381,7 +1381,7 @@ async function getProductAvailableKgBreakdown(productId) {
       { headers: headers() }
     ).catch(() => ({ data: [] })),
     axios.get(
-      `${base()}/rest/v1/event_offers?product_id=eq.${productId}&select=${encodeURIComponent('kg_offered,event:roast_events(id,roasted_at,status,cached_lot_code)')}`,
+      `${base()}/rest/v1/event_offers?product_id=eq.${productId}&select=${encodeURIComponent('kg_offered,event:roast_events(id,roasted_at,status,cached_lot_code,notes)')}`,
       { headers: headers() }
     ).catch(() => ({ data: [] })),
     axios.get(
@@ -1439,12 +1439,18 @@ async function getProductAvailableKgBreakdown(productId) {
   let nextEventKg = 0, nextEventDate = null, nextEventStatus = null, nextEventLotCode = null, nextEventId = null;
   const upcomingEvents = upcomingOffers.map(offer => {
     const ev = Array.isArray(offer.event) ? offer.event[0] : offer.event;
+    let mediaUrls = [];
+    try {
+      const parsed = ev?.notes ? JSON.parse(ev.notes) : {};
+      mediaUrls = Array.isArray(parsed.media) ? parsed.media : [];
+    } catch (_) {}
     return {
-      kg:       Number(offer.kg_offered) || 0,
-      date:     ev?.roasted_at || null,
-      status:   ev?.status || null,
-      lotCode:  ev?.cached_lot_code || null,
-      eventId:  ev?.id || null,
+      kg:        Number(offer.kg_offered) || 0,
+      date:      ev?.roasted_at || null,
+      status:    ev?.status || null,
+      lotCode:   ev?.cached_lot_code || null,
+      eventId:   ev?.id || null,
+      mediaUrls,
     };
   });
   if (upcomingEvents.length > 0) {
