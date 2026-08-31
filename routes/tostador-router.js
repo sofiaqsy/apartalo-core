@@ -495,6 +495,82 @@ router.delete('/events/:id/media', async (req, res) => {
   }
 });
 
+// ── POST /api/tostador/events/:id/start-admin ────────────────────────────────
+// Admin version: authorizes via businessId instead of profileId
+router.post('/events/:id/start-admin', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { businessId } = req.body;
+    if (!businessId) return res.status(400).json({ error: 'businessId requerido' });
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const { data: [event] } = await axios.get(
+      rest('/roast_events') + `?select=id,farm_id,status&id=eq.${id}`,
+      { headers: headers() }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+    if (event.farm_id !== negocio.farmId) return res.status(403).json({ error: 'Sin acceso a este evento' });
+    if (event.status !== 'planned') return res.status(400).json({ error: `Estado inválido: ${event.status}` });
+
+    const roastedAt = new Date().toISOString();
+    await axios.patch(
+      rest('/roast_events') + `?id=eq.${id}`,
+      { status: 'in_progress', roasted_at: roastedAt, updated_at: roastedAt },
+      { headers: headers() }
+    );
+
+    res.json({ ok: true, roasted_at: roastedAt });
+  } catch (err) {
+    console.error('[tostador/events/start-admin]', err.message);
+    res.status(500).json({ error: 'Error iniciando tueste' });
+  }
+});
+
+// ── POST /api/tostador/events/:id/complete-admin ──────────────────────────────
+// Admin version: authorizes via businessId instead of profileId
+router.post('/events/:id/complete-admin', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { businessId, notesText, outKg } = req.body;
+    if (!businessId) return res.status(400).json({ error: 'businessId requerido' });
+    if (outKg === undefined || outKg === null || isNaN(Number(outKg))) {
+      return res.status(400).json({ error: 'outKg requerido (kg de café tostado)' });
+    }
+
+    const negocio = negociosService.getById(businessId);
+    if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
+
+    const { data: [event] } = await axios.get(
+      rest('/roast_events') + `?select=id,farm_id,status,notes,green_in_kg&id=eq.${id}`,
+      { headers: headers() }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento no encontrado' });
+    if (event.farm_id !== negocio.farmId) return res.status(403).json({ error: 'Sin acceso a este evento' });
+    if (event.status !== 'in_progress') return res.status(400).json({ error: `Estado inválido: ${event.status}` });
+
+    const completedAt = new Date().toISOString();
+    const expiresAt   = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 6);
+
+    const existing = parseNotes(event.notes);
+    const newNotes = serializeNotes({ text: notesText || existing.text, media: existing.media });
+
+    await axios.patch(
+      rest('/roast_events') + `?id=eq.${id}`,
+      { status: 'completed', completed_at: completedAt, updated_at: completedAt,
+        notes: newNotes, roasted_out_kg: Number(outKg) },
+      { headers: headers() }
+    );
+
+    res.json({ ok: true, completed_at: completedAt, roasted_out_kg: Number(outKg) });
+  } catch (err) {
+    console.error('[tostador/events/complete-admin]', err.message);
+    res.status(500).json({ error: 'Error finalizando tueste' });
+  }
+});
+
 // ── GET /api/tostador/green-lots?businessId=... ───────────────────────────────
 // Lista lotes verdes disponibles para el negocio (para crear eventos desde apartalo-app)
 router.get('/green-lots', async (req, res) => {
