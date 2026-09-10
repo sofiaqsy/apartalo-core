@@ -43,7 +43,14 @@ async function getFarm(farmId) {
 
 // ─── PRODUCTS ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images,green_lot_id';
+// Ficha técnica: variedad / tueste / proceso / secado vienen de tablas de
+// catálogo, así que se traen embebidas en la misma consulta.
+const PRODUCT_SELECT = 'id,name,description,unit,price_cents,b2b_price_cents,currency,stock,min_order_qty,status,images,green_lot_id,'
+  + 'sensory_notes,blend_varieties,sca_score,'
+  + 'variety:coffee_varieties(name),'
+  + 'roast_level:coffee_roast_levels(name),'
+  + 'process_method:coffee_process_methods(name),'
+  + 'drying_method:coffee_drying_methods(name)';
 
 async function getProducts(farmId) {
   return get('products', { farm_id: `eq.${farmId}`, status: 'eq.active', select: PRODUCT_SELECT, order: 'name.asc' });
@@ -127,7 +134,7 @@ async function getProductsWithPresentations(farmId) {
   }
 
   const ids = products.map(p => p.id);
-  const [presentations, mediaRows] = await Promise.all([
+  const [presentations, mediaRows, farmRow, operators] = await Promise.all([
     get('product_presentations', {
       product_id: `in.(${ids.join(',')})`,
       select: PRESENTATION_SELECT,
@@ -137,8 +144,20 @@ async function getProductsWithPresentations(farmId) {
       owner_id: `in.(${ids.join(',')})`,
       select: 'owner_id,presentation_id,url,role,sort_order',
       order: 'sort_order.asc'
-    })
+    }),
+    // Altura, finca y productor son de la finca, iguales para todos sus cafés.
+    getFarm(farmId).catch(() => null),
+    get('roast_operators', {
+      farm_id: `eq.${farmId}`,
+      active: 'eq.true',
+      select: 'name,role'
+    }).catch(() => [])
   ]);
+
+  // El tostador es el operario con rol de tueste; si sólo hay uno, ese.
+  const tostador = (operators || []).find(o => /tost/i.test(o.role || ''))
+    || (operators || [])[0]
+    || null;
 
   // presentation_id set → image for that specific presentation
   // no presentation_id + role cover/profile → fallback product image
@@ -231,6 +250,13 @@ async function getProductsWithPresentations(farmId) {
     }
   } catch (_) { /* non-fatal */ }
 
+  // PostgREST devuelve las relaciones embebidas como objeto o como array de
+  // un elemento según la cardinalidad; esto normaliza ambos casos.
+  const nombreDe = (rel) => {
+    const r = Array.isArray(rel) ? rel[0] : rel;
+    return r?.name || null;
+  };
+
   return products
     .map(p => ({
       ...p,
@@ -238,6 +264,22 @@ async function getProductsWithPresentations(farmId) {
       image_url: productCoverMap[p.id] || null,
       totalSold: salesMap[p.id] || 0,
       pendingTueste: pendingProductIds.has(p.id),
+      // Ficha técnica: lo que la app imprime en la etiqueta de muestra.
+      fichaTecnica: {
+        variedad:     nombreDe(p.variety),
+        tostado:      nombreDe(p.roast_level),
+        proceso:      nombreDe(p.process_method),
+        secado:       nombreDe(p.drying_method),
+        variedades:   Array.isArray(p.blend_varieties) ? p.blend_varieties : [],
+        notas:        Array.isArray(p.sensory_notes) ? p.sensory_notes : [],
+        puntajeSca:   p.sca_score != null ? Number(p.sca_score) : null,
+        altura:       farmRow?.altitude_masl || null,
+        finca:        farmRow?.name || null,
+        region:       farmRow?.region || farmRow?.city || null,
+        pais:         farmRow?.country || null,
+        productor:    farmRow?.producer_name || null,
+        tostador:     tostador?.name || null,
+      },
     }))
     .sort((a, b) => b.totalSold - a.totalSold || a.name.localeCompare(b.name));
 }

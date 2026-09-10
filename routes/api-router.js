@@ -1208,6 +1208,20 @@ router.get('/productos/:businessId', async (req, res) => {
         })),
         _totalSold: sp.totalSold || 0,
         pendingTueste: sp.pendingTueste || false,
+        // Ficha técnica — la app la imprime en la etiqueta de muestra.
+        variedad:    sp.fichaTecnica?.variedad   || null,
+        tostado:     sp.fichaTecnica?.tostado    || null,
+        proceso:     sp.fichaTecnica?.proceso    || null,
+        secado:      sp.fichaTecnica?.secado     || null,
+        variedades:  sp.fichaTecnica?.variedades || [],
+        sensoryNotes: sp.fichaTecnica?.notas     || [],
+        scaScore:    sp.fichaTecnica?.puntajeSca ?? null,
+        altitudeMasl: sp.fichaTecnica?.altura    || null,
+        finca:       sp.fichaTecnica?.finca      || null,
+        region:      sp.fichaTecnica?.region     || null,
+        pais:        sp.fichaTecnica?.pais       || null,
+        productor:   sp.fichaTecnica?.productor  || null,
+        tostador:    sp.fichaTecnica?.tostador   || null,
       }));
 
       // Filtro estado
