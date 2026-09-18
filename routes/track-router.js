@@ -34,13 +34,27 @@ function parseProductosPublico(productosStr) {
     }
   } catch (_) {}
 
-  return productosStr.split(/\n|,/).map(line => {
+  // Un ítem por línea. La coma sólo separa ítems si lo que sigue empieza
+  // con cantidad ("2x ..."): hay productos con comas en el nombre, como
+  // "Blend de Caturra, Pache, typica", que antes se partían en tres.
+  return productosStr.split(/\n|,\s*(?=\d+\s*x\s)/i).map(line => {
     const m = line.trim().match(/^(\d+)x?\s+(.+)$/i);
     if (m) return { cantidad: parseInt(m[1]), nombre: stripPrecio(m[2]) };
     const t = line.trim();
     if (t) return { cantidad: 1, nombre: stripPrecio(t) };
     return null;
   }).filter(p => p && p.nombre);
+}
+
+// "51944494966" → "+51 944 494 966"; otros formatos se devuelven tal cual.
+function formatTelefono(raw) {
+  const d = (raw || '').toString().replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length === 11 && d.startsWith('51')) {
+    return `+51 ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}`;
+  }
+  if (d.length === 9) return `+51 ${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  return raw.toString().trim();
 }
 
 function estadoToStep(estado) {
@@ -80,6 +94,8 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
       direccion: pedido.direccion   || '',
       ciudad:    [pedido.ciudad, pedido.departamento].filter(Boolean).join(', '),
       referencia: pedido.referencia || '',
+      // Para que quien entrega pueda llamar al cliente desde la página.
+      telefono:  formatTelefono(pedido.telefono || pedido.whatsapp || ''),
     };
 
     res.json({

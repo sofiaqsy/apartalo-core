@@ -453,7 +453,7 @@
         '<div class="card-title">Ruta de envío nacional</div>' +
         routeRow('origin', svgPin,   'ORIGEN',         origen.nombre,                   origen.direccion, origen.ciudad) +
         '<div class="route-divider"></div>' +
-        routeRow('dest',   svgTruck, 'AGENCIA COURIER', destino.nombre || destino.direccion || 'Agencia de envío', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia);
+        routeRow('dest',   svgTruck, 'AGENCIA COURIER', destino.nombre || destino.direccion || 'Agencia de envío', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia, destino.telefono);
 
     } else {
       // LOCAL o sin tipo
@@ -465,7 +465,7 @@
         '<div class="card-title">Ruta de entrega</div>' +
         routeRow('origin', svgPin,   'ORIGEN',  origen.nombre,                      origen.direccion, origen.ciudad) +
         '<div class="route-divider"></div>' +
-        routeRow('dest',   svgTruck, 'DESTINO', destino.nombre || destino.direccion || 'Domicilio', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia);
+        routeRow('dest',   svgTruck, 'DESTINO', destino.nombre || destino.direccion || 'Domicilio', destino.nombre ? destino.direccion : '', destino.ciudad, destino.referencia, destino.telefono);
     }
 
     const routeCard = el('div', 'card');
@@ -533,7 +533,8 @@
   // ── Helpers ──
   function el(tag, cls) { const d = document.createElement(tag); d.className = cls; return d; }
   function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function routeRow(type, icon, label, name, addr, city, ref) {
+  function routeRow(type, icon, label, name, addr, city, ref, tel) {
+    const telDigits = (tel || '').replace(/[^0-9+]/g, '');
     return '<div class="route-row">' +
       '<div class="route-icon icon-' + (type === 'origin' ? 'origin' : 'dest') + '">' + icon + '</div>' +
       '<div>' +
@@ -542,6 +543,8 @@
         (addr ? '<div class="route-addr">' + esc(addr) + '</div>' : '') +
         (city ? '<div class="route-city">' + esc(city) + '</div>' : '') +
         (ref  ? '<div class="route-addr" style="color:#6b7280;font-style:italic">' + esc(ref) + '</div>' : '') +
+        (tel  ? '<div class="route-addr" style="margin-top:4px">Tel. <a href="tel:' + esc(telDigits) +
+                '" style="color:var(--blue);font-weight:600;text-decoration:none">' + esc(tel) + '</a></div>' : '') +
       '</div></div>';
   }
 
