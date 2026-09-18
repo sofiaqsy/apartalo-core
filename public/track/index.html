@@ -411,6 +411,16 @@
   const svgWaze  = '<svg viewBox="0 0 24 24"><path d="M12.003 2C6.477 2 2 6.477 2 12.003c0 2.4.857 4.6 2.27 6.316L3.158 21l2.78-.994A9.943 9.943 0 0 0 12.003 22C17.528 22 22 17.528 22 12.003 22 6.477 17.528 2 12.003 2zm0 1.8a8.2 8.2 0 1 1 0 16.4 8.2 8.2 0 0 1 0-16.4zm-3.2 5.1a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2zm6.4 0a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2zm-3.2 3.6c-1.77 0-3.3 1.04-3.96 2.54h7.92c-.66-1.5-2.19-2.54-3.96-2.54z"/></svg>';
 
   // ── Render ──
+  // Pedido completado: sin datos del pedido, sólo el aviso.
+  function renderCompletado(data) {
+    document.getElementById('hdr-title').textContent = 'Pedido #' + (data.id || '');
+    document.getElementById('hdr-sub').textContent   = '';
+    document.getElementById('main').innerHTML =
+      '<div class="card" style="text-align:center;padding:40px 20px">' +
+        '<div style="font-size:18px;font-weight:700;color:var(--brand)">Pedido completado</div>' +
+      '</div>';
+  }
+
   function render(data) {
     const { id, fecha, hora, estado, timelineStep, tipoEnvio, origen, destino, productos } = data;
 
@@ -523,7 +533,9 @@
           '<div class="error-state">No se encontró el pedido.<br><small>' + esc(e.error || '') + '</small></div>';
         return;
       }
-      render(await resp.json());
+      const data = await resp.json();
+      if (data.completado) { renderCompletado(data); return; }
+      render(data);
     } catch {
       document.getElementById('main').innerHTML =
         '<div class="error-state">Error de conexión. Verifica tu red.</div>';

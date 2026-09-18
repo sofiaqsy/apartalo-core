@@ -78,6 +78,12 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
     const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
+    // Pedido completado: la página es pública, así que no se expone más
+    // dirección, teléfono ni productos. Sólo se confirma que terminó.
+    if ((pedido.estado || '').toUpperCase() === 'COMPLETADO') {
+      return res.json({ id: pedido.id, estado: 'COMPLETADO', completado: true });
+    }
+
     const productos    = parseProductosPublico(pedido.productos);
     const timelineStep = estadoToStep(pedido.estado);
     const tipoEnvio    = (pedido.tipoEnvio || '').toUpperCase();
