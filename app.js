@@ -33,6 +33,7 @@ const ocrRouter = require('./routes/ocr-router');
 const trackRouter    = require('./routes/track-router');
 const deliveryRouter = require('./routes/delivery-router');
 const tostadorRouter = require('./routes/tostador-router');
+const authRouter = require('./routes/auth-router');
 
 // Inicializar Express
 const app = express();
@@ -137,6 +138,9 @@ app.use('/api', apiRouter);
 
 // Track API (public — no auth required)
 app.use('/api/track', trackRouter);
+
+// Google / Apple sign-in session bootstrap
+app.use('/api/auth', authRouter);
 
 // Tostador App API
 app.use('/api/tostador', tostadorRouter);
