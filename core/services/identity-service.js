@@ -32,7 +32,7 @@ function createIdentityService({ get, post, patch, getNegocios, log = console } 
     return (members || [])
       .map(m => {
         const n = negocios.find(x => x.farmId === m.farm_id);
-        return n ? { businessId: n.id, name: n.nombre || n.nombreComercial || n.id, role: m.role } : null;
+        return n ? { businessId: n.id, name: n.nombre || n.nombreComercial || n.id, address: n.direccion || '', city: n.ciudad || '', role: m.role } : null;
       })
       .filter(Boolean);
   }

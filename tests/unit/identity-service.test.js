@@ -1,7 +1,7 @@
 const { createIdentityService, normalizePhone } = require('../../core/services/identity-service');
 
 const P_OWNER = 'p-owner', P_CUSTOMER = 'p-customer';
-const NEGOCIOS = [{ id: 'BIZ-002', nombre: 'Finca Rosal', farmId: 'farm-A' }];
+const NEGOCIOS = [{ id: 'BIZ-002', nombre: 'Finca Rosal', direccion: 'Calle 1', ciudad: 'Lima', farmId: 'farm-A' }];
 
 function build({ identities = [], profiles, members } = {}) {
   const db = {
@@ -55,7 +55,7 @@ describe('resolveSession', () => {
     expect(await b.svc.resolveSession(id())).toEqual({
       status: 'active',
       profile: { id: P_OWNER, fullName: 'Ana', hasPhone: false },
-      businesses: [{ businessId: 'BIZ-002', name: 'Finca Rosal', role: 'owner' }],
+      businesses: [{ businessId: 'BIZ-002', name: 'Finca Rosal', address: 'Calle 1', city: 'Lima', role: 'owner' }],
     });
   });
 
