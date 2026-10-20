@@ -101,6 +101,18 @@ app.get('/health', (req, res) => {
 // Webhook de WhatsApp
 app.use('/webhook', webhookRouter);
 
+// Autenticación de la API (inactiva por defecto: AUTH_MODE=off).
+//   observe -> sólo registra qué clientes llaman sin credenciales; nunca bloquea.
+//   enforce -> NO se puede activar todavía: requiere la comprobación de membresía
+//              por negocio (canEnforce: false), así que se degrada a observe.
+// Debe ir antes de los routers de /api. /api/track es público por diseño.
+const { createAuth } = require('./core/middleware/auth');
+app.use('/api', createAuth({
+  mode: process.env.AUTH_MODE,
+  canEnforce: false,
+  verifyToken: token => firebaseService.verifyIdToken(token),
+}));
+
 // IMPORTANTE: Registrar rutas específicas ANTES de las generales
 // API específica para clientes (con estructura extendida)
 app.use('/api/clientes', clientesRouter);

@@ -17,6 +17,7 @@ class FirebaseService {
     this.db = null;
     this.messaging = null;
     this.initialized = false;
+    this.projectId = null;
   }
 
   /**
@@ -43,6 +44,7 @@ class FirebaseService {
 
       this.db = admin.firestore();
       this.messaging = admin.messaging();
+      this.projectId = serviceAccount.project_id;
       this.initialized = true;
 
       console.log('✅ Firebase inicializado correctamente');
@@ -51,6 +53,54 @@ class FirebaseService {
       console.error('❌ Error inicializando Firebase:', error.message);
       return false;
     }
+  }
+
+  // ============================================
+  // AUTENTICACIÓN (Firebase Auth: Google / Apple)
+  // ============================================
+
+  /**
+   * Verifica un Firebase ID token y devuelve sólo lo necesario.
+   *
+   * El Admin SDK comprueba firma, emisor, vencimiento y que el token sea de ESTE
+   * proyecto. Aquí además se exige explícitamente que `aud` coincida con el
+   * proyecto de la cuenta de servicio, y que exista un uid.
+   *
+   * Falla cerrado: si Firebase no está inicializado se lanza `auth/not-initialized`
+   * (el middleware lo traduce en 503); nunca se "deja pasar".
+   *
+   * El uid es la identidad. Email, nombre y teléfono NO se usan para autorizar:
+   * se devuelven sólo para mostrarlos o registrarlos.
+   */
+  async verifyIdToken(idToken) {
+    if (!this.initialized) {
+      const err = new Error('Firebase no inicializado');
+      err.code = 'auth/not-initialized';
+      throw err;
+    }
+    if (typeof idToken !== 'string' || idToken.length < 20 || idToken.length > 4096) {
+      const err = new Error('Token con formato inválido');
+      err.code = 'auth/invalid-token';
+      throw err;
+    }
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    if (!decoded || !decoded.uid) {
+      const err = new Error('Token sin uid');
+      err.code = 'auth/invalid-token';
+      throw err;
+    }
+    if (this.projectId && decoded.aud !== this.projectId) {
+      const err = new Error('Token de otro proyecto');
+      err.code = 'auth/wrong-audience';
+      throw err;
+    }
+    return {
+      uid: decoded.uid,
+      provider: decoded.firebase?.sign_in_provider || null,
+      email: decoded.email || null,
+      emailVerified: !!decoded.email_verified,
+      name: decoded.name || null,
+    };
   }
 
   // ============================================

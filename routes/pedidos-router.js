@@ -7,6 +7,7 @@ const router = express.Router();
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const supabaseService = require('../core/services/supabase-service');
+const { guards } = require('../core/services/ownership-instance');
 
 // ==================== GET PEDIDOS ====================
 
@@ -40,7 +41,7 @@ router.get('/:businessId', async (req, res) => {
 
 // ==================== GET PEDIDO BY ID ====================
 
-router.get('/:businessId/:pedidoId', async (req, res) => {
+router.get('/:businessId/:pedidoId', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const negocio = negociosService.getById(businessId);
@@ -56,7 +57,7 @@ router.get('/:businessId/:pedidoId', async (req, res) => {
 
 // ==================== EVIDENCIAS DE PAGO ====================
 
-router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
+router.post('/:businessId/:pedidoId/evidencias', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const { url, tipo, descripcion } = req.body;
@@ -89,7 +90,7 @@ router.post('/:businessId/:pedidoId/evidencias', async (req, res) => {
   }
 });
 
-router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
+router.get('/:businessId/:pedidoId/evidencias', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
 
@@ -107,7 +108,7 @@ router.get('/:businessId/:pedidoId/evidencias', async (req, res) => {
 
 // ==================== VERIFICAR EVIDENCIA CONTRA BCP ====================
 
-router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (req, res) => {
+router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', guards.orderEvidence, async (req, res) => {
   try {
     const { businessId, pedidoId, evidenciaId } = req.params;
     const { operacionBCP, montoVerificado, fechaOperacion } = req.body;
@@ -129,7 +130,7 @@ router.put('/:businessId/:pedidoId/evidencias/:evidenciaId/verificar', async (re
   }
 });
 
-router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', async (req, res) => {
+router.delete('/:businessId/:pedidoId/evidencias/:evidenciaId', guards.orderEvidence, async (req, res) => {
   try {
     const { businessId, pedidoId, evidenciaId } = req.params;
 
@@ -242,7 +243,7 @@ router.post('/:businessId', async (req, res) => {
 
 // ==================== ACTUALIZAR PEDIDO ====================
 
-router.put('/:businessId/:pedidoId', async (req, res) => {
+router.put('/:businessId/:pedidoId', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const {
@@ -334,7 +335,7 @@ router.put('/:businessId/:pedidoId', async (req, res) => {
 
 // ==================== ELIMINAR PEDIDO ====================
 
-router.delete('/:businessId/:pedidoId', async (req, res) => {
+router.delete('/:businessId/:pedidoId', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const negocio = negociosService.getById(businessId);

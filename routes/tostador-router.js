@@ -6,6 +6,7 @@
  */
 
 const express = require('express');
+const { guards } = require('../core/services/ownership-instance');
 const router = express.Router();
 const axios  = require('axios');
 const negociosService = require('../config/negocios');
@@ -607,7 +608,7 @@ router.get('/green-lots', async (req, res) => {
 // ── POST /api/tostador/events/create ─────────────────────────────────────────
 // Crea un evento de tueste planificado y lo vincula al producto via event_offers
 // Body: { businessId, green_lot_id, green_in_kg, roasted_at, product_id }
-router.post('/events/create', async (req, res) => {
+router.post('/events/create', guards.lotInBody, async (req, res) => {
   try {
     const { businessId, green_lot_id, green_in_kg, roasted_at, product_id, roasted_out_kg } = req.body;
     if (!businessId)   return res.status(400).json({ error: 'businessId requerido' });

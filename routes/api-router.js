@@ -31,6 +31,7 @@ async function getSheetsServiceDirect(negocio) {
   return getSheetsService(negocio);
 }
 const deliveryService = require('../core/services/delivery-service');
+const { guards } = require('../core/services/ownership-instance');
 
 function parseDecimal(value) {
   if (value === null || value === undefined || value === '') return 0;
@@ -467,7 +468,7 @@ router.post('/pedidos/:businessId', async (req, res) => {
   }
 });
 
-router.patch('/pedidos/:businessId/:pedidoId/items', async (req, res) => {
+router.patch('/pedidos/:businessId/:pedidoId/items', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const { presentacionId, codigo, cantidad, grind } = req.body;
@@ -484,7 +485,7 @@ router.patch('/pedidos/:businessId/:pedidoId/items', async (req, res) => {
   }
 });
 
-router.patch('/pedidos/:businessId/:pedidoId/shipping', async (req, res) => {
+router.patch('/pedidos/:businessId/:pedidoId/shipping', guards.order, async (req, res) => {
   try {
     const { businessId, pedidoId } = req.params;
     const { costoEnvio } = req.body;
@@ -584,7 +585,7 @@ router.put('/pedidos/:businessId/:pedidoId', async (req, res) => {
 });
 
 // DELETE /pedidos/:businessId/:pedidoId/pagos/:pagoId
-router.delete('/pedidos/:businessId/:pedidoId/pagos/:pagoId', async (req, res) => {
+router.delete('/pedidos/:businessId/:pedidoId/pagos/:pagoId', guards.orderPayment, async (req, res) => {
   try {
     const { businessId, pedidoId, pagoId } = req.params;
     const negocio = negociosService.getById(businessId);
@@ -1087,74 +1088,6 @@ router.get('/negocios/por-whatsapp/:whatsapp', async (req, res) => {
   }
 });
 
-// ONE-TIME: Setup admin user — delete after use
-router.post('/setup/admin', async (req, res) => {
-  const { secret, phone, fullName, farmId } = req.body;
-  if (secret !== process.env.ADMIN_SETUP_SECRET) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  try {
-    const axios = require('axios');
-    const baseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, '');
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const cleaned = phone.replace(/\D/g, '');
-    const email = `${cleaned}@admin.apartalo.co`;
-
-    // 1. Fix the conflicting customer phone (Angie Cruz had Keyla's number)
-    await axios.patch(
-      `${baseUrl}/rest/v1/profiles?phone=eq.${cleaned}`,
-      { phone: '51922636789' },
-      { headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=representation' } }
-    );
-
-    // 2. Create auth user for the new admin
-    let userId;
-    try {
-      const { data: authUser } = await axios.post(`${baseUrl}/auth/v1/admin/users`, {
-        email,
-        email_confirm: true,
-        phone: cleaned,
-        phone_confirm: true,
-        user_metadata: { full_name: fullName || 'Admin' },
-        email_change: '',
-        email_change_token_new: '',
-        email_change_token_current: '',
-      }, { headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' } });
-      userId = authUser.id;
-    } catch (e) {
-      if (e.response?.data?.error_code === 'email_exists') {
-        // Already exists — look up by phone in profiles
-        const { data: existing } = await axios.get(
-          `${baseUrl}/rest/v1/profiles?phone=eq.${cleaned}&select=id`,
-          { headers: { apikey: key, Authorization: `Bearer ${key}` } }
-        );
-        userId = existing?.[0]?.id;
-      } else throw e;
-    }
-    if (!userId) return res.status(500).json({ error: 'No se pudo obtener el userId' });
-
-    // 3. Update profile: role=admin, full_name
-    await axios.patch(
-      `${baseUrl}/rest/v1/profiles?id=eq.${userId}`,
-      { role: 'admin', full_name: fullName || 'Admin', phone: cleaned },
-      { headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=representation' } }
-    );
-
-    // 4. Add to farm_members as admin
-    const targetFarmId = farmId || 'c1d391b2-31d0-4eb4-a3e5-6986490e4dd3';
-    await axios.post(
-      `${baseUrl}/rest/v1/farm_members`,
-      { farm_id: targetFarmId, user_id: userId, role: 'admin' },
-      { headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=representation,resolution=merge-duplicates' } }
-    );
-
-    res.json({ success: true, userId, email, message: `Admin creado: ${fullName} (${cleaned})` });
-  } catch (error) {
-    console.error('[setup/admin] Error:', error.response?.data || error.message);
-    res.status(500).json({ error: error.response?.data?.msg || error.message });
-  }
-});
-
 router.post('/negocios/reload', async (req, res) => {
   try {
     await negociosService.reload();
@@ -1482,7 +1415,7 @@ router.post('/productos/:businessId/importar', async (req, res) => {
 // RECETAS (Production Recipes)
 // ─── PRESENTACIONES ──────────────────────────────────────────────────────────
 
-router.get('/productos/:businessId/:productId/presentaciones', async (req, res) => {
+router.get('/productos/:businessId/:productId/presentaciones', guards.product, async (req, res) => {
   try {
     const { businessId, productId } = req.params;
     const negocio = negociosService.getById(businessId);
@@ -1550,7 +1483,7 @@ router.get('/productos/:businessId/:productId/presentaciones', async (req, res) 
   }
 });
 
-router.post('/productos/:businessId/:productId/presentaciones', async (req, res) => {
+router.post('/productos/:businessId/:productId/presentaciones', guards.product, async (req, res) => {
   try {
     const { businessId, productId } = req.params;
     const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
@@ -1587,7 +1520,7 @@ router.post('/productos/:businessId/:productId/presentaciones', async (req, res)
   }
 });
 
-router.put('/productos/:businessId/:productId/presentaciones/:presentationId', async (req, res) => {
+router.put('/productos/:businessId/:productId/presentaciones/:presentationId', guards.presentation, async (req, res) => {
   try {
     const { businessId, productId, presentationId } = req.params;
     const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
@@ -1623,7 +1556,7 @@ router.put('/productos/:businessId/:productId/presentaciones/:presentationId', a
   }
 });
 
-router.delete('/productos/:businessId/:productId/presentaciones/:presentationId', async (req, res) => {
+router.delete('/productos/:businessId/:productId/presentaciones/:presentationId', guards.presentation, async (req, res) => {
   try {
     const { businessId, presentationId } = req.params;
     const negocio = negociosService.getById(businessId);
@@ -1640,7 +1573,7 @@ router.delete('/productos/:businessId/:productId/presentaciones/:presentationId'
 // ─── DISPONIBLE EN LOTE ──────────────────────────────────────────────────────
 // PATCH /api/productos/:businessId/:productId/lote
 // Body: { kg_disponible: number }  — actualiza kg_assigned del lote activo más reciente
-router.patch('/productos/:businessId/:productId/lote', async (req, res) => {
+router.patch('/productos/:businessId/:productId/lote', guards.product, async (req, res) => {
   try {
     const { businessId, productId } = req.params;
     const { kg_disponible } = req.body;
