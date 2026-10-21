@@ -8,12 +8,12 @@
  * Authorization comes ONLY from membership. Email, phone and display name from the
  * identity provider are never consulted.
  *
- * Roles are ranked roaster < staff < owner (each role includes the permissions of
+ * Roles are ranked roaster < staff < manager < owner (each role includes the permissions of
  * the lower ones). This reflects the proposed role matrix (decision D5) and is the
  * single place to change if that matrix changes. Unknown roles rank 0: no access.
  */
 
-const ROLE_RANK = Object.freeze({ roaster: 1, staff: 2, owner: 3 });
+const ROLE_RANK = Object.freeze({ roaster: 1, staff: 2, manager: 3, owner: 4 });
 
 const MODES = ['off', 'observe', 'enforce'];
 
