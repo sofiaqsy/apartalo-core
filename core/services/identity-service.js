@@ -23,11 +23,15 @@ function normalizePhone(raw) {
 
 const escapeLike = s => String(s).replace(/[\\%_*]/g, c => '\\' + c);
 
-function createIdentityService({ get, post, patch, getNegocios, log = console } = {}) {
+function createIdentityService({ get, post, patch, getNegocios, refreshNegocios = async () => {}, log = console } = {}) {
   async function businessesFor(profileId) {
     const members = await get('farm_members', {
       user_id: `eq.${profileId}`, role: `in.(${MEMBER_ROLES.join(',')})`, select: 'farm_id,role',
     });
+    // A farm approved elsewhere (for example on the website) may not be loaded yet: refresh once.
+    if ((members || []).some(m => !getNegocios().find(x => x.farmId === m.farm_id))) {
+      try { await refreshNegocios(); } catch (e) { log.error('[IDENTITY] no se pudo refrescar negocios'); }
+    }
     const negocios = getNegocios();
     return (members || [])
       .map(m => {
@@ -38,7 +42,7 @@ function createIdentityService({ get, post, patch, getNegocios, log = console } 
   }
 
   async function getProfile(profileId) {
-    const rows = await get('profiles', { id: `eq.${profileId}`, select: 'id,full_name,phone,role' });
+    const rows = await get('profiles', { id: `eq.${profileId}`, select: 'id,full_name,phone,is_admin' });
     return rows && rows[0] ? rows[0] : null;
   }
 
@@ -50,7 +54,7 @@ function createIdentityService({ get, post, patch, getNegocios, log = console } 
     if (link) {
       if (link.status === 'active') {
         const profile = await getProfile(link.profile_id);
-        return { status: 'active', profile: { id: profile.id, fullName: profile.full_name || '', hasPhone: !!profile.phone, isAdmin: profile.role === 'admin' }, businesses: await businessesFor(link.profile_id) };
+        return { status: 'active', profile: { id: profile.id, fullName: profile.full_name || '', hasPhone: !!profile.phone, isAdmin: profile.is_admin === true }, businesses: await businessesFor(link.profile_id) };
       }
       return { status: link.status === 'revoked' ? 'revoked' : 'pending' };
     }

@@ -7,7 +7,7 @@ function build({ identities = [], profiles, members } = {}) {
   const db = {
     firebase_identities: identities,
     profiles: profiles || [
-      { id: P_OWNER, email: 'ana@gmail.com', phone: null, full_name: 'Ana' },
+      { id: P_OWNER, email: 'ana@gmail.com', phone: null, full_name: 'Ana', is_admin: false },
       { id: P_CUSTOMER, email: '51999111222@whatsapp.apartalo.co', phone: '51999111222', full_name: 'Cli' },
       { id: 'p-other', email: 'dup@x.com', phone: '51988000111' },
       { id: 'p-dup1', email: 'twin@x.com' }, { id: 'p-dup2', email: 'TWIN@x.com' },
@@ -113,5 +113,29 @@ describe('savePhone', () => {
     const b = build({ identities: active });
     expect((await b.svc.savePhone(id(), 'abc')).reason).toBe('invalid-phone');
     expect(b.get).not.toHaveBeenCalled();
+  });
+});
+
+describe('platform admin flag and late-approved businesses', () => {
+  test('isAdmin comes from profiles.is_admin, not from the role column', async () => {
+    const b = build({ identities: [{ firebase_uid: 'uid-1', profile_id: P_OWNER, status: 'active' }] });
+    b.db.profiles.find(p => p.id === P_OWNER).is_admin = true;
+    expect((await b.svc.resolveSession(id())).profile.isAdmin).toBe(true);
+  });
+
+  test('a farm approved elsewhere triggers one refresh of the loaded businesses', async () => {
+    const negocios = [];
+    const refresh = jest.fn(async () => { negocios.push({ id: 'BIZ-NEW', nombre: 'Nuevo', farmId: 'farm-A', direccion: '', ciudad: '' }); });
+    const db = {
+      firebase_identities: [{ firebase_uid: 'uid-1', profile_id: P_OWNER, status: 'active' }],
+      profiles: [{ id: P_OWNER, full_name: 'Ana', phone: null, is_admin: false }],
+      farm_members: [{ user_id: P_OWNER, farm_id: 'farm-A', role: 'owner' }],
+    };
+    const get = async (t, p = {}) => db[t].filter(r => Object.entries(p).every(([k, v]) => ['select', 'limit', 'role'].includes(k) || String(r[k]) === String(v).replace(/^eq\./, '')));
+    const { createIdentityService } = require('../../core/services/identity-service');
+    const svc = createIdentityService({ get, post: jest.fn(), patch: jest.fn(), getNegocios: () => negocios, refreshNegocios: refresh, log: quietLog() });
+    const r = await svc.resolveSession(id());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(r.businesses).toEqual([expect.objectContaining({ businessId: 'BIZ-NEW', role: 'owner' })]);
   });
 });

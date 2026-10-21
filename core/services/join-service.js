@@ -11,7 +11,8 @@
 const crypto = require('crypto');
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';        // no 0/O/1/I
-const INVITABLE_ROLES = ['staff', 'manager'];
+// farm_members.role only allows 'owner' and 'staff' (database CHECK constraint).
+const INVITABLE_ROLES = ['staff'];
 
 class JoinError extends Error {
   constructor(status, code, message) { super(message || code); this.status = status; this.code = code; }

@@ -49,8 +49,9 @@ describe('createCode', () => {
     const s = b.db.join_codes.pop();
     expect(s.max_uses).toBe(20); expect(new Date(s.expires_at) - NOW).toBe(168 * 3600 * 1000);
   });
-  test('only invitable roles (no owner)', async () => {
+  test('only invitable roles (staff): owner and manager are refused', async () => {
     await expectErr(build().svc.createCode(owner, { businessId: 'BIZ-A', role: 'owner' }), 400, 'invalid-role');
+    await expectErr(build().svc.createCode(owner, { businessId: 'BIZ-A', role: 'manager' }), 400, 'invalid-role');
   });
   test('non-owner, owner of another business, unknown business are refused', async () => {
     const b = build();

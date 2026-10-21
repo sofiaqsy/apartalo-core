@@ -36,7 +36,7 @@ async function createMemberProfile({ email, fullName }) {
 
 const identityService = createIdentityService({
   get: supabaseService.get, post: supabaseService.post, patch: supabaseService.patch,
-  getNegocios: () => negociosService.getAll(),
+  getNegocios: () => negociosService.getAll(), refreshNegocios: () => negociosService.loadFromFarms(),
 });
 
 const joinService = createJoinService({
