@@ -43,6 +43,11 @@ describe('submit', () => {
     expect(b.db.farms[1]).toMatchObject({ slug: 'cafe-luis', name: 'Café Luis', status: 'pending', owner_id: 'p-new', contact_phone: '51987654321', kind: 'hybrid' });
     expect(b.db.farm_members).toHaveLength(1);                 // untouched: the database trigger adds it on approval
   });
+  test.each([['missing', undefined], ['empty', ''], ['blank', '   ']])('the phone is optional (%s): the farm is created without it', async (_l, phone) => {
+    const b = build();
+    expect(await b.svc.submit(newbie, { name: 'Café Luis', city: 'Lima', phone })).toEqual({ status: 'business_pending' });
+    expect(b.db.farms[1]).toMatchObject({ name: 'Café Luis', status: 'pending', contact_phone: null });
+  });
   test('an existing plain profile with the same verified email is reused', async () => {
     const b = build();
     await b.svc.submit({ ...newbie, email: 'cust@x.com' }, form);

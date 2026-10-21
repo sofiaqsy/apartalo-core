@@ -68,10 +68,12 @@ function createBusinessService({ get, post, patch, createProfile, onApproved = a
   async function submit(identity, { name, city, phone } = {}) {
     const businessName = String(name || '').trim();
     const cityName = String(city || '').trim();
-    const contactPhone = normalizePhone(phone);
+    // The business phone is optional; when given it must be a valid number.
+    const rawPhone = String(phone || '').trim();
+    const contactPhone = rawPhone ? normalizePhone(rawPhone) : null;
     if (businessName.length < 3 || businessName.length > 80) throw new JoinError(400, 'invalid-name', 'Escribe el nombre del negocio (3 a 80 caracteres)');
     if (cityName.length < 2 || cityName.length > 60) throw new JoinError(400, 'invalid-city', 'Escribe la ciudad');
-    if (!contactPhone) throw new JoinError(400, 'invalid-phone', 'Número inválido. Usa 9 dígitos, por ejemplo 987654321.');
+    if (rawPhone && !contactPhone) throw new JoinError(400, 'invalid-phone', 'Número inválido. Usa 9 dígitos, por ejemplo 987654321.');
 
     const profileId = await ensureProfile(identity);
     const open = await get('farms', { owner_id: `eq.${profileId}`, status: 'eq.pending', select: 'id', limit: 1 });
