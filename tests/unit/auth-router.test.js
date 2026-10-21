@@ -101,4 +101,20 @@ describe('auth router', () => {
     await call(server, '/api/auth/admin/business-requests/r1/decision', { token: 'a', body: { approve: 1 } });
     expect(business.decide).toHaveBeenCalledWith({ uid: 'u1' }, 'r1', false);
   });
+
+  test('a linked user with no business yet sees their open business request', async () => {
+    service.resolveSession.mockResolvedValue({ status: 'active', profile: { id: 'p' }, businesses: [] });
+    business.pendingFor.mockResolvedValue([{ businessName: 'Café Luis' }]);
+    expect((await call(server, '/api/auth/session', { token: 'a' })).body).toEqual({ status: 'business_pending', businessName: 'Café Luis' });
+  });
+  test('a linked user with no business and no request stays active (the app shows the options)', async () => {
+    const session = { status: 'active', profile: { id: 'p' }, businesses: [] };
+    service.resolveSession.mockResolvedValue(session);
+    expect((await call(server, '/api/auth/session', { token: 'a' })).body).toEqual(session);
+  });
+  test('a user with a business never triggers the pending lookups', async () => {
+    service.resolveSession.mockResolvedValue({ status: 'active', profile: { id: 'p' }, businesses: [{ businessId: 'BIZ-1' }] });
+    await call(server, '/api/auth/session', { token: 'a' });
+    expect(join.pendingFor).not.toHaveBeenCalled(); expect(business.pendingFor).not.toHaveBeenCalled();
+  });
 });

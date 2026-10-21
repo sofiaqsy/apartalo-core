@@ -74,7 +74,10 @@ function createAuthRouter({ service = identityService, join = joinService, busin
   router.post('/session', authenticate, async (req, res) => {
     try {
       const session = await service.resolveSession(req.identity);
-      if (session.status === 'no_invitation') {
+      // Linked but without any business yet (for example right after asking to register one):
+      // report an open request instead of sending the person back to the start.
+      const noAccessYet = session.status === 'no_invitation' || (session.status === 'active' && (session.businesses || []).length === 0);
+      if (noAccessYet) {
         const pending = await join.pendingFor(req.identity.uid);
         if (pending.length) return res.json({ status: 'join_pending', businessName: pending[0].businessName });
         const requested = await business.pendingFor(req.identity.uid);
