@@ -133,7 +133,7 @@ describe('platform admin flag and late-approved businesses', () => {
     };
     const get = async (t, p = {}) => db[t].filter(r => Object.entries(p).every(([k, v]) => ['select', 'limit', 'role'].includes(k) || String(r[k]) === String(v).replace(/^eq\./, '')));
     const { createIdentityService } = require('../../core/services/identity-service');
-    const svc = createIdentityService({ get, post: jest.fn(), patch: jest.fn(), getNegocios: () => negocios, refreshNegocios: refresh, log: quietLog() });
+    const svc = createIdentityService({ get, post: jest.fn(), patch: jest.fn(), getNegocios: () => negocios, refreshNegocios: refresh, log: { log: jest.fn(), error: jest.fn() } });
     const r = await svc.resolveSession(id());
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(r.businesses).toEqual([expect.objectContaining({ businessId: 'BIZ-NEW', role: 'owner' })]);
