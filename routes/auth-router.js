@@ -10,6 +10,7 @@ const negociosService = require('../config/negocios');
 const firebaseService = require('../core/services/firebase-service');
 const axios = require('axios');
 const { createJoinService, JoinError } = require('../core/services/join-service');
+const { createBusinessService } = require('../core/services/business-service');
 
 /** profiles.id is a FK to auth.users.id, so a person without a profile needs an auth user first. */
 async function createMemberProfile({ email, fullName }) {
@@ -43,7 +44,12 @@ const joinService = createJoinService({
   getNegocios: () => negociosService.getAll(), createProfile: createMemberProfile,
 });
 
-function createAuthRouter({ service = identityService, join = joinService, verifyToken = t => firebaseService.verifyIdToken(t) } = {}) {
+const businessService = createBusinessService({
+  get: supabaseService.get, post: supabaseService.post, patch: supabaseService.patch,
+  createProfile: createMemberProfile, onApproved: () => negociosService.loadFromFarms(),
+});
+
+function createAuthRouter({ service = identityService, join = joinService, business = businessService, verifyToken = t => firebaseService.verifyIdToken(t) } = {}) {
   const router = express.Router();
 
   async function authenticate(req, res, next) {
@@ -71,6 +77,8 @@ function createAuthRouter({ service = identityService, join = joinService, verif
       if (session.status === 'no_invitation') {
         const pending = await join.pendingFor(req.identity.uid);
         if (pending.length) return res.json({ status: 'join_pending', businessName: pending[0].businessName });
+        const requested = await business.pendingFor(req.identity.uid);
+        if (requested.length) return res.json({ status: 'business_pending', businessName: requested[0].businessName });
       }
       res.json(session);
     } catch (err) {
@@ -114,6 +122,24 @@ function createAuthRouter({ service = identityService, join = joinService, verif
       const b = req.body || {};
       res.json(await join.decide(req.identity, b.businessId, req.params.id, b.approve === true));
     } catch (err) { sendError(res, 'join-decision', err); }
+  });
+
+  // POST /api/auth/business-requests { name, city, phone } -> { status: business_pending }
+  router.post('/business-requests', authenticate, async (req, res) => {
+    try { res.json(await business.submit(req.identity, req.body || {})); }
+    catch (err) { sendError(res, 'business-requests', err); }
+  });
+
+  // GET /api/auth/admin/business-requests (platform admin)
+  router.get('/admin/business-requests', authenticate, async (req, res) => {
+    try { res.json({ requests: await business.listPending(req.identity) }); }
+    catch (err) { sendError(res, 'admin-business-requests', err); }
+  });
+
+  // POST /api/auth/admin/business-requests/:id/decision { approve } (platform admin)
+  router.post('/admin/business-requests/:id/decision', authenticate, async (req, res) => {
+    try { res.json(await business.decide(req.identity, req.params.id, (req.body || {}).approve === true)); }
+    catch (err) { sendError(res, 'admin-business-decision', err); }
   });
 
   return router;

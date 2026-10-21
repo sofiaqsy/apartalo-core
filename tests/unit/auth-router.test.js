@@ -19,10 +19,11 @@ function call(server, path, { token, body, method = 'POST' } = {}) {
 
 describe('auth router', () => {
   let server; const service = { resolveSession: jest.fn(), savePhone: jest.fn() };
+  const business = { pendingFor: jest.fn(), submit: jest.fn(), listPending: jest.fn(), decide: jest.fn() };
   const join = { pendingFor: jest.fn(), submit: jest.fn(), createCode: jest.fn(), listRequests: jest.fn(), decide: jest.fn() }; const verifyToken = jest.fn();
-  beforeAll(async () => { server = await start(createAuthRouter({ service, join, verifyToken })); });
+  beforeAll(async () => { server = await start(createAuthRouter({ service, join, business, verifyToken })); });
   afterAll(() => new Promise(r => server.close(r)));
-  beforeEach(() => { jest.clearAllMocks(); verifyToken.mockResolvedValue({ uid: 'u1' }); join.pendingFor.mockResolvedValue([]); });
+  beforeEach(() => { jest.clearAllMocks(); verifyToken.mockResolvedValue({ uid: 'u1' }); join.pendingFor.mockResolvedValue([]); business.pendingFor.mockResolvedValue([]); });
 
   test('no token -> 401, service untouched', async () => {
     expect((await call(server, '/api/auth/session')).status).toBe(401);
@@ -80,5 +81,24 @@ describe('auth router', () => {
     join.decide.mockResolvedValue({ status: 'rejected' });
     await call(server, '/api/auth/join-requests/r1/decision', { token: 'a', body: { businessId: 'BIZ-A', approve: 'true' } });
     expect(join.decide).toHaveBeenCalledWith({ uid: 'u1' }, 'BIZ-A', 'r1', false);
+  });
+
+  test('no_invitation with an open business request becomes business_pending', async () => {
+    service.resolveSession.mockResolvedValue({ status: 'no_invitation' });
+    business.pendingFor.mockResolvedValue([{ businessName: 'Café Luis' }]);
+    expect((await call(server, '/api/auth/session', { token: 'a' })).body).toEqual({ status: 'business_pending', businessName: 'Café Luis' });
+  });
+  test('business endpoints require a token', async () => {
+    expect((await call(server, '/api/auth/business-requests')).status).toBe(401);
+    expect((await call(server, '/api/auth/admin/business-requests', { method: 'GET' })).status).toBe(401);
+    expect((await call(server, '/api/auth/admin/business-requests/x/decision')).status).toBe(401);
+  });
+  test('business submit uses the verified identity; admin decision approves only on exactly true', async () => {
+    business.submit.mockResolvedValue({ status: 'business_pending' });
+    await call(server, '/api/auth/business-requests', { token: 'a', body: { name: 'N', city: 'C', phone: '9' } });
+    expect(business.submit).toHaveBeenCalledWith({ uid: 'u1' }, { name: 'N', city: 'C', phone: '9' });
+    business.decide.mockResolvedValue({ status: 'rejected' });
+    await call(server, '/api/auth/admin/business-requests/r1/decision', { token: 'a', body: { approve: 1 } });
+    expect(business.decide).toHaveBeenCalledWith({ uid: 'u1' }, 'r1', false);
   });
 });

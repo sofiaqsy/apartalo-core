@@ -54,7 +54,7 @@ describe('resolveSession', () => {
     const b = build({ identities: [{ firebase_uid: 'uid-1', profile_id: P_OWNER, status: 'active' }] });
     expect(await b.svc.resolveSession(id())).toEqual({
       status: 'active',
-      profile: { id: P_OWNER, fullName: 'Ana', hasPhone: false },
+      profile: { id: P_OWNER, fullName: 'Ana', hasPhone: false, isAdmin: false },
       businesses: [{ businessId: 'BIZ-002', name: 'Finca Rosal', address: 'Calle 1', city: 'Lima', role: 'owner' }],
     });
   });

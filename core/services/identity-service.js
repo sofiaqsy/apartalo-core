@@ -38,7 +38,7 @@ function createIdentityService({ get, post, patch, getNegocios, log = console } 
   }
 
   async function getProfile(profileId) {
-    const rows = await get('profiles', { id: `eq.${profileId}`, select: 'id,full_name,phone' });
+    const rows = await get('profiles', { id: `eq.${profileId}`, select: 'id,full_name,phone,role' });
     return rows && rows[0] ? rows[0] : null;
   }
 
@@ -50,7 +50,7 @@ function createIdentityService({ get, post, patch, getNegocios, log = console } 
     if (link) {
       if (link.status === 'active') {
         const profile = await getProfile(link.profile_id);
-        return { status: 'active', profile: { id: profile.id, fullName: profile.full_name || '', hasPhone: !!profile.phone }, businesses: await businessesFor(link.profile_id) };
+        return { status: 'active', profile: { id: profile.id, fullName: profile.full_name || '', hasPhone: !!profile.phone, isAdmin: profile.role === 'admin' }, businesses: await businessesFor(link.profile_id) };
       }
       return { status: link.status === 'revoked' ? 'revoked' : 'pending' };
     }

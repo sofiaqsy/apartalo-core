@@ -42,7 +42,7 @@ function routePattern(path) {
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':uuid')
     .replace(/\bORD-[0-9A-Za-z-]+/g, ':order')
     .replace(/\bPED-[0-9A-Za-z-]+/g, ':order')
-    .replace(/\bBIZ-\d+/g, ':biz')
+    .replace(/\bBIZ-[0-9A-Za-z-]+/g, ':biz')
     .replace(/\/\d{4,}(?=\/|$)/g, '/:num')
     .slice(0, 120);
 }

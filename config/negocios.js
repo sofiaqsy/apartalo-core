@@ -21,6 +21,7 @@ class NegociosService {
     try {
       console.log('📦 Cargando negocios...');
       this.loadFromLocal();
+      await this.loadFromFarms();
       this.initialized = true;
       console.log(`✅ ${this.negocios.size} negocio(s) cargado(s)`);
       return true;
@@ -61,6 +62,31 @@ class NegociosService {
     });
 
     console.log(`   ✅ Finca Rosal (BIZ-002) — Supabase farmId=${FINCA_ROSAL_FARM_ID}`);
+  }
+
+  /**
+   * Approved farms that are not configured above become businesses with safe defaults
+   * (no WhatsApp line, standard flow). A failure here never prevents the server from booting.
+   */
+  async loadFromFarms() {
+    try {
+      const supabaseService = require('../core/services/supabase-service');
+      const farms = await supabaseService.get('farms', { status: 'eq.approved', select: 'id,slug,name,city' });
+      const known = new Set(Array.from(this.negocios.values()).map(n => n.farmId));
+      for (const farm of farms || []) {
+        if (!farm.slug || known.has(farm.id)) continue;
+        const id = `BIZ-${farm.slug.toUpperCase()}`;
+        this.negocios.set(id, {
+          id, nombre: farm.name, direccion: '', ciudad: farm.city || '',
+          whatsapp: { tipo: 'NINGUNO', phoneId: null, token: null, webhookPath: null, admin: null, prefijo: farm.slug.slice(0, 5).toUpperCase() },
+          flujo: 'STANDARD', features: [], estado: 'ACTIVO', farmId: farm.id, plataformaExterna: true,
+          configExtra: { unidad: 'kg', minimoCompra: 1, flujoPago: 'contacto', mostrarFotos: true, prefijoPedido: 'PED' },
+        });
+        console.log(`   ✅ ${farm.name} (${id}) — desde farms`);
+      }
+    } catch (error) {
+      console.error('⚠️ No se pudieron cargar negocios desde farms:', error.message);
+    }
   }
 
   getById(id)          { return this.negocios.get(id) || null; }
