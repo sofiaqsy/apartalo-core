@@ -112,9 +112,16 @@ describe('auth router', () => {
     service.resolveSession.mockResolvedValue(session);
     expect((await call(server, '/api/auth/session', { token: 'a' })).body).toEqual(session);
   });
-  test('a user with a business never triggers the pending lookups', async () => {
+  test('a user with a business also gets the requests still in review', async () => {
     service.resolveSession.mockResolvedValue({ status: 'active', profile: { id: 'p' }, businesses: [{ businessId: 'BIZ-1' }] });
-    await call(server, '/api/auth/session', { token: 'a' });
-    expect(join.pendingFor).not.toHaveBeenCalled(); expect(business.pendingFor).not.toHaveBeenCalled();
+    join.pendingFor.mockResolvedValue([{ businessName: 'Finca A' }]);
+    business.pendingFor.mockResolvedValue([{ businessName: 'Café Luis' }]);
+    const r = await call(server, '/api/auth/session', { token: 'a' });
+    expect(r.body.businesses).toEqual([{ businessId: 'BIZ-1' }]);
+    expect(r.body.pending).toEqual([{ kind: 'join', businessName: 'Finca A' }, { kind: 'business', businessName: 'Café Luis' }]);
+  });
+  test('non-active sessions do not get a pending list', async () => {
+    service.resolveSession.mockResolvedValue({ status: 'revoked' });
+    expect((await call(server, '/api/auth/session', { token: 'a' })).body).toEqual({ status: 'revoked' });
   });
 });

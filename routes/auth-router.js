@@ -83,6 +83,15 @@ function createAuthRouter({ service = identityService, join = joinService, busin
         const requested = await business.pendingFor(req.identity.uid);
         if (requested.length) return res.json({ status: 'business_pending', businessName: requested[0].businessName });
       }
+      // Someone who already has businesses may also be waiting on other requests: list them.
+      if (session.status === 'active') {
+        const joins = await join.pendingFor(req.identity.uid);
+        const requested = await business.pendingFor(req.identity.uid);
+        session.pending = [
+          ...joins.map(p => ({ kind: 'join', businessName: p.businessName })),
+          ...requested.map(p => ({ kind: 'business', businessName: p.businessName })),
+        ];
+      }
       res.json(session);
     } catch (err) {
       console.error('[auth/session]', err.message);
