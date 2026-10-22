@@ -100,17 +100,18 @@ async function getPresentations(productId) {
     }),
     get('media', {
       owner_id: `eq.${productId}`,
-      select: 'presentation_id,url,role,sort_order',
+      select: 'id,presentation_id,url,role,sort_order',
       order: 'sort_order.asc'
     })
   ]);
   const presImageMap = {};
+  const presPhotos = {};
   for (const m of mediaRows) {
-    if (m.presentation_id && !presImageMap[m.presentation_id]) {
-      presImageMap[m.presentation_id] = m.url;
-    }
+    if (!m.presentation_id) continue;
+    if (!presImageMap[m.presentation_id]) presImageMap[m.presentation_id] = m.url;
+    (presPhotos[m.presentation_id] = presPhotos[m.presentation_id] || []).push({ id: m.id, url: m.url, orden: m.sort_order });
   }
-  return presentations.map(pp => ({ ...pp, image_url: presImageMap[pp.id] || null }));
+  return presentations.map(pp => ({ ...pp, image_url: presImageMap[pp.id] || null, fotos: presPhotos[pp.id] || [] }));
 }
 
 async function getProductsWithPresentations(farmId) {

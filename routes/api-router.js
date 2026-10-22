@@ -1476,6 +1476,7 @@ router.get('/productos/:businessId/:productId/presentaciones', guards.product, a
         predeterminada: pp.is_default || false,
         molienda:     pp.grind || [],
         visible:      pp.is_visible !== false,
+        fotos:        pp.fotos || [],
         imageUrl:     pp.image_url || null
       };
     }) });
@@ -1557,6 +1558,54 @@ router.put('/productos/:businessId/:productId/presentaciones/:presentationId', g
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// ── Fotos de una presentación (hasta 3): firma de subida, registro y borrado ──
+const axiosHttp = require('axios');
+const { createPresentationPhotos, PhotoError } = require('../core/services/presentation-photos');
+const storageBase = () => (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, '') + '/storage/v1';
+const storageHeaders = () => ({ apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' });
+const presentationPhotos = createPresentationPhotos({
+  get: supabaseService.get,
+  post: supabaseService.post,
+  deleteRow: supabaseService.deleteRow,
+  publicBase: `${storageBase()}/object/public`,
+  signUpload: async (bucket, path) => {
+    const r = await axiosHttp.post(`${storageBase()}/object/upload/sign/${bucket}/${path}`, {}, { headers: storageHeaders() });
+    const raw = r.data.signedURL || r.data.url || r.data.signedUrl;
+    if (!raw) throw new Error('Storage no devolvió la URL firmada');
+    return raw.startsWith('http') ? raw : `${storageBase()}${raw}`;
+  },
+  removeObject: (bucket, path) => axiosHttp.delete(`${storageBase()}/object/${bucket}/${path}`, { headers: storageHeaders() }),
+});
+
+function sendPhotoError(res, tag, err) {
+  if (err instanceof PhotoError) return res.status(err.status).json({ error: err.message });
+  console.error(`[presentaciones/fotos ${tag}]`, err.message);
+  return res.status(500).json({ error: 'Error interno del servidor' });
+}
+
+router.post('/productos/:businessId/:productId/presentaciones/:presentationId/fotos/firma', guards.presentation, async (req, res) => {
+  try {
+    if (!negociosService.getById(req.params.businessId)) return res.status(404).json({ error: 'Negocio no encontrado' });
+    res.json(await presentationPhotos.prepareUpload(req.params.productId, req.params.presentationId, (req.body || {}).mimeType));
+  } catch (error) { sendPhotoError(res, 'firma', error); }
+});
+
+router.post('/productos/:businessId/:productId/presentaciones/:presentationId/fotos', guards.presentation, async (req, res) => {
+  try {
+    if (!negociosService.getById(req.params.businessId)) return res.status(404).json({ error: 'Negocio no encontrado' });
+    const b = req.body || {};
+    res.status(201).json({ success: true, foto: await presentationPhotos.register(req.params.productId, req.params.presentationId, b.path, b.mimeType) });
+  } catch (error) { sendPhotoError(res, 'registro', error); }
+});
+
+router.delete('/productos/:businessId/:productId/presentaciones/:presentationId/fotos/:fotoId', guards.presentation, async (req, res) => {
+  try {
+    if (!negociosService.getById(req.params.businessId)) return res.status(404).json({ error: 'Negocio no encontrado' });
+    await presentationPhotos.remove(req.params.productId, req.params.presentationId, req.params.fotoId);
+    res.json({ success: true });
+  } catch (error) { sendPhotoError(res, 'borrado', error); }
 });
 
 router.delete('/productos/:businessId/:productId/presentaciones/:presentationId', guards.presentation, async (req, res) => {
