@@ -1475,6 +1475,7 @@ router.get('/productos/:businessId/:productId/presentaciones', guards.product, a
         orden:        pp.sort_order || 0,
         predeterminada: pp.is_default || false,
         molienda:     pp.grind || [],
+        visible:      pp.is_visible !== false,
         imageUrl:     pp.image_url || null
       };
     }) });
@@ -1486,7 +1487,7 @@ router.get('/productos/:businessId/:productId/presentaciones', guards.product, a
 router.post('/productos/:businessId/:productId/presentaciones', guards.product, async (req, res) => {
   try {
     const { businessId, productId } = req.params;
-    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda, visible } = req.body;
     if (contenido === undefined || !unidad || precio === undefined) {
       return res.status(400).json({ error: 'Campos requeridos: contenido, unidad, precio' });
     }
@@ -1510,6 +1511,7 @@ router.post('/productos/:businessId/:productId/presentaciones', guards.product, 
       minOrderQty:  parseFloat(pedidoMinimo) || 1,
       sortOrder:    parseInt(orden) || 0,
       isDefault:    predeterminada || false,
+      isVisible:    visible !== false,
       grind:        Array.isArray(molienda) ? molienda : []
     });
     if (!created) return res.status(500).json({ error: 'No se pudo crear la presentación' });
@@ -1523,7 +1525,7 @@ router.post('/productos/:businessId/:productId/presentaciones', guards.product, 
 router.put('/productos/:businessId/:productId/presentaciones/:presentationId', guards.presentation, async (req, res) => {
   try {
     const { businessId, productId, presentationId } = req.params;
-    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda } = req.body;
+    const { contenido, unidad, precio, precioB2b, cantidadB2b, stock, pedidoMinimo, orden, predeterminada, molienda, visible } = req.body;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
@@ -1548,6 +1550,7 @@ router.put('/productos/:businessId/:productId/presentaciones/:presentationId', g
     if (orden     !== undefined) fields.sort_order   = parseInt(orden) || 0;
     if (predeterminada !== undefined) fields.is_default = predeterminada;
     if (molienda  !== undefined) fields.grind        = Array.isArray(molienda) ? molienda : [];
+    if (visible   !== undefined) fields.is_visible   = visible === true;
 
     const updated = await supabaseService.updatePresentation(presentationId, fields);
     res.json({ success: true, mensaje: 'Presentación actualizada', presentacion: updated });
@@ -1573,6 +1576,35 @@ router.delete('/productos/:businessId/:productId/presentaciones/:presentationId'
 // ─── DISPONIBLE EN LOTE ──────────────────────────────────────────────────────
 // PATCH /api/productos/:businessId/:productId/lote
 // Body: { kg_disponible: number }  — actualiza kg_assigned del lote activo más reciente
+// ── Información general del producto (nombre, descripciones, categoría, atributos del café) ──
+const { createProductInfo, InfoError } = require('../core/services/product-info');
+const productInfo = createProductInfo({ get: supabaseService.get, patch: supabaseService.patch });
+
+function sendInfoError(res, err) {
+  if (err instanceof InfoError) return res.status(err.status).json({ error: err.message, field: err.field });
+  console.error('[productos/info]', err.message);
+  return res.status(500).json({ error: 'Error interno del servidor' });
+}
+
+router.get('/productos/:businessId/:productId/info', guards.product, async (req, res) => {
+  try {
+    if (!negociosService.getById(req.params.businessId)) return res.status(404).json({ error: 'Negocio no encontrado' });
+    res.json(await productInfo.getInfo(req.params.productId));
+  } catch (error) {
+    sendInfoError(res, error);
+  }
+});
+
+router.put('/productos/:businessId/:productId/info', guards.product, async (req, res) => {
+  try {
+    if (!negociosService.getById(req.params.businessId)) return res.status(404).json({ error: 'Negocio no encontrado' });
+    const producto = await productInfo.updateInfo(req.params.productId, req.body);
+    res.json({ success: true, mensaje: 'Información actualizada', producto });
+  } catch (error) {
+    sendInfoError(res, error);
+  }
+});
+
 router.patch('/productos/:businessId/:productId/lote', guards.product, async (req, res) => {
   try {
     const { businessId, productId } = req.params;

@@ -89,7 +89,7 @@ async function getProductById(productId) {
 
 // ─── PRODUCT PRESENTATIONS ────────────────────────────────────────────────────
 
-const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,min_qty_for_b2b,stock,min_order_qty,sort_order,is_default,grind';
+const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,min_qty_for_b2b,stock,min_order_qty,sort_order,is_default,is_visible,grind';
 
 async function getPresentations(productId) {
   const [presentations, mediaRows] = await Promise.all([
@@ -242,7 +242,7 @@ async function getProductsWithPresentations(farmId) {
     .sort((a, b) => b.totalSold - a.totalSold || a.name.localeCompare(b.name));
 }
 
-async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, minQtyForB2b, stock, minOrderQty, sortOrder, isDefault, grind }) {
+async function createPresentation(productId, { packSize, unit, priceCents, b2bPriceCents, minQtyForB2b, stock, minOrderQty, sortOrder, isDefault, isVisible, grind }) {
   const body = {
     product_id:    productId,
     pack_size:     packSize || 1,
@@ -252,6 +252,7 @@ async function createPresentation(productId, { packSize, unit, priceCents, b2bPr
     min_order_qty: minOrderQty || 1,
     sort_order:    sortOrder || 0,
     is_default:    isDefault || false,
+    is_visible:    isVisible !== false, // visible en tienda por defecto
     grind:         grind || []
   };
   if (b2bPriceCents != null) body.b2b_price_cents = b2bPriceCents;
