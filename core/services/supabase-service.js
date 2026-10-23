@@ -1484,7 +1484,7 @@ async function getProductAvailableKg(productId) {
 module.exports = {
   // Low-level REST helpers, exported so other services (ownership checks, identity)
   // reuse the same base URL and service-role headers instead of duplicating them.
-  get, post, patch,
+  get, post, patch, deleteRow,
   getRawSalesCounts,
   getAdminFarmsByPhone,
   getFarm,
