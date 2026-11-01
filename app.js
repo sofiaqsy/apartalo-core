@@ -34,6 +34,7 @@ const trackRouter    = require('./routes/track-router');
 const deliveryRouter = require('./routes/delivery-router');
 const tostadorRouter = require('./routes/tostador-router');
 const authRouter = require('./routes/auth-router');
+const { createAdministracionRouter } = require('./routes/administracion-router');
 
 // Inicializar Express
 const app = express();
@@ -129,6 +130,12 @@ app.use('/api/ocr', ocrRouter);
 
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
+
+// Administración (gastos, adelantos, entregas, pagos, pendientes): reenvía el login de la persona a fincas
+app.use('/api/administracion', createAdministracionRouter({
+  getNegocio: id => negociosService.getById(id),
+  verifyToken: token => firebaseService.verifyIdToken(token),
+}));
 
 // Delivery — gestión de hoja Delivery del spreadsheet
 app.use('/api/delivery', deliveryRouter);
