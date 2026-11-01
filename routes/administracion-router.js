@@ -25,9 +25,23 @@ const FORMS = Object.freeze({
     fn: 'admin_pay_expense',
     fields: { gastoId: 'p_expense_id', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
+  // An adelanto is a request too: Administración approves it (choosing how it is paid) or rejects it.
   adelanto: {
-    fn: 'admin_record_advance',
-    fields: { personaId: 'p_party_id', monto: 'p_amount', devuelveEn: 'p_repay_in', metodo: 'p_method', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date' },
+    fn: 'admin_request_advance',
+    fields: { personaId: 'p_party_id', monto: 'p_amount', devuelveEn: 'p_repay_in', motivo: 'p_reason', fecha: 'p_date' },
+  },
+  aprobarAdelanto: {
+    fn: 'admin_approve_advance',
+    fields: { solicitudId: 'p_request_id', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
+  },
+  rechazarAdelanto: {
+    fn: 'admin_reject_advance',
+    fields: { solicitudId: 'p_request_id', motivo: 'p_reason' },
+  },
+  // A new farmer, buyer or supplier.
+  proveedor: {
+    fn: 'admin_register_party',
+    fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community' },
   },
   entrega: {
     fn: 'admin_record_delivery',
@@ -57,6 +71,7 @@ const PENDIENTES = Object.freeze({
   porPagar: { view: 'purchase_balances', filter: { still_owed: 'gt.0' }, order: 'purchase_date' },
   sinPrecio: { view: 'deliveries_awaiting_price', filter: {}, order: 'delivery_date' },
   gastosPorPagar: { view: 'expenses_to_pay', filter: {}, order: 'expense_date' },
+  adelantosPorAprobar: { view: 'advance_requests_pending', filter: {}, order: 'request_date' },
   banco: { view: 'finance_bank_to_match', filter: {}, order: 'movement_date' },
 });
 
@@ -179,6 +194,23 @@ function createAdministracionRouter({
         comprador: buyerIds.has(p.id),
         recogidoPor: farmerById.get(p.id) ? farmerById.get(p.id).collected_by : null,
       })));
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Mis solicitudes: what each person sent and where it stands. The owner sees everyone's.
+  router.get('/:businessId/solicitudes', async (req, res) => {
+    try {
+      const me = await db(req, 'rpc/my_memberships', { method: 'POST', body: {} });
+      if (!me.ok) return sendDbError(res, me);
+      const mine = (me.data || []).find(m => m.business_id === req.admin.farmId);
+      if (!mine) return res.status(403).json({ error: 'Sin acceso a este negocio' });
+      const qs = new URLSearchParams({ select: '*', business_id: `eq.${req.admin.farmId}`, order: 'request_date.desc,id.desc', limit: '200' });
+      if (mine.role !== 'owner') qs.set('mine', 'is.true');
+      const r = await db(req, `my_requests?${qs}`);
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ rol: mine.role, solicitudes: r.data || [] });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

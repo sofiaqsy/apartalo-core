@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'retiro']);
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'retiro']);
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -83,7 +83,7 @@ describe('administración router', () => {
     fetchImpl.mockImplementation(async url => reply(200, [{ url }]));
     const r = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'banco', 'gastosPorPagar', 'porPagar', 'sinPrecio']);
+    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'adelantosPorAprobar', 'banco', 'gastosPorPagar', 'porPagar', 'sinPrecio']);
     for (const [, opts] of fetchImpl.mock.calls) expect(opts.headers.Authorization).toBe('Bearer t');
     expect(fetchImpl.mock.calls.map(c => c[0]).every(u => u.includes('business_id=eq.farm-rosal'))).toBe(true);
     expect(r.body.adelantos[0].url).toContain('/advance_balances?');
@@ -113,6 +113,37 @@ describe('administración router', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     fetchImpl.mockImplementation(async () => reply(200, [{ business_id: 'other-farm', role: 'owner' }]));
     expect((await call(server, '/api/administracion/BIZ-002/resumen', { token: 't', method: 'GET' })).status).toBe(403);
+  });
+});
+
+describe('solicitudes', () => {
+  test('staff see only their own requests; the owner sees everyone\'s', async () => {
+    const fetchImpl = jest.fn();
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const get = () => call(server, '/api/administracion/BIZ-002/solicitudes', { token: 't', method: 'GET' });
+    fetchImpl.mockImplementation(async url => url.includes('my_memberships') ? reply(200, [{ business_id: 'farm-rosal', role: 'staff' }]) : reply(200, [{ url }]));
+    let r = await get();
+    expect(r.body.rol).toBe('staff');
+    expect(r.body.solicitudes[0].url).toContain('mine=is.true');
+    fetchImpl.mockImplementation(async url => url.includes('my_memberships') ? reply(200, [{ business_id: 'farm-rosal', role: 'owner' }]) : reply(200, [{ url }]));
+    r = await get();
+    expect(r.body.rol).toBe('owner');
+    expect(r.body.solicitudes[0].url).not.toContain('mine=');
+    await new Promise(res => server.close(res));
+  });
+});
+
+describe('adelanto is a request', () => {
+  test('no payment fields are sent with the request; approval carries them', () => {
+    expect(toParams(FORMS.adelanto, { personaId: 'P-0001', monto: 1500, motivo: 'Compras', metodo: 'transfer', operacion: '1' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_party_id: 'P-0001', p_amount: 1500, p_reason: 'Compras' });
+    expect(toParams(FORMS.aprobarAdelanto, { solicitudId: 'SOL-0001', metodo: 'transfer', operacion: '888888' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_request_id: 'SOL-0001', p_method: 'transfer', p_bank_reference: '888888' });
   });
 });
 
