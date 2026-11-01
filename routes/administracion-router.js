@@ -21,7 +21,7 @@ const FORMS = Object.freeze({
   gasto: {
     // For Combustible the database finds the area itself (same-day purchase or delivery, the person's default);
     // paraQue is the optional one tap when it cannot.
-    fn: 'admin_request_expense_v4',
+    fn: 'admin_request_expense_v5',
     fields: {
       paraQue: 'p_purpose',
       categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', area: 'p_area', centro: 'p_cost_centre',
@@ -29,6 +29,11 @@ const FORMS = Object.freeze({
       equipoId: 'p_equipment_id', muestraId: 'p_sample_id', eventoId: 'p_event_booking_id', documentoId: 'p_document_id',
       parcelaId: 'p_plot_id', fecha: 'p_date',
     },
+  },
+  // Administración sets a person's areas (two or more allowed, one principal); the others are ended, not deleted.
+  areasPersona: {
+    fn: 'admin_set_person_areas',
+    fields: { perfilId: 'p_profile_id', areas: 'p_areas', principal: 'p_principal' },
   },
   // Administración corrects the area of an expense (a new record; the expense itself is kept).
   corregirArea: {
@@ -87,7 +92,7 @@ const PENDIENTES = Object.freeze({
   gastosPorPagar: { view: 'expenses_to_pay', filter: {}, order: 'expense_date' },
   adelantosPorAprobar: { view: 'advance_requests_pending', filter: {}, order: 'request_date' },
   banco: { view: 'finance_bank_to_match', filter: {}, order: 'movement_date' },
-  porRevisar: { view: 'expenses_to_review', filter: {}, order: 'expense_date' },
+  porRevisar: { view: 'expenses_to_review_v2', filter: {}, order: 'expense_date' },
 });
 
 /** Lower case, without accents, so "jose" finds "José". */
@@ -295,13 +300,36 @@ function createAdministracionRouter({
     }
   });
 
+  // The team (owners only): each person's role and active areas.
+  router.get('/:businessId/equipo', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/team_members', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ equipo: r.data || [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Areas suggested for a person from what they registered in the last 60 days (owners only).
+  router.get('/:businessId/equipo/:perfilId/sugerencia', async (req, res) => {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.perfilId)) return res.status(400).json({ error: 'Persona no válida' });
+    try {
+      const r = await db(req, 'rpc/suggest_person_areas', { method: 'POST', body: { p_profile_id: req.params.perfilId, p_business_id: req.admin.farmId } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ sugeridas: r.data || [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // What the database would set as the area of an expense, before saving (for the form's summary line).
   router.get('/:businessId/sugerir-area', async (req, res) => {
     const categoria = typeof req.query.categoria === 'string' ? req.query.categoria.trim() : '';
     const fecha = typeof req.query.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.fecha) ? req.query.fecha : undefined;
     if (!categoria) return res.status(400).json({ error: 'Falta la categoría' });
     try {
-      const r = await db(req, 'rpc/suggest_expense_area', {
+      const r = await db(req, 'rpc/suggest_expense_area_v2', {
         method: 'POST', body: { p_category: categoria, p_business_id: req.admin.farmId, ...(fecha ? { p_date: fecha } : {}) },
       });
       if (!r.ok) return sendDbError(res, r);
@@ -314,7 +342,7 @@ function createAdministracionRouter({
   // Mi área: the areas of the person, and for the chosen one its costs by month and latest expenses.
   router.get('/:businessId/mi-area', async (req, res) => {
     try {
-      const mine = await db(req, 'rpc/my_areas', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+      const mine = await db(req, 'rpc/my_areas_v2', { method: 'POST', body: { p_business_id: req.admin.farmId } });
       if (!mine.ok) return sendDbError(res, mine);
       const areas = mine.data || [];
       const pedida = typeof req.query.area === 'string' ? req.query.area : '';
