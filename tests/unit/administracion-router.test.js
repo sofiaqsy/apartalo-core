@@ -59,7 +59,7 @@ describe('administración router', () => {
     });
     expect(r).toEqual({ status: 200, body: { ok: true, result: { expense_id: 'EX-0001', payment_id: 'PY-0001' } } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense');
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v2');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(opts.headers.apikey).toBe('sb_publishable_x');
     // A gasto is a request: how it was paid and the operation number are not sent (Administración pays it).
@@ -113,6 +113,31 @@ describe('administración router', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     fetchImpl.mockImplementation(async () => reply(200, [{ business_id: 'other-farm', role: 'owner' }]));
     expect((await call(server, '/api/administracion/BIZ-002/resumen', { token: 't', method: 'GET' })).status).toBe(403);
+  });
+});
+
+describe('mi área', () => {
+  test('shows only an area the person belongs to; asking for another falls back to their first', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('my_areas')) return reply(200, [{ area: 'fulfillment', name: 'Logística', role: 'lead' }]);
+      return reply(200, [{ url }]);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/mi-area?area=finance', { token: 't', method: 'GET' });
+    expect(r.body.area).toBe('fulfillment');
+    expect(r.body.meses[0].url).toContain('area=eq.fulfillment');
+    expect(r.body.gastos[0].url).toContain('/area_expenses_recent?');
+    await new Promise(res => server.close(res));
+  });
+
+  test('the gasto sends the chosen area and links', () => {
+    expect(toParams(FORMS.gasto, { categoria: 'Flete', monto: 85, area: 'fulfillment', envioId: 'SH-0001' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_category: 'Flete', p_amount: 85, p_area: 'fulfillment', p_shipment_id: 'SH-0001' });
   });
 });
 

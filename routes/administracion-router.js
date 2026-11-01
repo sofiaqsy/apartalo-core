@@ -17,9 +17,15 @@ const { extractBearer } = require('../core/middleware/auth');
 /** Form name in the URL -> database function and the body fields it accepts (body -> parameter). */
 const FORMS = Object.freeze({
   // A gasto is a payment request: no money moves until Administración pays it (pagoGasto).
+  // Each gasto carries the area that answers for it (filled from the category, editable) and optional links.
   gasto: {
-    fn: 'admin_request_expense',
-    fields: { categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', centro: 'p_cost_centre', fecha: 'p_date' },
+    fn: 'admin_request_expense_v2',
+    fields: {
+      categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', area: 'p_area', centro: 'p_cost_centre',
+      inversion: 'p_is_investment', loteId: 'p_lot_id', entregaId: 'p_delivery_id', compraId: 'p_purchase_id', envioId: 'p_shipment_id',
+      equipoId: 'p_equipment_id', muestraId: 'p_sample_id', eventoId: 'p_event_booking_id', documentoId: 'p_document_id',
+      parcelaId: 'p_plot_id', fecha: 'p_date',
+    },
   },
   pagoGasto: {
     fn: 'admin_pay_expense',
@@ -211,6 +217,41 @@ function createAdministracionRouter({
       const r = await db(req, `my_requests?${qs}`);
       if (!r.ok) return sendDbError(res, r);
       return res.json({ rol: mine.role, solicitudes: r.data || [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Expense categories with the area and cost centre each one suggests, and the list of areas.
+  router.get('/:businessId/categorias', async (req, res) => {
+    try {
+      const [cats, areas] = await Promise.all([
+        db(req, `expense_categories?${new URLSearchParams({ select: 'category,default_area,default_cost_centre', active: 'is.true', order: 'sort_order' })}`),
+        db(req, `areas?${new URLSearchParams({ select: 'id,name', order: 'sort_order' })}`),
+      ]);
+      for (const r of [cats, areas]) if (!r.ok) return sendDbError(res, r);
+      return res.json({ categorias: cats.data || [], areas: areas.data || [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Mi área: the areas of the person, and for the chosen one its costs by month and latest expenses.
+  router.get('/:businessId/mi-area', async (req, res) => {
+    try {
+      const mine = await db(req, 'rpc/my_areas', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+      if (!mine.ok) return sendDbError(res, mine);
+      const areas = mine.data || [];
+      const pedida = typeof req.query.area === 'string' ? req.query.area : '';
+      const area = areas.find(a => a.area === pedida) || areas[0];
+      if (!area) return res.json({ areas: [], area: null, meses: [], gastos: [] });
+      const farm = `eq.${req.admin.farmId}`;
+      const [meses, gastos] = await Promise.all([
+        db(req, `area_costs_by_month?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'month.desc' })}`),
+        db(req, `area_expenses_recent?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'expense_date.desc,id.desc', limit: '30' })}`),
+      ]);
+      for (const r of [meses, gastos]) if (!r.ok) return sendDbError(res, r);
+      return res.json({ areas, area: area.area, meses: meses.data || [], gastos: gastos.data || [] });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
