@@ -130,8 +130,29 @@ describe('mi área', () => {
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/mi-area?area=finance', { token: 't', method: 'GET' });
     expect(r.body.area).toBe('fulfillment');
-    expect(r.body.meses[0].url).toContain('area=eq.fulfillment');
+    expect(decodeURIComponent(r.body.meses[0].url)).toContain('area=in.(fulfillment)');
     expect(r.body.gastos[0].url).toContain('/area_expenses_recent_v2?');
+    await new Promise(res => server.close(res));
+  });
+
+  test('several areas at once, only the person\'s own; todas = all of them', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('my_areas')) return reply(200, [{ area: 'sourcing', name: 'Compras', principal: true }, { area: 'farm', name: 'Finca', principal: false }]);
+      return reply(200, [{ url }]);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const dos = await call(server, '/api/administracion/BIZ-002/mi-area?area=farm,finance,sourcing', { token: 't', method: 'GET' });
+    expect(dos.body.elegidas).toEqual(['farm', 'sourcing']); // finance is not hers: left out
+    expect(decodeURIComponent(dos.body.meses[0].url)).toContain('area=in.(farm,sourcing)');
+    const todas = await call(server, '/api/administracion/BIZ-002/mi-area?area=todas', { token: 't', method: 'GET' });
+    expect(todas.body.elegidas).toEqual(['sourcing', 'farm']);
+    const nada = await call(server, '/api/administracion/BIZ-002/mi-area?area=risk', { token: 't', method: 'GET' });
+    expect(nada.body.elegidas).toEqual(['sourcing']); // falls back to the first (principal)
     await new Promise(res => server.close(res));
   });
 

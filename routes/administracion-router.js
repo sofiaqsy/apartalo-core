@@ -339,22 +339,27 @@ function createAdministracionRouter({
     }
   });
 
-  // Mi área: the areas of the person, and for the chosen one its costs by month and latest expenses.
+  // Mi área: the person's areas, and for the chosen ones (one, several, or "todas") their costs by month and
+  // latest expenses. Only areas the person belongs to count (owners: every area); each expense has one area,
+  // so adding areas never counts a cost twice.
   router.get('/:businessId/mi-area', async (req, res) => {
     try {
       const mine = await db(req, 'rpc/my_areas_v2', { method: 'POST', body: { p_business_id: req.admin.farmId } });
       if (!mine.ok) return sendDbError(res, mine);
       const areas = mine.data || [];
-      const pedida = typeof req.query.area === 'string' ? req.query.area : '';
-      const area = areas.find(a => a.area === pedida) || areas[0];
-      if (!area) return res.json({ areas: [], area: null, meses: [], gastos: [] });
+      if (!areas.length) return res.json({ areas: [], area: null, elegidas: [], meses: [], gastos: [] });
+      const permitidas = new Set(areas.map(a => a.area));
+      const pedido = typeof req.query.area === 'string' ? req.query.area.trim() : '';
+      let elegidas = pedido === 'todas' ? [...permitidas] : pedido.split(',').map(a => a.trim()).filter(a => permitidas.has(a));
+      if (!elegidas.length) elegidas = [areas[0].area];
       const farm = `eq.${req.admin.farmId}`;
+      const filtro = `in.(${elegidas.join(',')})`;
       const [meses, gastos] = await Promise.all([
-        db(req, `area_costs_by_month_v2?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'month.desc' })}`),
-        db(req, `area_expenses_recent_v2?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'expense_date.desc,id.desc', limit: '30' })}`),
+        db(req, `area_costs_by_month_v2?${new URLSearchParams({ select: '*', business_id: farm, area: filtro, order: 'month.desc' })}`),
+        db(req, `area_expenses_recent_v2?${new URLSearchParams({ select: '*', business_id: farm, area: filtro, order: 'expense_date.desc,id.desc', limit: '30' })}`),
       ]);
       for (const r of [meses, gastos]) if (!r.ok) return sendDbError(res, r);
-      return res.json({ areas, area: area.area, meses: meses.data || [], gastos: gastos.data || [] });
+      return res.json({ areas, area: elegidas[0], elegidas, meses: meses.data || [], gastos: gastos.data || [] });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
