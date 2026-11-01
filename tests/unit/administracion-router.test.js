@@ -49,22 +49,23 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'entrega', 'gasto', 'ingreso', 'pago', 'precio', 'retiro']);
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'retiro']);
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
     const r = await call(server, '/api/administracion/BIZ-002/registrar/gasto', {
       token: 'person-token',
-      body: { categoria: 'Transporte', centro: 'coffee', monto: 80, metodo: 'transfer', operacion: ' 222222 ', descripcion: '', clientRef: 'exp-0001-abcd', p_business_id: 'other-farm', hack: 'x' },
+      body: { categoria: 'Transporte', centro: 'coffee', monto: 80, metodo: 'transfer', operacion: ' 222222 ', descripcion: ' Flete ', clientRef: 'exp-0001-abcd', p_business_id: 'other-farm', hack: 'x' },
     });
     expect(r).toEqual({ status: 200, body: { ok: true, result: { expense_id: 'EX-0001', payment_id: 'PY-0001' } } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/admin_record_expense');
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(opts.headers.apikey).toBe('sb_publishable_x');
+    // A gasto is a request: how it was paid and the operation number are not sent (Administración pays it).
     expect(JSON.parse(opts.body)).toEqual({
       p_business_id: 'farm-rosal', p_category: 'Transporte', p_cost_centre: 'coffee', p_amount: 80,
-      p_method: 'transfer', p_bank_reference: '222222', p_client_ref: 'exp-0001-abcd',
+      p_description: 'Flete', p_client_ref: 'exp-0001-abcd',
     });
   });
   test('database refusals come back as the plain message', async () => {
@@ -82,7 +83,7 @@ describe('administración router', () => {
     fetchImpl.mockImplementation(async url => reply(200, [{ url }]));
     const r = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'banco', 'porPagar', 'sinPrecio']);
+    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'banco', 'gastosPorPagar', 'porPagar', 'sinPrecio']);
     for (const [, opts] of fetchImpl.mock.calls) expect(opts.headers.Authorization).toBe('Bearer t');
     expect(fetchImpl.mock.calls.map(c => c[0]).every(u => u.includes('business_id=eq.farm-rosal'))).toBe(true);
     expect(r.body.adelantos[0].url).toContain('/advance_balances?');
@@ -112,6 +113,13 @@ describe('administración router', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     fetchImpl.mockImplementation(async () => reply(200, [{ business_id: 'other-farm', role: 'owner' }]));
     expect((await call(server, '/api/administracion/BIZ-002/resumen', { token: 't', method: 'GET' })).status).toBe(403);
+  });
+});
+
+describe('pagoGasto', () => {
+  test('pays a requested expense with method and operation number', () => {
+    expect(toParams(FORMS.pagoGasto, { gastoId: 'EX-0001', metodo: 'transfer', operacion: '777777' }, 'farm-rosal'))
+      .toEqual({ p_business_id: 'farm-rosal', p_expense_id: 'EX-0001', p_method: 'transfer', p_bank_reference: '777777' });
   });
 });
 

@@ -16,9 +16,14 @@ const { extractBearer } = require('../core/middleware/auth');
 
 /** Form name in the URL -> database function and the body fields it accepts (body -> parameter). */
 const FORMS = Object.freeze({
+  // A gasto is a payment request: no money moves until Administración pays it (pagoGasto).
   gasto: {
-    fn: 'admin_record_expense',
-    fields: { categoria: 'p_category', centro: 'p_cost_centre', monto: 'p_amount', descripcion: 'p_description', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
+    fn: 'admin_request_expense',
+    fields: { categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', centro: 'p_cost_centre', fecha: 'p_date' },
+  },
+  pagoGasto: {
+    fn: 'admin_pay_expense',
+    fields: { gastoId: 'p_expense_id', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   adelanto: {
     fn: 'admin_record_advance',
@@ -51,6 +56,7 @@ const PENDIENTES = Object.freeze({
   adelantos: { view: 'advance_balances', filter: { open_balance: 'gt.0' }, order: 'advance_date' },
   porPagar: { view: 'purchase_balances', filter: { still_owed: 'gt.0' }, order: 'purchase_date' },
   sinPrecio: { view: 'deliveries_awaiting_price', filter: {}, order: 'delivery_date' },
+  gastosPorPagar: { view: 'expenses_to_pay', filter: {}, order: 'expense_date' },
   banco: { view: 'finance_bank_to_match', filter: {}, order: 'movement_date' },
 });
 
