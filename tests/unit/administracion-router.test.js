@@ -1,6 +1,6 @@
 const http = require('http');
 const express = require('express');
-const { createAdministracionRouter, toParams, FORMS } = require('../../routes/administracion-router');
+const { createAdministracionRouter, toParams, FORMS, PENDIENTES } = require('../../routes/administracion-router');
 
 function start(router) {
   const app = express(); app.use(express.json()); app.use('/api/administracion', router);
@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'retiro']);
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'retiro']);
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -59,7 +59,7 @@ describe('administración router', () => {
     });
     expect(r).toEqual({ status: 200, body: { ok: true, result: { expense_id: 'EX-0001', payment_id: 'PY-0001' } } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v3');
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v4');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(opts.headers.apikey).toBe('sb_publishable_x');
     // A gasto is a request: how it was paid and the operation number are not sent (Administración pays it).
@@ -83,7 +83,7 @@ describe('administración router', () => {
     fetchImpl.mockImplementation(async url => reply(200, [{ url }]));
     const r = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'adelantosPorAprobar', 'banco', 'gastosPorPagar', 'porPagar', 'sinPrecio']);
+    expect(Object.keys(r.body).sort()).toEqual(['adelantos', 'adelantosPorAprobar', 'banco', 'gastosPorPagar', 'porPagar', 'porRevisar', 'sinPrecio']);
     for (const [, opts] of fetchImpl.mock.calls) expect(opts.headers.Authorization).toBe('Bearer t');
     expect(fetchImpl.mock.calls.map(c => c[0]).every(u => u.includes('business_id=eq.farm-rosal'))).toBe(true);
     expect(r.body.adelantos[0].url).toContain('/advance_balances?');
@@ -131,7 +131,7 @@ describe('mi área', () => {
     const r = await call(server, '/api/administracion/BIZ-002/mi-area?area=finance', { token: 't', method: 'GET' });
     expect(r.body.area).toBe('fulfillment');
     expect(r.body.meses[0].url).toContain('area=eq.fulfillment');
-    expect(r.body.gastos[0].url).toContain('/area_expenses_recent?');
+    expect(r.body.gastos[0].url).toContain('/area_expenses_recent_v2?');
     await new Promise(res => server.close(res));
   });
 
@@ -157,6 +157,35 @@ describe('categorías', () => {
     expect(guideUrl).toContain('active=is.true');
     expect(guideUrl).toContain('what_goes_here');
     await new Promise(res => server.close(res));
+  });
+});
+
+describe('combustible', () => {
+  test('the gasto sends the optional Para qué; the area is left to the database', () => {
+    expect(toParams(FORMS.gasto, { categoria: 'Combustible', monto: 50, paraQue: 'compra' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_category: 'Combustible', p_amount: 50, p_purpose: 'compra' });
+  });
+  test('sugerir-area asks the database with the person\'s token and the date', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { area: 'sourcing', source: 'same_day' }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/sugerir-area?categoria=Combustible&fecha=2026-11-22', { token: 'tk', method: 'GET' });
+    expect(r.body).toEqual({ area: 'sourcing', source: 'same_day' });
+    const [url, opts] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://db.example/rest/v1/rpc/suggest_expense_area');
+    expect(JSON.parse(opts.body)).toEqual({ p_category: 'Combustible', p_business_id: 'farm-rosal', p_date: '2026-11-22' });
+    expect(opts.headers.Authorization).toBe('Bearer tk');
+    expect((await call(server, '/api/administracion/BIZ-002/sugerir-area', { token: 'tk', method: 'GET' })).status).toBe(400);
+    await new Promise(res => server.close(res));
+  });
+  test('the owner corrects an area with a new record', () => {
+    expect(toParams(FORMS.corregirArea, { gastoId: 'EX-0009', area: 'sourcing', motivo: 'Compra' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_expense_id: 'EX-0009', p_area: 'sourcing', p_reason: 'Compra' });
+    expect(PENDIENTES.porRevisar.view).toBe('expenses_to_review');
   });
 });
 

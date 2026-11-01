@@ -19,13 +19,21 @@ const FORMS = Object.freeze({
   // A gasto is a payment request: no money moves until Administración pays it (pagoGasto).
   // Each gasto carries the area that answers for it (filled from the category, editable) and optional links.
   gasto: {
-    fn: 'admin_request_expense_v3',
+    // For Combustible the database finds the area itself (same-day purchase or delivery, the person's default);
+    // paraQue is the optional one tap when it cannot.
+    fn: 'admin_request_expense_v4',
     fields: {
+      paraQue: 'p_purpose',
       categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', area: 'p_area', centro: 'p_cost_centre',
       inversion: 'p_is_investment', loteId: 'p_lot_id', entregaId: 'p_delivery_id', compraId: 'p_purchase_id', envioId: 'p_shipment_id',
       equipoId: 'p_equipment_id', muestraId: 'p_sample_id', eventoId: 'p_event_booking_id', documentoId: 'p_document_id',
       parcelaId: 'p_plot_id', fecha: 'p_date',
     },
+  },
+  // Administración corrects the area of an expense (a new record; the expense itself is kept).
+  corregirArea: {
+    fn: 'admin_correct_expense_area',
+    fields: { gastoId: 'p_expense_id', area: 'p_area', centro: 'p_cost_centre', motivo: 'p_reason' },
   },
   pagoGasto: {
     fn: 'admin_pay_expense',
@@ -79,6 +87,7 @@ const PENDIENTES = Object.freeze({
   gastosPorPagar: { view: 'expenses_to_pay', filter: {}, order: 'expense_date' },
   adelantosPorAprobar: { view: 'advance_requests_pending', filter: {}, order: 'request_date' },
   banco: { view: 'finance_bank_to_match', filter: {}, order: 'movement_date' },
+  porRevisar: { view: 'expenses_to_review', filter: {}, order: 'expense_date' },
 });
 
 /** Body -> database parameters: only the allowed fields; empty values are left out so defaults apply. */
@@ -240,6 +249,22 @@ function createAdministracionRouter({
     }
   });
 
+  // What the database would set as the area of an expense, before saving (for the form's summary line).
+  router.get('/:businessId/sugerir-area', async (req, res) => {
+    const categoria = typeof req.query.categoria === 'string' ? req.query.categoria.trim() : '';
+    const fecha = typeof req.query.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.fecha) ? req.query.fecha : undefined;
+    if (!categoria) return res.status(400).json({ error: 'Falta la categoría' });
+    try {
+      const r = await db(req, 'rpc/suggest_expense_area', {
+        method: 'POST', body: { p_category: categoria, p_business_id: req.admin.farmId, ...(fecha ? { p_date: fecha } : {}) },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json(r.data || {});
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Mi área: the areas of the person, and for the chosen one its costs by month and latest expenses.
   router.get('/:businessId/mi-area', async (req, res) => {
     try {
@@ -251,8 +276,8 @@ function createAdministracionRouter({
       if (!area) return res.json({ areas: [], area: null, meses: [], gastos: [] });
       const farm = `eq.${req.admin.farmId}`;
       const [meses, gastos] = await Promise.all([
-        db(req, `area_costs_by_month?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'month.desc' })}`),
-        db(req, `area_expenses_recent?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'expense_date.desc,id.desc', limit: '30' })}`),
+        db(req, `area_costs_by_month_v2?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'month.desc' })}`),
+        db(req, `area_expenses_recent_v2?${new URLSearchParams({ select: '*', business_id: farm, area: `eq.${area.area}`, order: 'expense_date.desc,id.desc', limit: '30' })}`),
       ]);
       for (const r of [meses, gastos]) if (!r.ok) return sendDbError(res, r);
       return res.json({ areas, area: area.area, meses: meses.data || [], gastos: gastos.data || [] });
