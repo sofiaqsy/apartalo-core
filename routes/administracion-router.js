@@ -90,6 +90,11 @@ const PENDIENTES = Object.freeze({
   porRevisar: { view: 'expenses_to_review', filter: {}, order: 'expense_date' },
 });
 
+/** Lower case, without accents, so "jose" finds "José". */
+function normalizar(texto) {
+  return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
 /** Body -> database parameters: only the allowed fields; empty values are left out so defaults apply. */
 function toParams(form, body, farmId) {
   const params = { p_business_id: farmId };
@@ -186,6 +191,47 @@ function createAdministracionRouter({
       return res.json(Object.fromEntries(entries));
     } catch (err) {
       if (err && err.r) return sendDbError(res, err.r);
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Search people for the phone picker, a page at a time: q matches name or nickname (in the notes) without
+  // caring about accents or capitals; rol = agricultor | comprador | ambos (either); limit at most 50.
+  router.get('/:businessId/personas/buscar', async (req, res) => {
+    const q = normalizar(typeof req.query.q === 'string' ? req.query.q : '');
+    const rol = ['agricultor', 'comprador', 'ambos'].includes(req.query.rol) ? req.query.rol : null;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    try {
+      const farm = `eq.${req.admin.farmId}`;
+      const [parties, farmers, buyers] = await Promise.all([
+        db(req, `parties?${new URLSearchParams({ select: 'id,name,kind,notes', business_id: farm, status: 'eq.active', order: 'name' })}`),
+        db(req, `farmers?${new URLSearchParams({ select: 'party_id,sells,collected_by', business_id: farm })}`),
+        db(req, `buyers?${new URLSearchParams({ select: 'party_id,active', business_id: farm })}`),
+      ]);
+      for (const r of [parties, farmers, buyers]) if (!r.ok) return sendDbError(res, r);
+      const farmerById = new Map((farmers.data || []).map(f => [f.party_id, f]));
+      const buyerIds = new Set((buyers.data || []).filter(b => b.active).map(b => b.party_id));
+      const nombreById = new Map((parties.data || []).map(p => [p.id, p.name]));
+      const todos = (parties.data || [])
+        .filter(p => !q || normalizar(`${p.name} ${p.notes || ''}`).includes(q))
+        .filter(p => !rol
+          || (rol === 'agricultor' && farmerById.has(p.id))
+          || (rol === 'comprador' && buyerIds.has(p.id))
+          || (rol === 'ambos' && (farmerById.has(p.id) || buyerIds.has(p.id))));
+      const pagina = todos.slice(offset, offset + limit).map(p => ({
+        id: p.id,
+        nombre: p.name,
+        detalle: p.notes || null,
+        agricultor: farmerById.has(p.id),
+        comprador: buyerIds.has(p.id),
+        vende: farmerById.get(p.id) ? farmerById.get(p.id).sells : null,
+        recogidoPor: farmerById.get(p.id) ? farmerById.get(p.id).collected_by : null,
+        recogidoPorNombre: farmerById.get(p.id) && farmerById.get(p.id).collected_by
+          ? (nombreById.get(farmerById.get(p.id).collected_by) || null) : null,
+      }));
+      return res.json({ personas: pagina, total: todos.length, hayMas: offset + limit < todos.length });
+    } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
   });

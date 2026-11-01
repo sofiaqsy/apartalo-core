@@ -189,6 +189,51 @@ describe('combustible', () => {
   });
 });
 
+describe('buscar personas', () => {
+  const parties = [
+    { id: 'P-1', name: 'Pedro Ramírez Ñique', notes: 'También: Chato. Vende café.' },
+    { id: 'P-2', name: 'Ferretería Ejemplo SAC', notes: 'Proveedor: materiales.' },
+    ...Array.from({ length: 30 }, (_, i) => ({ id: `P-F${i}`, name: `Agricultor ${String(i).padStart(2, '0')}`, notes: null })),
+  ];
+  async function servidor() {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('/parties?')) return reply(200, parties);
+      if (url.includes('/farmers?')) return reply(200, [{ party_id: 'P-1', sells: 'parchment', collected_by: null },
+        ...Array.from({ length: 30 }, (_, i) => ({ party_id: `P-F${i}`, sells: 'cherry', collected_by: null }))]);
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    return new Promise(r => { const s = app.listen(0, () => r(s)); });
+  }
+  test('finds by nickname without accents, and only farmers when asked', async () => {
+    const server = await servidor();
+    const r = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=chato&rol=agricultor', { token: 't', method: 'GET' });
+    expect(r.body.personas.map(p => p.nombre)).toEqual(['Pedro Ramírez Ñique']);
+    expect(r.body.personas[0]).toMatchObject({ agricultor: true, vende: 'parchment', detalle: 'También: Chato. Vende café.' });
+    const j = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=NIQUE', { token: 't', method: 'GET' });
+    expect(j.body.total).toBe(1);
+    const tienda = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=ferreteria&rol=agricultor', { token: 't', method: 'GET' });
+    expect(tienda.body.total).toBe(0);
+    await new Promise(res => server.close(res));
+  });
+  test('pages of 20, with hayMas', async () => {
+    const server = await servidor();
+    const p1 = await call(server, '/api/administracion/BIZ-002/personas/buscar?rol=agricultor', { token: 't', method: 'GET' });
+    expect(p1.body.personas).toHaveLength(20);
+    expect(p1.body).toMatchObject({ total: 31, hayMas: true });
+    const p2 = await call(server, '/api/administracion/BIZ-002/personas/buscar?rol=agricultor&offset=20', { token: 't', method: 'GET' });
+    expect(p2.body.personas).toHaveLength(11);
+    expect(p2.body.hayMas).toBe(false);
+    const big = await call(server, '/api/administracion/BIZ-002/personas/buscar?limit=500', { token: 't', method: 'GET' });
+    expect(big.body.personas).toHaveLength(32 > 50 ? 50 : 32);
+    await new Promise(res => server.close(res));
+  });
+});
+
 describe('solicitudes', () => {
   test('staff see only their own requests; the owner sees everyone\'s', async () => {
     const fetchImpl = jest.fn();
