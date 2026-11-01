@@ -19,7 +19,7 @@ const FORMS = Object.freeze({
   // A gasto is a payment request: no money moves until Administración pays it (pagoGasto).
   // Each gasto carries the area that answers for it (filled from the category, editable) and optional links.
   gasto: {
-    fn: 'admin_request_expense_v2',
+    fn: 'admin_request_expense_v3',
     fields: {
       categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', area: 'p_area', centro: 'p_cost_centre',
       inversion: 'p_is_investment', loteId: 'p_lot_id', entregaId: 'p_delivery_id', compraId: 'p_purchase_id', envioId: 'p_shipment_id',
@@ -222,11 +222,15 @@ function createAdministracionRouter({
     }
   });
 
-  // Expense categories with the area and cost centre each one suggests, and the list of areas.
+  // Expense categories still offered, with what goes in each, the area and cost centre each one suggests,
+  // and whether it is a main chip; plus the list of areas.
   router.get('/:businessId/categorias', async (req, res) => {
     try {
       const [cats, areas] = await Promise.all([
-        db(req, `expense_categories?${new URLSearchParams({ select: 'category,default_area,default_cost_centre', active: 'is.true', order: 'sort_order' })}`),
+        db(req, `expense_category_guide?${new URLSearchParams({
+          select: 'category,what_goes_here,not_here,default_area,default_cost_centre,is_investment,needs_description,main',
+          active: 'is.true', order: 'sort_order',
+        })}`),
         db(req, `areas?${new URLSearchParams({ select: 'id,name', order: 'sort_order' })}`),
       ]);
       for (const r of [cats, areas]) if (!r.ok) return sendDbError(res, r);

@@ -59,7 +59,7 @@ describe('administración router', () => {
     });
     expect(r).toEqual({ status: 200, body: { ok: true, result: { expense_id: 'EX-0001', payment_id: 'PY-0001' } } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v2');
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v3');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(opts.headers.apikey).toBe('sb_publishable_x');
     // A gasto is a request: how it was paid and the operation number are not sent (Administración pays it).
@@ -138,6 +138,25 @@ describe('mi área', () => {
   test('the gasto sends the chosen area and links', () => {
     expect(toParams(FORMS.gasto, { categoria: 'Flete', monto: 85, area: 'fulfillment', envioId: 'SH-0001' }, 'f'))
       .toEqual({ p_business_id: 'f', p_category: 'Flete', p_amount: 85, p_area: 'fulfillment', p_shipment_id: 'SH-0001' });
+  });
+});
+
+describe('categorías', () => {
+  test('come from the guide: only the ones still offered, with their phone text', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('expense_category_guide')
+      ? [{ category: 'Combustible', what_goes_here: 'Gasolina y petróleo', main: true }] : [{ id: 'farm', name: 'Finca' }]));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/categorias', { token: 't', method: 'GET' });
+    expect(r.body.categorias[0].category).toBe('Combustible');
+    const guideUrl = fetchImpl.mock.calls.map(c => c[0]).find(u => u.includes('expense_category_guide'));
+    expect(guideUrl).toContain('active=is.true');
+    expect(guideUrl).toContain('what_goes_here');
+    await new Promise(res => server.close(res));
   });
 });
 
