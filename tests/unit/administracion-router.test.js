@@ -290,6 +290,26 @@ describe('equipo', () => {
   });
 });
 
+describe('pendientes', () => {
+  test('purchases to pay carry their delivery id', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('/purchase_balances?')) return reply(200, [{ id: 'PU-0001', still_owed: 300 }]);
+      if (url.includes('/purchases?')) return reply(200, [{ id: 'PU-0001', delivery_id: 'DL-0001' }]);
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
+    expect(r.body.porPagar).toEqual([{ id: 'PU-0001', still_owed: 300, delivery_id: 'DL-0001' }]);
+    expect(decodeURIComponent(fetchImpl.mock.calls.find(c => c[0].includes('/purchases?'))[0])).toContain('id=in.(PU-0001)');
+    await new Promise(res => server.close(res));
+  });
+});
+
 describe('solicitudes', () => {
   test('staff see only their own requests; the owner sees everyone\'s', async () => {
     const fetchImpl = jest.fn();

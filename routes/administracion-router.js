@@ -193,7 +193,18 @@ function createAdministracionRouter({
         if (!r.ok) throw Object.assign(new Error('db'), { r });
         return [key, r.data || []];
       }));
-      return res.json(Object.fromEntries(entries));
+      const lists = Object.fromEntries(entries);
+      // Each purchase to pay says which delivery it came from, so the app shows the delivery once, with its action.
+      const ids = (lists.porPagar || []).map(p => p.id).filter(Boolean);
+      if (ids.length) {
+        const qs = new URLSearchParams({ select: 'id,delivery_id', business_id: `eq.${req.admin.farmId}`, id: `in.(${ids.join(',')})` });
+        const r = await db(req, `purchases?${qs}`);
+        if (r.ok) {
+          const deliveryOf = new Map((r.data || []).map(x => [x.id, x.delivery_id]));
+          lists.porPagar = lists.porPagar.map(p => ({ ...p, delivery_id: deliveryOf.get(p.id) || null }));
+        }
+      }
+      return res.json(lists);
     } catch (err) {
       if (err && err.r) return sendDbError(res, err.r);
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
