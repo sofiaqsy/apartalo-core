@@ -15,6 +15,8 @@ const express = require('express');
 const { extractBearer } = require('../core/middleware/auth');
 
 /** Form name in the URL -> database function and the body fields it accepts (body -> parameter). */
+// Money forms never ask for the operation number: the bank file fills it in when it matches the payment
+// (General Manager, 1 Nov 2026; *_v2 functions, migration 0011).
 const FORMS = Object.freeze({
   // A gasto is a payment request: no money moves until Administración pays it (pagoGasto).
   // Each gasto carries the area that answers for it (filled from the category, editable) and optional links.
@@ -41,7 +43,7 @@ const FORMS = Object.freeze({
     fields: { gastoId: 'p_expense_id', area: 'p_area', centro: 'p_cost_centre', motivo: 'p_reason' },
   },
   pagoGasto: {
-    fn: 'admin_pay_expense',
+    fn: 'admin_pay_expense_v2',
     fields: { gastoId: 'p_expense_id', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   // An adelanto is a request too: Administración approves it (choosing how it is paid) or rejects it.
@@ -50,7 +52,7 @@ const FORMS = Object.freeze({
     fields: { personaId: 'p_party_id', monto: 'p_amount', devuelveEn: 'p_repay_in', motivo: 'p_reason', fecha: 'p_date' },
   },
   aprobarAdelanto: {
-    fn: 'admin_approve_advance',
+    fn: 'admin_approve_advance_v2',
     fields: { solicitudId: 'p_request_id', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   rechazarAdelanto: {
@@ -63,15 +65,15 @@ const FORMS = Object.freeze({
     fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community' },
   },
   entrega: {
-    fn: 'admin_record_delivery',
+    fn: 'admin_record_delivery_v2',
     fields: { agricultorId: 'p_farmer_id', estado: 'p_coffee_state', kg: 'p_kg', compradorId: 'p_buyer_id', precioKg: 'p_price_per_kg', humedad: 'p_moisture_pct', rendimiento: 'p_yield_factor', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date' },
   },
   precio: {
-    fn: 'admin_set_price',
+    fn: 'admin_set_price_v2',
     fields: { entregaId: 'p_delivery_id', precioKg: 'p_price_per_kg', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   pago: {
-    fn: 'admin_pay_purchase',
+    fn: 'admin_pay_purchase_v2',
     fields: { compraId: 'p_purchase_id', monto: 'p_amount', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   ingreso: {
