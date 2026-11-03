@@ -64,6 +64,20 @@ const FORMS = Object.freeze({
     fn: 'admin_register_party',
     fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community' },
   },
+  // Editar proveedor and its payment accounts (3 Nov 2026, owners only, decided by the database). An account is
+  // never edited in place: cuentaProveedor with reemplazaId archives the old one and adds the new one.
+  editarProveedor: {
+    fn: 'admin_update_party',
+    fields: { proveedorId: 'p_party_id', nombre: 'p_name', documento: 'p_dni_or_ruc', telefono: 'p_phone', comunidad: 'p_community', notas: 'p_notes' },
+  },
+  cuentaProveedor: {
+    fn: 'admin_save_payment_method',
+    fields: { proveedorId: 'p_party_id', tipo: 'p_kind', numero: 'p_number', banco: 'p_bank', titular: 'p_holder', reemplazaId: 'p_replace_id' },
+  },
+  quitarCuenta: {
+    fn: 'admin_archive_payment_method',
+    fields: { cuentaId: 'p_method_id' },
+  },
   // Registrar compra (3 Nov 2026): v3 also links the product the coffee is for (checked to be this farm's).
   entrega: {
     fn: 'admin_record_delivery_v3',
@@ -107,11 +121,6 @@ const PENDIENTES = Object.freeze({
   banco: { view: 'finance_bank_to_match', filter: {}, order: 'movement_date' },
   porRevisar: { view: 'expenses_to_review_v2', filter: {}, order: 'expense_date' },
 });
-
-/** Lower case, without accents, so "jose" finds "José". */
-function normalizar(texto) {
-  return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
 
 /** Body -> database parameters: only the allowed fields; empty values are left out so defaults apply. */
 function toParams(form, body, farmId) {
@@ -244,50 +253,18 @@ function createAdministracionRouter({
   // area = a process: only its providers (party_areas, set by an owner, or who supplied its gastos). Compras
   // asks rol=agricultor instead: its providers are the farmers who sell coffee.
   router.get('/:businessId/personas/buscar', async (req, res) => {
-    const q = normalizar(typeof req.query.q === 'string' ? req.query.q : '');
+    const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 80) : '';
     const rol = ['agricultor', 'comprador', 'ambos'].includes(req.query.rol) ? req.query.rol : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const area = typeof req.query.area === 'string' && /^[a-z_]{2,30}$/.test(req.query.area) ? req.query.area : null;
     try {
-      const farm = `eq.${req.admin.farmId}`;
-      let delArea = null;
-      if (area) {
-        const [asignados, gastos] = await Promise.all([
-          db(req, `party_areas?${new URLSearchParams({ select: 'party_id', business_id: farm, area: `eq.${area}`, active: 'is.true' })}`),
-          db(req, `expenses?${new URLSearchParams({ select: 'supplier_party_id', business_id: farm, area: `eq.${area}`, supplier_party_id: 'not.is.null' })}`),
-        ]);
-        for (const r of [asignados, gastos]) if (!r.ok) return sendDbError(res, r);
-        delArea = new Set([...(asignados.data || []).map(x => x.party_id), ...(gastos.data || []).map(x => x.supplier_party_id)]);
-      }
-      const [parties, farmers, buyers] = await Promise.all([
-        db(req, `parties?${new URLSearchParams({ select: 'id,name,kind,notes', business_id: farm, status: 'eq.active', order: 'name' })}`),
-        db(req, `farmers?${new URLSearchParams({ select: 'party_id,sells,collected_by', business_id: farm })}`),
-        db(req, `buyers?${new URLSearchParams({ select: 'party_id,active', business_id: farm })}`),
-      ]);
-      for (const r of [parties, farmers, buyers]) if (!r.ok) return sendDbError(res, r);
-      const farmerById = new Map((farmers.data || []).map(f => [f.party_id, f]));
-      const buyerIds = new Set((buyers.data || []).filter(b => b.active).map(b => b.party_id));
-      const nombreById = new Map((parties.data || []).map(p => [p.id, p.name]));
-      const todos = (parties.data || [])
-        .filter(p => !delArea || delArea.has(p.id))
-        .filter(p => !q || normalizar(`${p.name} ${p.notes || ''}`).includes(q))
-        .filter(p => !rol
-          || (rol === 'agricultor' && farmerById.has(p.id))
-          || (rol === 'comprador' && buyerIds.has(p.id))
-          || (rol === 'ambos' && (farmerById.has(p.id) || buyerIds.has(p.id))));
-      const pagina = todos.slice(offset, offset + limit).map(p => ({
-        id: p.id,
-        nombre: p.name,
-        detalle: p.notes || null,
-        agricultor: farmerById.has(p.id),
-        comprador: buyerIds.has(p.id),
-        vende: farmerById.get(p.id) ? farmerById.get(p.id).sells : null,
-        recogidoPor: farmerById.get(p.id) ? farmerById.get(p.id).collected_by : null,
-        recogidoPorNombre: farmerById.get(p.id) && farmerById.get(p.id).collected_by
-          ? (nombreById.get(farmerById.get(p.id).collected_by) || null) : null,
-      }));
-      return res.json({ personas: pagina, total: todos.length, hayMas: offset + limit < todos.length });
+      // The database filters and cuts the page (3 Nov 2026); before, every provider was read and cut here.
+      const r = await db(req, 'rpc/parties_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_q: q || null, p_rol: rol, p_area: area, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      const total = (r.data && r.data.total) || 0;
+      const personas = (r.data && r.data.personas) || [];
+      return res.json({ personas, total, hayMas: offset + personas.length < total });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
@@ -437,7 +414,9 @@ function createAdministracionRouter({
       const mine = await db(req, 'rpc/my_areas_v2', { method: 'POST', body });
       if (!mine.ok) return sendDbError(res, mine);
       const permitidas = new Set((mine.data || []).map(a => a.area));
-      const pedidos = PROCESOS.filter(p => permitidas.has(p.area));
+      // ?solo=compras: a process screen asks only for its own summary (3 Nov 2026), not all of them.
+      const solo = typeof req.query.solo === 'string' ? req.query.solo : null;
+      const pedidos = PROCESOS.filter(p => permitidas.has(p.area) && (!solo || p.key === solo));
       const respuestas = await Promise.all(pedidos.map(p => db(req, `rpc/${p.fn}`, { method: 'POST', body })));
       for (const r of respuestas) if (!r.ok) return sendDbError(res, r);
       const out = {};
@@ -505,9 +484,20 @@ function createAdministracionRouter({
   // A provider's detail (3 Nov 2026). The database gives DNI or RUC, phone, accounts and money only to owners.
   router.get('/:businessId/proveedores/:id', async (req, res) => {
     try {
-      const r = await db(req, 'rpc/party_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      const r = await db(req, 'rpc/party_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ proveedor: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Generar reporte: everything for the PDF, read only when asked (money only for owners, decided by the database).
+  router.get('/:businessId/proveedores/:id/reporte', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/party_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ reporte: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

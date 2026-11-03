@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -211,18 +211,7 @@ describe('combustible', () => {
 });
 
 describe('buscar personas', () => {
-  const parties = [
-    { id: 'P-1', name: 'Pedro Ramírez Ñique', notes: 'También: Chato. Vende café.' },
-    { id: 'P-2', name: 'Ferretería Ejemplo SAC', notes: 'Proveedor: materiales.' },
-    ...Array.from({ length: 30 }, (_, i) => ({ id: `P-F${i}`, name: `Agricultor ${String(i).padStart(2, '0')}`, notes: null })),
-  ];
-  async function servidor() {
-    const fetchImpl = jest.fn(async url => {
-      if (url.includes('/parties?')) return reply(200, parties);
-      if (url.includes('/farmers?')) return reply(200, [{ party_id: 'P-1', sells: 'parchment', collected_by: null },
-        ...Array.from({ length: 30 }, (_, i) => ({ party_id: `P-F${i}`, sells: 'cherry', collected_by: null }))]);
-      return reply(200, []);
-    });
+  async function servidor(fetchImpl) {
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
       getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
@@ -230,27 +219,24 @@ describe('buscar personas', () => {
     }));
     return new Promise(r => { const s = app.listen(0, () => r(s)); });
   }
-  test('finds by nickname without accents, and only farmers when asked', async () => {
-    const server = await servidor();
-    const r = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=chato&rol=agricultor', { token: 't', method: 'GET' });
-    expect(r.body.personas.map(p => p.nombre)).toEqual(['Pedro Ramírez Ñique']);
-    expect(r.body.personas[0]).toMatchObject({ agricultor: true, vende: 'parchment', detalle: 'También: Chato. Vende café.' });
-    const j = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=NIQUE', { token: 't', method: 'GET' });
-    expect(j.body.total).toBe(1);
-    const tienda = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=ferreteria&rol=agricultor', { token: 't', method: 'GET' });
-    expect(tienda.body.total).toBe(0);
+  test('the database filters and cuts the page; nothing else is read', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { total: 31, personas: Array.from({ length: 20 }, (_, i) => ({ id: `P-F${i}`, nombre: `Agricultor ${i}` })) }));
+    const server = await servidor(fetchImpl);
+    const r = await call(server, '/api/administracion/BIZ-002/personas/buscar?q=chato&rol=agricultor&offset=0', { token: 't', method: 'GET' });
+    expect(r.body.personas).toHaveLength(20);
+    expect(r.body).toMatchObject({ total: 31, hayMas: true });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://db.example/rest/v1/rpc/parties_page');
+    expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal', p_q: 'chato', p_rol: 'agricultor', p_area: null, p_offset: 0, p_limit: 20 });
     await new Promise(res => server.close(res));
   });
-  test('pages of 20, with hayMas', async () => {
-    const server = await servidor();
-    const p1 = await call(server, '/api/administracion/BIZ-002/personas/buscar?rol=agricultor', { token: 't', method: 'GET' });
-    expect(p1.body.personas).toHaveLength(20);
-    expect(p1.body).toMatchObject({ total: 31, hayMas: true });
-    const p2 = await call(server, '/api/administracion/BIZ-002/personas/buscar?rol=agricultor&offset=20', { token: 't', method: 'GET' });
-    expect(p2.body.personas).toHaveLength(11);
+  test('the last page says no more; limit at most 50; odd values are never sent', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { total: 31, personas: Array.from({ length: 11 }, (_, i) => ({ id: `P-${i}` })) }));
+    const server = await servidor(fetchImpl);
+    const p2 = await call(server, "/api/administracion/BIZ-002/personas/buscar?rol=jefe&offset=20&limit=500&area=farm'%20or", { token: 't', method: 'GET' });
     expect(p2.body.hayMas).toBe(false);
-    const big = await call(server, '/api/administracion/BIZ-002/personas/buscar?limit=500', { token: 't', method: 'GET' });
-    expect(big.body.personas).toHaveLength(32 > 50 ? 50 : 32);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toMatchObject({ p_rol: null, p_area: null, p_offset: 20, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
 });
@@ -361,7 +347,7 @@ describe('procesos', () => {
     : url.includes('farm_summary') ? { parcelas: { n: 1 } }
     : url.includes('logistics_summary') ? { por_despachar: 3 }
     : url.includes('finance_summary') ? { compras: { n: 1 } } : { verde_kg: 760 };
-  async function pedir(areas, token = 'person-token') {
+  async function pedir(areas, token = 'person-token', ruta = '/procesos') {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? areas.map(area => ({ area })) : resumenes(url)));
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
@@ -369,7 +355,7 @@ describe('procesos', () => {
       supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
     }));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
-    const r = await call(server, '/api/administracion/BIZ-002/procesos', { token, method: 'GET' });
+    const r = await call(server, `/api/administracion/BIZ-002${ruta}`, { token, method: 'GET' });
     await new Promise(res => server.close(res));
     return { r, fetchImpl };
   }
@@ -388,6 +374,11 @@ describe('procesos', () => {
     expect(Object.keys(r.body)).toEqual(['compras']);
     const urls = fetchImpl.mock.calls.map(c => c[0]).join(' ');
     for (const fn of ['farm_summary', 'production_summary', 'apartalo_sales_by_month', 'logistics_summary', 'finance_summary']) expect(urls).not.toContain(fn);
+  });
+  test('?solo=compras asks only for the Compras summary', async () => {
+    const { r, fetchImpl } = await pedir(['farm', 'sourcing', 'production', 'finance'], 'person-token', '/procesos?solo=compras');
+    expect(r.body).toEqual({ compras: { mes: { recibidos: 2 } } });
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // my_areas_v2 and purchasing_summary_v2
   });
   test('a person without areas gets nothing', async () => {
     const { r } = await pedir([]);
@@ -431,15 +422,8 @@ describe('area of each pending expense', () => {
 });
 
 describe('providers of a process', () => {
-  test('area=farm lists only the providers set in Finca or who supplied its gastos', async () => {
-    const fetchImpl = jest.fn(async url => {
-      if (url.includes('/party_areas?')) return reply(200, [{ party_id: 'P-0020' }]);
-      if (url.includes('/expenses?')) return reply(200, [{ supplier_party_id: 'P-0031' }]);
-      if (url.includes('/parties?')) return reply(200, [
-        { id: 'P-0020', name: 'Bulcar Tech', kind: 'business' }, { id: 'P-0023', name: 'Electrocentro', kind: 'business' },
-        { id: 'P-0031', name: 'Ferretería Ejemplo', kind: 'business' }, { id: 'P-0001', name: 'Agricultor Uno', kind: 'person' }]);
-      return reply(200, []);
-    });
+  test('area=farm is passed to the database', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { total: 2, personas: [{ nombre: 'Bulcar Tech' }, { nombre: 'Ferretería Ejemplo' }] }));
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
       getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
@@ -448,9 +432,7 @@ describe('providers of a process', () => {
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/personas/buscar?area=farm', { token: 't', method: 'GET' });
     expect(r.body.personas.map(p => p.nombre)).toEqual(['Bulcar Tech', 'Ferretería Ejemplo']);
-    expect(r.body.total).toBe(2);
-    const raro = await call(server, "/api/administracion/BIZ-002/personas/buscar?area=farm'%20or", { token: 't', method: 'GET' });
-    expect(raro.body.total).toBe(4); // an invalid area is ignored, never sent to the database
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).p_area).toBe('farm');
     await new Promise(res => server.close(res));
   });
 });
@@ -559,9 +541,33 @@ describe('provider detail', () => {
     const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0001', { token: 'person-token', method: 'GET' });
     expect(r.body).toEqual({ proveedor: { id: 'P-0001', nombre: 'Agricultor Uno' } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toContain('rpc/party_detail');
+    expect(url).toContain('rpc/party_detail_v2');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal', p_party_id: 'P-0001' });
     await new Promise(res => server.close(res));
+  });
+});
+
+describe('provider report and editing', () => {
+  test('the report is read only when asked, with the person\'s token', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { nombre: 'Agricultor Uno', compras_lista: [] }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0001/reporte', { token: 'tk', method: 'GET' });
+    expect(r.body.reporte.nombre).toBe('Agricultor Uno');
+    expect(fetchImpl.mock.calls[0][0]).toContain('rpc/party_report');
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer tk');
+    await new Promise(res => server.close(res));
+  });
+  test('edit forms map to the owner-only functions', () => {
+    expect(toParams(FORMS.editarProveedor, { proveedorId: 'P-1', nombre: 'Ana', telefono: '999' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_party_id: 'P-1', p_name: 'Ana', p_phone: '999' });
+    expect(toParams(FORMS.cuentaProveedor, { proveedorId: 'P-1', tipo: 'bank_account', numero: '000', reemplazaId: 7 }, 'f'))
+      .toEqual({ p_business_id: 'f', p_party_id: 'P-1', p_kind: 'bank_account', p_number: '000', p_replace_id: 7 });
+    expect(FORMS.quitarCuenta.fn).toBe('admin_archive_payment_method');
   });
 });
