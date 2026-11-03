@@ -413,6 +413,7 @@ function createAdministracionRouter({
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary' },
     { key: 'produccion', area: 'production', fn: 'production_summary' },
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
+    { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {

@@ -357,7 +357,8 @@ describe('toParams', () => {
 describe('procesos', () => {
   const resumenes = url => url.includes('purchasing_summary') ? { mes: { recibidos: 2 } }
     : url.includes('sales_by_month') ? [{ month: '2026-11-01', orders: 3, total: 3088 }]
-    : url.includes('farm_summary') ? { parcelas: { n: 1 } } : { verde_kg: 760 };
+    : url.includes('farm_summary') ? { parcelas: { n: 1 } }
+    : url.includes('logistics_summary') ? { por_despachar: 3 } : { verde_kg: 760 };
   async function pedir(areas, token = 'person-token') {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? areas.map(area => ({ area })) : resumenes(url)));
     const app = express(); app.use(express.json());
@@ -371,19 +372,19 @@ describe('procesos', () => {
     return { r, fetchImpl };
   }
   test('an owner (every area) gets the four summaries, with the person\'s own token', async () => {
-    const { r, fetchImpl } = await pedir(['farm', 'sourcing', 'production', 'commercial', 'finance']);
+    const { r, fetchImpl } = await pedir(['farm', 'sourcing', 'production', 'commercial', 'fulfillment', 'finance']);
     expect(r.body).toEqual({ finca: { parcelas: { n: 1 } }, compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
-      comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] } });
+      comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 } });
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
     }
   });
   test('staff only get the processes of their own areas; the others are never asked for', async () => {
-    const { r, fetchImpl } = await pedir(['sourcing', 'fulfillment']);
+    const { r, fetchImpl } = await pedir(['sourcing', 'quality']);
     expect(Object.keys(r.body)).toEqual(['compras']);
     const urls = fetchImpl.mock.calls.map(c => c[0]).join(' ');
-    for (const fn of ['farm_summary', 'production_summary', 'apartalo_sales_by_month']) expect(urls).not.toContain(fn);
+    for (const fn of ['farm_summary', 'production_summary', 'apartalo_sales_by_month', 'logistics_summary']) expect(urls).not.toContain(fn);
   });
   test('a person without areas gets nothing', async () => {
     const { r } = await pedir([]);
