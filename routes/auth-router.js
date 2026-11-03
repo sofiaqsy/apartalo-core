@@ -110,7 +110,7 @@ function createAuthRouter({ service = identityService, join = joinService, busin
     }
   });
 
-  // POST /api/auth/join { code } -> { status: join_pending | already_member }
+  // POST /api/auth/join { code } -> { status: joined | join_pending | already_member }
   router.post('/join', authenticate, async (req, res) => {
     try { res.json(await join.submit(req.identity, req.body && req.body.code)); }
     catch (err) { sendError(res, 'join', err); }

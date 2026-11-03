@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Invitación a Fincas</title>
+<style>
+  body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #f6f3ee; color: #2b2118; }
+  main { max-width: 420px; margin: 0 auto; padding: 32px 20px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { line-height: 1.45; color: #5a4a3c; }
+  .code { font-size: 34px; font-weight: 700; letter-spacing: 4px; background: #fff; border-radius: 12px; padding: 18px; margin: 20px 0; }
+  a.btn { display: block; background: #6b4423; color: #fff; text-decoration: none; font-size: 18px; padding: 16px; border-radius: 12px; }
+  ol { text-align: left; color: #5a4a3c; line-height: 1.5; padding-left: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Te invitaron a unirte a un negocio en Fincas</h1>
+  <p>Tu código de invitación:</p>
+  <div class="code" id="code">--------</div>
+  <a class="btn" id="open" href="#">Abrir en la app Fincas</a>
+  <p>¿No tienes la app todavía?</p>
+  <ol>
+    <li>Pídele a quien te invitó cómo instalar la app Fincas.</li>
+    <li>Abre la app e ingresa con Google o Apple.</li>
+    <li>Toca <b>Trabajo en un negocio</b> y escribe el código de arriba.</li>
+  </ol>
+  <p>El código sirve una sola vez y vence en 48 horas.</p>
+</main>
+<script>
+  // Only letters and digits: the code comes from the address and is shown as text, never as HTML.
+  var raw = (location.pathname.split('/').pop() || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  var shown = raw.length === 8 ? raw.slice(0, 4) + '-' + raw.slice(4) : '';
+  document.getElementById('code').textContent = shown || 'Código no válido';
+  var open = document.getElementById('open');
+  if (shown) open.href = 'fincas://unirse?codigo=' + shown; else open.style.display = 'none';
+</script>
+</body>
+</html>

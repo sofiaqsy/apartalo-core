@@ -162,6 +162,13 @@ app.get('/catalogo/:businessId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'catalog', 'index.html'));
 });
 
+// Invitación: muestra el código y abre la app (fincas://unirse?codigo=...). El código va en la dirección.
+app.get('/unirse/:code', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.sendFile(path.join(__dirname, 'public', 'unirse', 'index.html'));
+});
+
 // Admin panel
 app.get('/admin/:businessId?', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin', 'index.html'));

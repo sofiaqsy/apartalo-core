@@ -3,7 +3,7 @@ const { createJoinService, JoinError, normalizeCode, hashCode } = require('../..
 const NEGOCIOS = [{ id: 'BIZ-A', nombre: 'Finca A', farmId: 'farm-A' }, { id: 'BIZ-B', nombre: 'Finca B', farmId: 'farm-B' }];
 const NOW = new Date('2026-10-21T12:00:00Z');
 
-function build({ code = 'ABCD-EFGH', over = {} } = {}) {
+function build({ code = 'ABCD-EFGH', over = {}, settings = [] } = {}) {
   const db = {
     firebase_identities: [
       { firebase_uid: 'owner-uid', profile_id: 'p-owner', status: 'active' },
@@ -14,6 +14,7 @@ function build({ code = 'ABCD-EFGH', over = {} } = {}) {
     join_codes: [{ id: 'c1', farm_id: 'farm-A', code_hash: hashCode(normalizeCode(code)), role: 'staff', max_uses: 1, uses: 0,
       expires_at: '2026-10-22T12:00:00Z', revoked_at: null, ...over }],
     join_requests: [],
+    farm_join_settings: settings,
   };
   const match = (row, params) => Object.entries(params).every(([k, v]) => {
     if (['select', 'limit', 'order'].includes(k)) return true;
@@ -137,5 +138,35 @@ describe('listRequests and decide', () => {
   test('an account with an unresolved identity link is not silently overwritten', async () => {
     const b = build(); await b.svc.submit({ uid: 'stuck-uid', email: 's@x.com' }, 'ABCD-EFGH');
     await expectErr(b.svc.decide(owner, 'BIZ-A', b.db.join_requests[0].id, true), 409, 'identity-unresolved');
+  });
+});
+
+describe('join without approval (farm_join_settings)', () => {
+  const on = [{ farm_id: 'farm-A', join_without_approval: true }];
+  test('the person joins at once as staff and the request is saved approved by the code creator', async () => {
+    const b = build({ settings: on, over: { created_by: 'p-owner' } });
+    const r = await b.svc.submit(newbie, 'abcd-efgh');
+    expect(r).toEqual({ status: 'joined', businessName: 'Finca A' });
+    expect(b.db.farm_members).toContainEqual(expect.objectContaining({ farm_id: 'farm-A', user_id: 'p-new', role: 'staff' }));
+    expect(b.db.join_requests[0]).toMatchObject({ status: 'approved', decided_by: 'p-owner' });
+    expect(b.db.join_codes[0].uses).toBe(1);
+  });
+  test('the code still works only once', async () => {
+    const b = build({ settings: on });
+    await b.svc.submit(newbie, 'ABCD-EFGH');
+    await expectErr(b.svc.submit({ uid: 'other-uid', email: 'x@gmail.com' }, 'ABCD-EFGH'), 400, 'invalid-code');
+  });
+  test('a business without the setting keeps owner approval', async () => {
+    const b = build({ settings: [{ farm_id: 'farm-B', join_without_approval: true }] });
+    expect((await b.svc.submit(newbie, 'ABCD-EFGH')).status).toBe('join_pending');
+    expect(b.db.farm_members).toHaveLength(2);
+    expect(b.db.join_requests[0].status).toBe('pending');
+  });
+  test('if joining fails the request stays pending for an owner', async () => {
+    const b = build({ settings: on });
+    const r = await b.svc.submit({ uid: 'new-uid', name: 'Sin correo' }, 'ABCD-EFGH');
+    expect(r.status).toBe('join_pending');
+    expect(b.db.join_requests[0].status).toBe('pending');
+    expect(b.db.farm_members).toHaveLength(2);
   });
 });
