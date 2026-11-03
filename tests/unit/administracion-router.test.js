@@ -459,3 +459,41 @@ describe('Registrar compra', () => {
       .toEqual({ p_business_id: 'f', p_farmer_id: 'P-1', p_coffee_state: 'parchment', p_kg: 40, p_product_id: 'prod-blend' });
   });
 });
+
+describe('compras list and detail', () => {
+  async function servidor(areas, reply2) {
+    const fetchImpl = jest.fn(async (url, opts) => {
+      if (url.includes('my_areas_v2')) return reply(200, areas.map(area => ({ area })));
+      return reply2(url, opts);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    return { server, fetchImpl };
+  }
+  test('pages of purchases with hayMas, limit at most 50', async () => {
+    const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { total: 3, filas: [{ id: 'DL-1' }, { id: 'DL-2' }] }));
+    const r = await call(server, '/api/administracion/BIZ-002/compras?offset=0&limit=500', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ compras: [{ id: 'DL-1' }, { id: 'DL-2' }], total: 3, hayMas: true });
+    const body = JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchases_page'))[1].body);
+    expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
+    await new Promise(res => server.close(res));
+  });
+  test('detail of one purchase', async () => {
+    const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
+    const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ compra: { id: 'DL-1', agricultor: 'Agricultor Uno' } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
+    await new Promise(res => server.close(res));
+  });
+  test('someone without the Compras area gets 403 and the database is not asked', async () => {
+    const { server, fetchImpl } = await servidor(['production'], () => reply(200, {}));
+    expect((await call(server, '/api/administracion/BIZ-002/compras', { token: 't', method: 'GET' })).status).toBe(403);
+    expect((await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' })).status).toBe(403);
+    expect(fetchImpl.mock.calls.some(c => c[0].includes('purchases_page') || c[0].includes('purchase_detail'))).toBe(false);
+    await new Promise(res => server.close(res));
+  });
+});

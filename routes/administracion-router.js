@@ -433,6 +433,40 @@ function createAdministracionRouter({
     }
   });
 
+  /** True when the person works in this area (owners have every area), as my_areas_v2 says. */
+  async function tieneArea(req, area) {
+    const mine = await db(req, 'rpc/my_areas_v2', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+    return mine.ok && (mine.data || []).some(a => a.area === area);
+  }
+
+  // Compras tab: purchases newest first, a page at a time (offset, limit at most 50); only for the Compras area.
+  router.get('/:businessId/compras', async (req, res) => {
+    try {
+      if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const r = await db(req, 'rpc/purchases_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      const total = (r.data && r.data.total) || 0;
+      const filas = (r.data && r.data.filas) || [];
+      return res.json({ compras: filas, total, hayMas: offset + filas.length < total });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // One purchase with its detail; only for the Compras area.
+  router.get('/:businessId/compras/:id', async (req, res) => {
+    try {
+      if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
+      const r = await db(req, 'rpc/purchase_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ compra: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Role of the person in this farm, and the month view (only for the owner).
   router.get('/:businessId/resumen', async (req, res) => {
     try {
