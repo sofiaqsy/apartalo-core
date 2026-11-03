@@ -378,6 +378,21 @@ function createAdministracionRouter({
     }
   });
 
+  // Compras and Producción cards: one summary each, from the database (money only for owners, decided there).
+  router.get('/:businessId/procesos', async (req, res) => {
+    try {
+      const body = { p_business_id: req.admin.farmId };
+      const [compras, produccion] = await Promise.all([
+        db(req, 'rpc/purchasing_summary', { method: 'POST', body }),
+        db(req, 'rpc/production_summary', { method: 'POST', body }),
+      ]);
+      for (const r of [compras, produccion]) if (!r.ok) return sendDbError(res, r);
+      return res.json({ compras: compras.data, produccion: produccion.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Role of the person in this farm, and the month view (only for the owner).
   router.get('/:businessId/resumen', async (req, res) => {
     try {

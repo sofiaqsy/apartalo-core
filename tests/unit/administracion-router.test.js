@@ -353,3 +353,34 @@ describe('toParams', () => {
     expect(toParams(FORMS.retiro, { monto: 400, p_business_id: 'x' }, 'farm-rosal')).toEqual({ p_business_id: 'farm-rosal', p_amount: 400 });
   });
 });
+
+describe('procesos', () => {
+  test('returns the Compras and Producción summaries with the person\'s own token', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('purchasing_summary') ? { mes: { recibidos: 2 } } : { verde_kg: 760 }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/procesos', { token: 'person-token', method: 'GET' });
+    expect(r.body).toEqual({ compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 } });
+    for (const [, opts] of fetchImpl.mock.calls) {
+      expect(opts.headers.Authorization).toBe('Bearer person-token');
+      expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
+    }
+    await new Promise(res => server.close(res));
+  });
+  test('a database refusal is passed on in plain words', async () => {
+    const fetchImpl = jest.fn(async () => reply(400, { message: 'You are not a member of this business.' }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/procesos', { token: 't', method: 'GET' });
+    expect(r).toEqual({ status: 400, body: { error: 'You are not a member of this business.' } });
+    await new Promise(res => server.close(res));
+  });
+});
