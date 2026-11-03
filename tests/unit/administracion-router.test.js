@@ -546,3 +546,22 @@ describe('Compras → Adelantos', () => {
     await new Promise(res => server.close(res));
   });
 });
+
+describe('provider detail', () => {
+  test('asks party_detail with the person\'s own token', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { id: 'P-0001', nombre: 'Agricultor Uno' }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0001', { token: 'person-token', method: 'GET' });
+    expect(r.body).toEqual({ proveedor: { id: 'P-0001', nombre: 'Agricultor Uno' } });
+    const [url, opts] = fetchImpl.mock.calls[0];
+    expect(url).toContain('rpc/party_detail');
+    expect(opts.headers.Authorization).toBe('Bearer person-token');
+    expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal', p_party_id: 'P-0001' });
+    await new Promise(res => server.close(res));
+  });
+});

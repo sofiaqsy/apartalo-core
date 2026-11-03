@@ -502,6 +502,17 @@ function createAdministracionRouter({
     }
   });
 
+  // A provider's detail (3 Nov 2026). The database gives DNI or RUC, phone, accounts and money only to owners.
+  router.get('/:businessId/proveedores/:id', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/party_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ proveedor: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // One purchase with its detail; only for the Compras area.
   router.get('/:businessId/compras/:id', async (req, res) => {
     try {
