@@ -378,19 +378,28 @@ function createAdministracionRouter({
     }
   });
 
-  // Finca, Compras, Producción and Comercialización cards: one summary each, from the database (money only for owners,
-  // decided there). Comercialización is Apartalo's store sales by month (apartalo_sales_by_month).
+  // Finca, Compras, Producción and Comercialización cards: one summary each, from the database (money only for
+  // owners, decided there). Comercialización is Apartalo's store sales by month (apartalo_sales_by_month).
+  // Only the processes of the person's own areas are sent (my_areas_v2: owners have every area), so hiding a
+  // card in the app is never the only protection (General Manager, 3 Nov 2026).
+  const PROCESOS = [
+    { key: 'finca', area: 'farm', fn: 'farm_summary' },
+    { key: 'compras', area: 'sourcing', fn: 'purchasing_summary' },
+    { key: 'produccion', area: 'production', fn: 'production_summary' },
+    { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
+  ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
       const body = { p_business_id: req.admin.farmId };
-      const [finca, compras, produccion, ventas] = await Promise.all([
-        db(req, 'rpc/farm_summary', { method: 'POST', body }),
-        db(req, 'rpc/purchasing_summary', { method: 'POST', body }),
-        db(req, 'rpc/production_summary', { method: 'POST', body }),
-        db(req, 'rpc/apartalo_sales_by_month', { method: 'POST', body }),
-      ]);
-      for (const r of [finca, compras, produccion, ventas]) if (!r.ok) return sendDbError(res, r);
-      return res.json({ finca: finca.data, compras: compras.data, produccion: produccion.data, comercial: { meses: ventas.data || [] } });
+      const mine = await db(req, 'rpc/my_areas_v2', { method: 'POST', body });
+      if (!mine.ok) return sendDbError(res, mine);
+      const permitidas = new Set((mine.data || []).map(a => a.area));
+      const pedidos = PROCESOS.filter(p => permitidas.has(p.area));
+      const respuestas = await Promise.all(pedidos.map(p => db(req, `rpc/${p.fn}`, { method: 'POST', body })));
+      for (const r of respuestas) if (!r.ok) return sendDbError(res, r);
+      const out = {};
+      pedidos.forEach((p, i) => { out[p.key] = p.wrap ? p.wrap(respuestas[i].data) : respuestas[i].data; });
+      return res.json(out);
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

@@ -355,24 +355,39 @@ describe('toParams', () => {
 });
 
 describe('procesos', () => {
-  test('returns the Compras and Producción summaries with the person\'s own token', async () => {
-    const fetchImpl = jest.fn(async url => reply(200, url.includes('purchasing_summary') ? { mes: { recibidos: 2 } }
-      : url.includes('sales_by_month') ? [{ month: '2026-11-01', orders: 3, total: 3088 }]
-      : url.includes('farm_summary') ? { parcelas: { n: 1 } } : { verde_kg: 760 }));
+  const resumenes = url => url.includes('purchasing_summary') ? { mes: { recibidos: 2 } }
+    : url.includes('sales_by_month') ? [{ month: '2026-11-01', orders: 3, total: 3088 }]
+    : url.includes('farm_summary') ? { parcelas: { n: 1 } } : { verde_kg: 760 };
+  async function pedir(areas, token = 'person-token') {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? areas.map(area => ({ area })) : resumenes(url)));
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
       getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
       supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
     }));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
-    const r = await call(server, '/api/administracion/BIZ-002/procesos', { token: 'person-token', method: 'GET' });
+    const r = await call(server, '/api/administracion/BIZ-002/procesos', { token, method: 'GET' });
+    await new Promise(res => server.close(res));
+    return { r, fetchImpl };
+  }
+  test('an owner (every area) gets the four summaries, with the person\'s own token', async () => {
+    const { r, fetchImpl } = await pedir(['farm', 'sourcing', 'production', 'commercial', 'finance']);
     expect(r.body).toEqual({ finca: { parcelas: { n: 1 } }, compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] } });
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
     }
-    await new Promise(res => server.close(res));
+  });
+  test('staff only get the processes of their own areas; the others are never asked for', async () => {
+    const { r, fetchImpl } = await pedir(['sourcing', 'fulfillment']);
+    expect(Object.keys(r.body)).toEqual(['compras']);
+    const urls = fetchImpl.mock.calls.map(c => c[0]).join(' ');
+    for (const fn of ['farm_summary', 'production_summary', 'apartalo_sales_by_month']) expect(urls).not.toContain(fn);
+  });
+  test('a person without areas gets nothing', async () => {
+    const { r } = await pedir([]);
+    expect(r.body).toEqual({});
   });
   test('a database refusal is passed on in plain words', async () => {
     const fetchImpl = jest.fn(async () => reply(400, { message: 'You are not a member of this business.' }));
