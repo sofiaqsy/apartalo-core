@@ -186,6 +186,14 @@ function createAdministracionRouter({
     }
   });
 
+  /** Area of each expense (with Administración's corrections), so the app can show only the ticked areas. */
+  async function areasDeGastos(req, ids) {
+    if (!ids.length) return new Map();
+    const qs = new URLSearchParams({ select: 'id,area', business_id: `eq.${req.admin.farmId}`, id: `in.(${ids.join(',')})` });
+    const r = await db(req, `expenses_effective_area?${qs}`);
+    return new Map(r.ok ? (r.data || []).map(x => [x.id, x.area]) : []);
+  }
+
   // Pending lists.
   router.get('/:businessId/pendientes', async (req, res) => {
     try {
@@ -206,6 +214,9 @@ function createAdministracionRouter({
           lists.porPagar = lists.porPagar.map(p => ({ ...p, delivery_id: deliveryOf.get(p.id) || null }));
         }
       }
+      const gastos = lists.gastosPorPagar || [];
+      const areaDe = await areasDeGastos(req, gastos.map(g => g.id).filter(Boolean));
+      lists.gastosPorPagar = gastos.map(g => ({ ...g, area: areaDe.get(g.id) || null }));
       return res.json(lists);
     } catch (err) {
       if (err && err.r) return sendDbError(res, err.r);
@@ -289,7 +300,9 @@ function createAdministracionRouter({
       if (mine.role !== 'owner') qs.set('mine', 'is.true');
       const r = await db(req, `my_requests?${qs}`);
       if (!r.ok) return sendDbError(res, r);
-      return res.json({ rol: mine.role, solicitudes: r.data || [] });
+      const filas = r.data || [];
+      const areaDe = await areasDeGastos(req, filas.filter(f => f.kind === 'gasto').map(f => f.id).filter(Boolean));
+      return res.json({ rol: mine.role, solicitudes: filas.map(f => (f.kind === 'gasto' ? { ...f, area: areaDe.get(f.id) || null } : f)) });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

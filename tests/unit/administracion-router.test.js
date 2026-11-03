@@ -402,3 +402,26 @@ describe('procesos', () => {
     await new Promise(res => server.close(res));
   });
 });
+
+describe('area of each pending expense', () => {
+  test('gastos por pagar and gasto requests carry their area', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('expenses_effective_area')) return reply(200, [{ id: 'EX-1', area: 'farm' }]);
+      if (url.includes('expenses_to_pay')) return reply(200, [{ id: 'EX-1', amount: 60 }]);
+      if (url.includes('my_memberships')) return reply(200, [{ business_id: 'farm-rosal', role: 'owner' }]);
+      if (url.includes('my_requests')) return reply(200, [{ kind: 'gasto', id: 'EX-1' }, { kind: 'adelanto', id: 'SOL-1' }]);
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const p = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
+    expect(p.body.gastosPorPagar).toEqual([{ id: 'EX-1', amount: 60, area: 'farm' }]);
+    const s = await call(server, '/api/administracion/BIZ-002/solicitudes', { token: 't', method: 'GET' });
+    expect(s.body.solicitudes).toEqual([{ kind: 'gasto', id: 'EX-1', area: 'farm' }, { kind: 'adelanto', id: 'SOL-1' }]);
+    await new Promise(res => server.close(res));
+  });
+});
