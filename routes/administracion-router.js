@@ -64,9 +64,10 @@ const FORMS = Object.freeze({
     fn: 'admin_register_party',
     fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community' },
   },
+  // Registrar compra (3 Nov 2026): v3 also links the product the coffee is for (checked to be this farm's).
   entrega: {
-    fn: 'admin_record_delivery_v2',
-    fields: { agricultorId: 'p_farmer_id', estado: 'p_coffee_state', kg: 'p_kg', compradorId: 'p_buyer_id', precioKg: 'p_price_per_kg', humedad: 'p_moisture_pct', rendimiento: 'p_yield_factor', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date' },
+    fn: 'admin_record_delivery_v3',
+    fields: { agricultorId: 'p_farmer_id', estado: 'p_coffee_state', kg: 'p_kg', compradorId: 'p_buyer_id', precioKg: 'p_price_per_kg', humedad: 'p_moisture_pct', rendimiento: 'p_yield_factor', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date', productoId: 'p_product_id' },
   },
   precio: {
     fn: 'admin_set_price_v2',

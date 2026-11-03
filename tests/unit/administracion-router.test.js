@@ -451,3 +451,11 @@ describe('providers of a process', () => {
     await new Promise(res => server.close(res));
   });
 });
+
+describe('Registrar compra', () => {
+  test('sends the linked product to admin_record_delivery_v3', () => {
+    expect(FORMS.entrega.fn).toBe('admin_record_delivery_v3');
+    expect(toParams(FORMS.entrega, { agricultorId: 'P-1', estado: 'parchment', kg: 40, productoId: 'prod-blend' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_farmer_id: 'P-1', p_coffee_state: 'parchment', p_kg: 40, p_product_id: 'prod-blend' });
+  });
+});
