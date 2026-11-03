@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'retiro']);
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -291,10 +291,11 @@ describe('equipo', () => {
 });
 
 describe('pendientes', () => {
-  test('purchases to pay carry their delivery id', async () => {
+  test('purchases to pay carry their delivery id and whether payment was requested', async () => {
     const fetchImpl = jest.fn(async url => {
       if (url.includes('/purchase_balances?')) return reply(200, [{ id: 'PU-0001', still_owed: 300 }]);
       if (url.includes('/purchases?')) return reply(200, [{ id: 'PU-0001', delivery_id: 'DL-0001' }]);
+      if (url.includes('/purchase_open_requests?')) return reply(200, [{ purchase_id: 'PU-0001' }]);
       return reply(200, []);
     });
     const app = express(); app.use(express.json());
@@ -304,7 +305,7 @@ describe('pendientes', () => {
     }));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/pendientes', { token: 't', method: 'GET' });
-    expect(r.body.porPagar).toEqual([{ id: 'PU-0001', still_owed: 300, delivery_id: 'DL-0001' }]);
+    expect(r.body.porPagar).toEqual([{ id: 'PU-0001', still_owed: 300, delivery_id: 'DL-0001', pago_solicitado: true }]);
     expect(decodeURIComponent(fetchImpl.mock.calls.find(c => c[0].includes('/purchases?'))[0])).toContain('id=in.(PU-0001)');
     await new Promise(res => server.close(res));
   });
@@ -480,7 +481,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { total: 3, filas: [{ id: 'DL-1' }, { id: 'DL-2' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/compras?offset=0&limit=500', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ compras: [{ id: 'DL-1' }, { id: 'DL-2' }], total: 3, hayMas: true });
-    const body = JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchases_page_v2'))[1].body);
+    const body = JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchases_page_v4'))[1].body);
     expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
@@ -488,7 +489,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
     const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ compra: { id: 'DL-1', agricultor: 'Agricultor Uno' } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail_v4'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
     await new Promise(res => server.close(res));
   });
   test('someone without the Compras area gets 403 and the database is not asked', async () => {
@@ -497,5 +498,14 @@ describe('compras list and detail', () => {
     expect((await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' })).status).toBe(403);
     expect(fetchImpl.mock.calls.some(c => c[0].includes('purchases_page') || c[0].includes('purchase_detail'))).toBe(false);
     await new Promise(res => server.close(res));
+  });
+});
+
+describe('Solicitar pago', () => {
+  test('sends the amount and how it is paid; Finanzas confirms an advance payment by its request', () => {
+    expect(FORMS.solicitarPago.fn).toBe('admin_request_purchase_payment_v2');
+    expect(toParams(FORMS.solicitarPago, { compraId: 'PU-0001', monto: 300, metodo: 'advance', adelantoId: 'ADV-001', hack: 1 }, 'f'))
+      .toEqual({ p_business_id: 'f', p_purchase_id: 'PU-0001', p_amount: 300, p_method: 'advance', p_advance_id: 'ADV-001' });
+    expect(toParams(FORMS.pagoConAdelanto, { solicitudId: 7 }, 'f')).toEqual({ p_business_id: 'f', p_request_id: 7 });
   });
 });

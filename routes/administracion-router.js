@@ -73,6 +73,16 @@ const FORMS = Object.freeze({
     fn: 'admin_set_price_v2',
     fields: { entregaId: 'p_delivery_id', precioKg: 'p_price_per_kg', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
+  // Solicitar pago (3 Nov 2026): on demand, with the amount and how (transfer, or the farmer's own advance).
+  solicitarPago: {
+    fn: 'admin_request_purchase_payment_v2',
+    fields: { compraId: 'p_purchase_id', monto: 'p_amount', metodo: 'p_method', adelantoId: 'p_advance_id', nota: 'p_note' },
+  },
+  // Finanzas confirms a request paid with an advance (owners only, decided by the database).
+  pagoConAdelanto: {
+    fn: 'admin_pay_purchase_with_advance',
+    fields: { solicitudId: 'p_request_id' },
+  },
   pago: {
     fn: 'admin_pay_purchase_v2',
     fields: { compraId: 'p_purchase_id', monto: 'p_amount', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
@@ -208,11 +218,15 @@ function createAdministracionRouter({
       // Each purchase to pay says which delivery it came from, so the app shows the delivery once, with its action.
       const ids = (lists.porPagar || []).map(p => p.id).filter(Boolean);
       if (ids.length) {
-        const qs = new URLSearchParams({ select: 'id,delivery_id', business_id: `eq.${req.admin.farmId}`, id: `in.(${ids.join(',')})` });
-        const r = await db(req, `purchases?${qs}`);
+        const farm = `eq.${req.admin.farmId}`;
+        const [r, abiertas] = await Promise.all([
+          db(req, `purchases?${new URLSearchParams({ select: 'id,delivery_id', business_id: farm, id: `in.(${ids.join(',')})` })}`),
+          db(req, `purchase_open_requests?${new URLSearchParams({ select: 'purchase_id', business_id: farm, purchase_id: `in.(${ids.join(',')})` })}`),
+        ]);
         if (r.ok) {
           const deliveryOf = new Map((r.data || []).map(x => [x.id, x.delivery_id]));
-          lists.porPagar = lists.porPagar.map(p => ({ ...p, delivery_id: deliveryOf.get(p.id) || null }));
+          const pedidas = new Set(abiertas.ok ? (abiertas.data || []).map(x => x.purchase_id) : []);
+          lists.porPagar = lists.porPagar.map(p => ({ ...p, delivery_id: deliveryOf.get(p.id) || null, pago_solicitado: pedidas.has(p.id) }));
         }
       }
       const gastos = lists.gastosPorPagar || [];
@@ -415,7 +429,7 @@ function createAdministracionRouter({
     { key: 'produccion', area: 'production', fn: 'production_summary' },
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
-    { key: 'finanzas', area: 'finance', fn: 'finance_summary' }, // money: the database answers only to owners
+    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v3' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
@@ -446,7 +460,7 @@ function createAdministracionRouter({
       if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/purchases_page_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/purchases_page_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -460,7 +474,7 @@ function createAdministracionRouter({
   router.get('/:businessId/compras/:id', async (req, res) => {
     try {
       if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
-      const r = await db(req, 'rpc/purchase_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
+      const r = await db(req, 'rpc/purchase_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ compra: r.data });
     } catch (err) {
