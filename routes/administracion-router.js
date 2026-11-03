@@ -415,6 +415,7 @@ function createAdministracionRouter({
     { key: 'produccion', area: 'production', fn: 'production_summary' },
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
+    { key: 'finanzas', area: 'finance', fn: 'finance_summary' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
