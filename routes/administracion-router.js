@@ -411,7 +411,7 @@ function createAdministracionRouter({
   // card in the app is never the only protection (General Manager, 3 Nov 2026).
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
-    { key: 'compras', area: 'sourcing', fn: 'purchasing_summary' },
+    { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
     { key: 'produccion', area: 'production', fn: 'production_summary' },
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
@@ -445,7 +445,7 @@ function createAdministracionRouter({
       if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/purchases_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/purchases_page_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -459,7 +459,7 @@ function createAdministracionRouter({
   router.get('/:businessId/compras/:id', async (req, res) => {
     try {
       if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
-      const r = await db(req, 'rpc/purchase_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
+      const r = await db(req, 'rpc/purchase_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ compra: r.data });
     } catch (err) {

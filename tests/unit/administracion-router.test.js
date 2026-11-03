@@ -478,7 +478,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { total: 3, filas: [{ id: 'DL-1' }, { id: 'DL-2' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/compras?offset=0&limit=500', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ compras: [{ id: 'DL-1' }, { id: 'DL-2' }], total: 3, hayMas: true });
-    const body = JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchases_page'))[1].body);
+    const body = JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchases_page_v2'))[1].body);
     expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
@@ -486,7 +486,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
     const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ compra: { id: 'DL-1', agricultor: 'Agricultor Uno' } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
     await new Promise(res => server.close(res));
   });
   test('someone without the Compras area gets 403 and the database is not asked', async () => {
