@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -569,5 +569,82 @@ describe('provider report and editing', () => {
     expect(toParams(FORMS.cuentaProveedor, { proveedorId: 'P-1', tipo: 'bank_account', numero: '000', reemplazaId: 7 }, 'f'))
       .toEqual({ p_business_id: 'f', p_party_id: 'P-1', p_kind: 'bank_account', p_number: '000', p_replace_id: 7 });
     expect(FORMS.quitarCuenta.fn).toBe('admin_archive_payment_method');
+  });
+});
+
+describe('evidence', () => {
+  const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64');
+  async function servidor(fetchImpl, serviceKey = () => 'service') {
+    const app = express(); app.use(express.json({ limit: '20mb' }));
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k', serviceKey,
+    }));
+    return new Promise(r => { const s = app.listen(0, () => r(s)); });
+  }
+  const sube = (server, body) => call(server, '/api/administracion/BIZ-002/evidencias', { token: 'owner-token', method: 'POST', body });
+
+  test('the database says yes first with the person\'s login, then the file is stored and recorded', async () => {
+    const fetchImpl = jest.fn(async url => url.includes('evidence_folder') ? reply(200, 'farm-rosal/purchase/PU-0001/')
+      : url.includes('/storage/') ? reply(200, { Key: 'x' }) : reply(200, { evidence_id: 1 }));
+    const server = await servidor(fetchImpl);
+    const r = await sube(server, { tipo: 'purchase', id: 'PU-0001', archivoBase64: `data:image/jpeg;base64,${JPG}`, nota: 'Voucher' });
+    expect(r.status).toBe(200);
+    const [carpeta, subida, registro] = fetchImpl.mock.calls;
+    expect(carpeta[0]).toContain('rpc/evidence_folder');
+    expect(carpeta[1].headers.Authorization).toBe('Bearer owner-token');
+    expect(subida[0]).toMatch(/^https:\/\/db\.example\/storage\/v1\/object\/operations-evidence\/farm-rosal\/purchase\/PU-0001\/\d+-[0-9a-f]{8}\.jpg$/);
+    expect(subida[1].headers.Authorization).toBe('Bearer service');
+    expect(subida[1].headers['Content-Type']).toBe('image/jpeg');
+    expect(registro[0]).toContain('rpc/admin_add_evidence');
+    expect(registro[1].headers.Authorization).toBe('Bearer owner-token');
+    expect(JSON.parse(registro[1].body)).toMatchObject({ p_kind: 'purchase', p_target_id: 'PU-0001', p_mime: 'image/jpeg', p_size: 8, p_note: 'Voucher' });
+    await new Promise(res => server.close(res));
+  });
+
+  test('staff are refused by the database and nothing is stored', async () => {
+    const fetchImpl = jest.fn(async () => reply(400, { message: 'Only the owners add evidence.' }));
+    const server = await servidor(fetchImpl);
+    const r = await sube(server, { tipo: 'expense', id: 'EX-0001', archivoBase64: JPG });
+    expect(r).toEqual({ status: 400, body: { error: 'Only the owners add evidence.' } });
+    expect(fetchImpl.mock.calls.some(c => c[0].includes('/storage/'))).toBe(false);
+    await new Promise(res => server.close(res));
+  });
+
+  test('a file that is not a photo or a PDF, or an unknown record type, is refused before anything', async () => {
+    const fetchImpl = jest.fn();
+    const server = await servidor(fetchImpl);
+    expect((await sube(server, { tipo: 'purchase', id: 'PU-1', archivoBase64: Buffer.from('MZ fake exe').toString('base64') })).status).toBe(400);
+    expect((await sube(server, { tipo: 'orders', id: 'PU-1', archivoBase64: JPG })).status).toBe(400);
+    expect((await sube(server, { tipo: 'purchase', id: '../x', archivoBase64: JPG })).status).toBe(400);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await new Promise(res => server.close(res));
+  });
+
+  test('if recording fails, the stored file is removed', async () => {
+    const fetchImpl = jest.fn(async (url, opts) => url.includes('evidence_folder') ? reply(200, 'farm-rosal/expense/EX-1/')
+      : url.includes('admin_add_evidence') ? reply(400, { message: 'The file is not in the folder of that record.' }) : reply(200, {}));
+    const server = await servidor(fetchImpl);
+    const r = await sube(server, { tipo: 'expense', id: 'EX-1', archivoBase64: JPG });
+    expect(r.status).toBe(400);
+    const borrado = fetchImpl.mock.calls.find(c => c[1].method === 'DELETE');
+    expect(borrado[0]).toBe('https://db.example/storage/v1/object/operations-evidence');
+    await new Promise(res => server.close(res));
+  });
+
+  test('the list gives 10-minute links and never the storage path', async () => {
+    const fetchImpl = jest.fn(async url => url.includes('evidence_of')
+      ? reply(200, [{ id: 3, path: 'farm-rosal/purchase/PU-1/a.jpg', tipo: 'image/jpeg', nota: 'Voucher' }])
+      : reply(200, [{ path: 'farm-rosal/purchase/PU-1/a.jpg', signedURL: '/object/sign/operations-evidence/farm-rosal/purchase/PU-1/a.jpg?token=t' }]));
+    const server = await servidor(fetchImpl);
+    const r = await call(server, '/api/administracion/BIZ-002/evidencias?tipo=purchase&id=PU-1', { token: 'owner-token', method: 'GET' });
+    expect(r.body.evidencias).toEqual([{ id: 3, tipo: 'image/jpeg', nota: 'Voucher',
+      url: 'https://db.example/storage/v1/object/sign/operations-evidence/farm-rosal/purchase/PU-1/a.jpg?token=t' }]);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({ expiresIn: 600, paths: ['farm-rosal/purchase/PU-1/a.jpg'] });
+    await new Promise(res => server.close(res));
+  });
+
+  test('Quitar evidencia archives it through the database', () => {
+    expect(FORMS.quitarEvidencia.fn).toBe('admin_archive_evidence');
   });
 });

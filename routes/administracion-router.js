@@ -11,6 +11,7 @@
  * sb_publishable_...). fincas must accept Firebase logins (Authentication > Third-party auth > Firebase,
  * project apartalo-10146); until then the database answers 401 and the app shows "sin acceso".
  */
+const crypto = require('crypto');
 const express = require('express');
 const { extractBearer } = require('../core/middleware/auth');
 
@@ -77,6 +78,11 @@ const FORMS = Object.freeze({
   quitarCuenta: {
     fn: 'admin_archive_payment_method',
     fields: { cuentaId: 'p_method_id' },
+  },
+  // Quitar evidencia (owners): archived, never deleted. Subir evidencia has its own route (it carries a file).
+  quitarEvidencia: {
+    fn: 'admin_archive_evidence',
+    fields: { evidenciaId: 'p_evidence_id' },
   },
   // Registrar compra (3 Nov 2026): v3 also links the product the coffee is for (checked to be this farm's).
   entrega: {
@@ -149,6 +155,8 @@ function createAdministracionRouter({
   fetchImpl = (...a) => fetch(...a),
   supabaseUrl = () => (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace(/\/rest\/v1$/, ''),
   publishableKey = () => process.env.SUPABASE_PUBLISHABLE_KEY || '',
+  // Only for the private evidence bucket, and only after the database said yes with the person's own login.
+  serviceKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY || '',
 } = {}) {
   const router = express.Router();
 
@@ -406,7 +414,7 @@ function createAdministracionRouter({
     { key: 'produccion', area: 'production', fn: 'production_summary' },
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
-    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v3' }, // money: the database answers only to owners
+    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
@@ -527,6 +535,88 @@ function createAdministracionRouter({
       const months = await db(req, `finance_account_months?${qs}`);
       if (!months.ok) return sendDbError(res, months);
       return res.json({ rol: mine.role, meses: months.data || [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // ── Evidence (3 Nov 2026): a photo or PDF of the voucher or receipt of a compra, gasto or adelanto ──
+  // The file goes to the private bucket operations-evidence. The database decides first, with the person's own
+  // login, that they may (owners) and in which folder; only then the server stores it with the service key.
+  const BUCKET = 'operations-evidence';
+  const TIPOS_EVIDENCIA = new Set(['purchase', 'expense', 'advance_request', 'advance']);
+  const ARCHIVOS = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' };
+  const MAX_BYTES = 8 * 1024 * 1024;
+
+  /** The first bytes must match the declared type, so a renamed file is refused. */
+  function tipoReal(buf) {
+    if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (buf.length > 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+    if (buf.length > 4 && buf.slice(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+    return null;
+  }
+
+  async function storage(path, { method = 'POST', body, contentType = 'application/json' } = {}) {
+    const res = await fetchImpl(`${supabaseUrl()}/storage/v1/${path}`, {
+      method,
+      headers: { apikey: serviceKey(), Authorization: `Bearer ${serviceKey()}`, 'Content-Type': contentType },
+      body: body === undefined ? undefined : (Buffer.isBuffer(body) ? body : JSON.stringify(body)),
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (_) { data = { message: text }; }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  router.post('/:businessId/evidencias', async (req, res) => {
+    const b = req.body || {};
+    const tipo = TIPOS_EVIDENCIA.has(b.tipo) ? b.tipo : null;
+    const id = typeof b.id === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(b.id) ? b.id : null;
+    if (!tipo || !id) return res.status(400).json({ error: 'Falta a qué registro va la evidencia.' });
+    if (!serviceKey()) return res.status(503).json({ error: 'Evidencias no configuradas en el servidor' });
+    const archivo = Buffer.from(typeof b.archivoBase64 === 'string' ? b.archivoBase64.replace(/^data:[^,]*,/, '') : '', 'base64');
+    if (!archivo.length) return res.status(400).json({ error: 'Falta la foto o el PDF.' });
+    if (archivo.length > MAX_BYTES) return res.status(400).json({ error: 'El archivo pesa más de 8 MB.' });
+    const mime = tipoReal(archivo);
+    if (!mime) return res.status(400).json({ error: 'Sólo fotos (JPG o PNG) o PDF.' });
+    try {
+      const carpeta = await db(req, 'rpc/evidence_folder', { method: 'POST', body: { p_kind: tipo, p_target_id: id, p_business_id: req.admin.farmId } });
+      if (!carpeta.ok) return sendDbError(res, carpeta);
+      const path = `${carpeta.data}${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ARCHIVOS[mime]}`;
+      const subida = await storage(`object/${BUCKET}/${path}`, { body: archivo, contentType: mime });
+      if (!subida.ok) return res.status(502).json({ error: 'No se pudo guardar el archivo. Inténtalo de nuevo.' });
+      const r = await db(req, 'rpc/admin_add_evidence', {
+        method: 'POST',
+        body: {
+          p_kind: tipo, p_target_id: id, p_path: path, p_mime: mime, p_size: archivo.length,
+          p_note: typeof b.nota === 'string' ? b.nota.slice(0, 300) : null, p_business_id: req.admin.farmId,
+          p_client_ref: typeof b.clientRef === 'string' ? b.clientRef.slice(0, 80) : null,
+        },
+      });
+      if (!r.ok) {
+        await storage(`object/${BUCKET}`, { method: 'DELETE', body: { prefixes: [path] } }).catch(() => {});
+        return sendDbError(res, r);
+      }
+      return res.json({ ok: true, evidencia: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // The evidence of one record with links that work for 10 minutes; the database gives the rows only to owners.
+  router.get('/:businessId/evidencias', async (req, res) => {
+    const tipo = TIPOS_EVIDENCIA.has(req.query.tipo) ? req.query.tipo : null;
+    const id = typeof req.query.id === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(req.query.id) ? req.query.id : null;
+    if (!tipo || !id) return res.status(400).json({ error: 'Falta el registro.' });
+    try {
+      const r = await db(req, 'rpc/evidence_of', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_target_id: id } });
+      if (!r.ok) return sendDbError(res, r);
+      const filas = Array.isArray(r.data) ? r.data : [];
+      if (!filas.length || !serviceKey()) return res.json({ evidencias: filas.map(({ path, ...e }) => e) });
+      const firmas = await storage(`object/sign/${BUCKET}`, { body: { expiresIn: 600, paths: filas.map(e => e.path) } });
+      const porPath = new Map((firmas.ok && Array.isArray(firmas.data) ? firmas.data : [])
+        .filter(f => f && f.signedURL).map(f => [f.path, f.signedURL.startsWith('http') ? f.signedURL : `${supabaseUrl()}/storage/v1${f.signedURL}`]));
+      return res.json({ evidencias: filas.map(({ path, ...e }) => ({ ...e, url: porPath.get(path) || null })) });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
