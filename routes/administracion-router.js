@@ -470,6 +470,38 @@ function createAdministracionRouter({
     }
   });
 
+  // Compras → Adelantos (3 Nov 2026): the requests waiting for Finanzas (first page only) and the advances, newest
+  // first, a page at a time (limit at most 50), with the person's name. Only for the Compras area.
+  router.get('/:businessId/adelantos', async (req, res) => {
+    try {
+      if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const farm = `eq.${req.admin.farmId}`;
+      const [adv, pedidos] = await Promise.all([
+        db(req, `advance_balances?${new URLSearchParams({ select: 'id,party_id,advance_date,amount,used_in_coffee,returned_in_money,open_balance,status,settle_by', business_id: farm, order: 'advance_date.desc,id.desc', offset: String(offset), limit: String(limit) })}`),
+        offset === 0
+          ? db(req, `advance_requests_pending?${new URLSearchParams({ select: 'id,request_date,party,amount,reason,created_by', business_id: farm, order: 'request_date.desc' })}`)
+          : Promise.resolve({ ok: true, data: [] }),
+      ]);
+      for (const r of [adv, pedidos]) if (!r.ok) return sendDbError(res, r);
+      const filas = adv.data || [];
+      const ids = [...new Set(filas.map(a => a.party_id).filter(Boolean))];
+      let nombre = new Map();
+      if (ids.length) {
+        const pr = await db(req, `parties?${new URLSearchParams({ select: 'id,name', business_id: farm, id: `in.(${ids.join(',')})` })}`);
+        if (pr.ok) nombre = new Map((pr.data || []).map(x => [x.id, x.name]));
+      }
+      return res.json({
+        porAprobar: pedidos.data || [],
+        adelantos: filas.map(a => ({ ...a, nombre: nombre.get(a.party_id) || null })),
+        hayMas: filas.length === limit,
+      });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // One purchase with its detail; only for the Compras area.
   router.get('/:businessId/compras/:id', async (req, res) => {
     try {

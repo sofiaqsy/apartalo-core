@@ -509,3 +509,40 @@ describe('Solicitar pago', () => {
     expect(toParams(FORMS.pagoConAdelanto, { solicitudId: 7 }, 'f')).toEqual({ p_business_id: 'f', p_request_id: 7 });
   });
 });
+
+describe('Compras → Adelantos', () => {
+  test('advances with names, requests waiting on the first page, only for the Compras area', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('my_areas_v2')) return reply(200, [{ area: 'sourcing' }]);
+      if (url.includes('/advance_balances?')) return reply(200, [{ id: 'ADV-002', party_id: 'P-1', open_balance: 200 }]);
+      if (url.includes('/advance_requests_pending?')) return reply(200, [{ id: 'SOL-1', party: 'Misael', amount: 1500 }]);
+      if (url.includes('/parties?')) return reply(200, [{ id: 'P-1', name: 'Agricultor Uno' }]);
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/adelantos?limit=999', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ porAprobar: [{ id: 'SOL-1', party: 'Misael', amount: 1500 }],
+      adelantos: [{ id: 'ADV-002', party_id: 'P-1', open_balance: 200, nombre: 'Agricultor Uno' }], hayMas: false });
+    expect(decodeURIComponent(fetchImpl.mock.calls.find(c => c[0].includes('/advance_balances?'))[0])).toContain('limit=50');
+    const r2 = await call(server, '/api/administracion/BIZ-002/adelantos?offset=20', { token: 't', method: 'GET' });
+    expect(r2.body.porAprobar).toEqual([]);
+    await new Promise(res => server.close(res));
+  });
+  test('without the Compras area: 403', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, [{ area: 'production' }]));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    expect((await call(server, '/api/administracion/BIZ-002/adelantos', { token: 't', method: 'GET' })).status).toBe(403);
+    expect(fetchImpl.mock.calls.some(c => c[0].includes('advance_balances'))).toBe(false);
+    await new Promise(res => server.close(res));
+  });
+});
