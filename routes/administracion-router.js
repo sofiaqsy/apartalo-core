@@ -226,13 +226,25 @@ function createAdministracionRouter({
 
   // Search people for the phone picker, a page at a time: q matches name or nickname (in the notes) without
   // caring about accents or capitals; rol = agricultor | comprador | ambos (either); limit at most 50.
+  // area = a process: only its providers (party_areas, set by an owner, or who supplied its gastos). Compras
+  // asks rol=agricultor instead: its providers are the farmers who sell coffee.
   router.get('/:businessId/personas/buscar', async (req, res) => {
     const q = normalizar(typeof req.query.q === 'string' ? req.query.q : '');
     const rol = ['agricultor', 'comprador', 'ambos'].includes(req.query.rol) ? req.query.rol : null;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const area = typeof req.query.area === 'string' && /^[a-z_]{2,30}$/.test(req.query.area) ? req.query.area : null;
     try {
       const farm = `eq.${req.admin.farmId}`;
+      let delArea = null;
+      if (area) {
+        const [asignados, gastos] = await Promise.all([
+          db(req, `party_areas?${new URLSearchParams({ select: 'party_id', business_id: farm, area: `eq.${area}`, active: 'is.true' })}`),
+          db(req, `expenses?${new URLSearchParams({ select: 'supplier_party_id', business_id: farm, area: `eq.${area}`, supplier_party_id: 'not.is.null' })}`),
+        ]);
+        for (const r of [asignados, gastos]) if (!r.ok) return sendDbError(res, r);
+        delArea = new Set([...(asignados.data || []).map(x => x.party_id), ...(gastos.data || []).map(x => x.supplier_party_id)]);
+      }
       const [parties, farmers, buyers] = await Promise.all([
         db(req, `parties?${new URLSearchParams({ select: 'id,name,kind,notes', business_id: farm, status: 'eq.active', order: 'name' })}`),
         db(req, `farmers?${new URLSearchParams({ select: 'party_id,sells,collected_by', business_id: farm })}`),
@@ -243,6 +255,7 @@ function createAdministracionRouter({
       const buyerIds = new Set((buyers.data || []).filter(b => b.active).map(b => b.party_id));
       const nombreById = new Map((parties.data || []).map(p => [p.id, p.name]));
       const todos = (parties.data || [])
+        .filter(p => !delArea || delArea.has(p.id))
         .filter(p => !q || normalizar(`${p.name} ${p.notes || ''}`).includes(q))
         .filter(p => !rol
           || (rol === 'agricultor' && farmerById.has(p.id))

@@ -425,3 +425,28 @@ describe('area of each pending expense', () => {
     await new Promise(res => server.close(res));
   });
 });
+
+describe('providers of a process', () => {
+  test('area=farm lists only the providers set in Finca or who supplied its gastos', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('/party_areas?')) return reply(200, [{ party_id: 'P-0020' }]);
+      if (url.includes('/expenses?')) return reply(200, [{ supplier_party_id: 'P-0031' }]);
+      if (url.includes('/parties?')) return reply(200, [
+        { id: 'P-0020', name: 'Bulcar Tech', kind: 'business' }, { id: 'P-0023', name: 'Electrocentro', kind: 'business' },
+        { id: 'P-0031', name: 'Ferretería Ejemplo', kind: 'business' }, { id: 'P-0001', name: 'Agricultor Uno', kind: 'person' }]);
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/personas/buscar?area=farm', { token: 't', method: 'GET' });
+    expect(r.body.personas.map(p => p.nombre)).toEqual(['Bulcar Tech', 'Ferretería Ejemplo']);
+    expect(r.body.total).toBe(2);
+    const raro = await call(server, "/api/administracion/BIZ-002/personas/buscar?area=farm'%20or", { token: 't', method: 'GET' });
+    expect(raro.body.total).toBe(4); // an invalid area is ignored, never sent to the database
+    await new Promise(res => server.close(res));
+  });
+});
