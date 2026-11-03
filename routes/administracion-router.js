@@ -378,18 +378,19 @@ function createAdministracionRouter({
     }
   });
 
-  // Compras, Producción and Comercialización cards: one summary each, from the database (money only for owners,
+  // Finca, Compras, Producción and Comercialización cards: one summary each, from the database (money only for owners,
   // decided there). Comercialización is Apartalo's store sales by month (apartalo_sales_by_month).
   router.get('/:businessId/procesos', async (req, res) => {
     try {
       const body = { p_business_id: req.admin.farmId };
-      const [compras, produccion, ventas] = await Promise.all([
+      const [finca, compras, produccion, ventas] = await Promise.all([
+        db(req, 'rpc/farm_summary', { method: 'POST', body }),
         db(req, 'rpc/purchasing_summary', { method: 'POST', body }),
         db(req, 'rpc/production_summary', { method: 'POST', body }),
         db(req, 'rpc/apartalo_sales_by_month', { method: 'POST', body }),
       ]);
-      for (const r of [compras, produccion, ventas]) if (!r.ok) return sendDbError(res, r);
-      return res.json({ compras: compras.data, produccion: produccion.data, comercial: { meses: ventas.data || [] } });
+      for (const r of [finca, compras, produccion, ventas]) if (!r.ok) return sendDbError(res, r);
+      return res.json({ finca: finca.data, compras: compras.data, produccion: produccion.data, comercial: { meses: ventas.data || [] } });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

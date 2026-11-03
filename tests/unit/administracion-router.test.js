@@ -357,7 +357,8 @@ describe('toParams', () => {
 describe('procesos', () => {
   test('returns the Compras and Producción summaries with the person\'s own token', async () => {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('purchasing_summary') ? { mes: { recibidos: 2 } }
-      : url.includes('sales_by_month') ? [{ month: '2026-11-01', orders: 3, total: 3088 }] : { verde_kg: 760 }));
+      : url.includes('sales_by_month') ? [{ month: '2026-11-01', orders: 3, total: 3088 }]
+      : url.includes('farm_summary') ? { parcelas: { n: 1 } } : { verde_kg: 760 }));
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
       getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
@@ -365,7 +366,7 @@ describe('procesos', () => {
     }));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/procesos', { token: 'person-token', method: 'GET' });
-    expect(r.body).toEqual({ compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
+    expect(r.body).toEqual({ finca: { parcelas: { n: 1 } }, compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] } });
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
