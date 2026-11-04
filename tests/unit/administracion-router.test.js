@@ -486,6 +486,20 @@ describe('compras list and detail', () => {
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });
+  test('the Producción report asks the database for a range of months; a bad month is refused before it', async () => {
+    const { server, fetchImpl } = await servidor(['production'], () => reply(200, { meses: 3, franja: { tuestes: 2 } }));
+    const r = await call(server, '/api/administracion/BIZ-002/produccion/reporte?desde=2026-05&hasta=2026-07', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ reporte: { meses: 3, franja: { tuestes: 2 } } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('production_report'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-05-01', p_to: '2026-07-31' });
+    const n = fetchImpl.mock.calls.length;
+    for (const q of ['desde=2026-00&hasta=2026-01', 'desde=2026-05', '']) {
+      expect((await call(server, `/api/administracion/BIZ-002/produccion/reporte?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
+    }
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
+
   test('Finanzas lists a page of one tab, with hayMas; an unknown tab is refused before the database', async () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });

@@ -554,6 +554,23 @@ function createAdministracionRouter({
     }
   });
 
+  // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
+  // the database: production_report). Content decided by the Production Manager; costs only for owners.
+  router.get('/:businessId/produccion/reporte', async (req, res) => {
+    try {
+      const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+      const { desde, hasta } = req.query;
+      if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
+      const [ha, hm] = hasta.split('-').map(Number);
+      const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10); // last day of the Hasta month
+      const r = await db(req, 'rpc/production_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ reporte: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   router.get('/:businessId/proveedores/:id/reporte', async (req, res) => {
     try {
       const r = await db(req, 'rpc/party_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
