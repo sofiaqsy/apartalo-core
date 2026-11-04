@@ -471,7 +471,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ filas: [{ id: 'EX-1', estado: 'Urgente' }], total: 21, hayMas: false });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v2'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_kind: 'gastos', p_offset: 20, p_limit: 50 });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=otro', { token: 't', method: 'GET' })).status).toBe(400);

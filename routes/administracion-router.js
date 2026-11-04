@@ -465,13 +465,14 @@ function createAdministracionRouter({
 
   // Finanzas lists (3 Nov 2026): compras, gastos or adelantos; what waits (Pendiente or Urgente) and the last 30 days
   // of what was paid or decided, a page at a time (limit at most 50). Owners only, decided by the database.
+  // finance_list_v2 (4 Nov 2026): each gasto also says whether its area needs review (revisar).
   router.get('/:businessId/finanzas/lista', async (req, res) => {
     try {
       const tipo = String(req.query.tipo || '');
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
