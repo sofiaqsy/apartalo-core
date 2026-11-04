@@ -538,6 +538,31 @@ describe('compras list and detail', () => {
     expect(otro.fetchImpl.mock.calls.some(c => c[0].includes('roast_lot_detail'))).toBe(false);
     await new Promise(res => otro.server.close(res));
   });
+  test('the Finca and Finanzas reports ask the database for a range of months', async () => {
+    const { server, fetchImpl } = await servidor(['farm', 'finance'], () => reply(200, { meses: 1 }));
+    for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report']]) {
+      const r = await call(server, `/api/administracion/BIZ-002/${ruta}/reporte?desde=2026-02&hasta=2026-02`, { token: 't', method: 'GET' });
+      expect(r.body).toEqual({ reporte: { meses: 1 } });
+      expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith(`rpc/${fn}`))[1].body))
+        .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-02-01', p_to: '2026-02-28' });
+      expect((await call(server, `/api/administracion/BIZ-002/${ruta}/reporte?desde=2026-2`, { token: 't', method: 'GET' })).status).toBe(400);
+    }
+    await new Promise(res => server.close(res));
+  });
+  test('the Gastos tab of a process: 20 at a time, only for that area', async () => {
+    const filas = Array.from({ length: 21 }, (_, i) => ({ id: `EX-${i}` }));
+    const { server, fetchImpl } = await servidor(['farm'], () => reply(200, filas));
+    const r = await call(server, '/api/administracion/BIZ-002/gastos-area?area=farm&offset=20', { token: 't', method: 'GET' });
+    expect(r.body.gastos).toHaveLength(20);
+    expect(r.body.hayMas).toBe(true);
+    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v2'))[0];
+    expect(url).toContain('area=eq.farm');
+    expect(url).toContain('offset=20');
+    expect(url).toContain('limit=21');
+    expect((await call(server, '/api/administracion/BIZ-002/gastos-area?area=sourcing', { token: 't', method: 'GET' })).status).toBe(403);
+    expect((await call(server, '/api/administracion/BIZ-002/gastos-area?area=x', { token: 't', method: 'GET' })).status).toBe(400);
+    await new Promise(res => server.close(res));
+  });
   test('the Logística report asks the database for a range of months; a bad month is refused before it', async () => {
     const { server, fetchImpl } = await servidor(['fulfillment'], () => reply(200, { meses: 2, franja: { creados: 3 } }));
     const r = await call(server, '/api/administracion/BIZ-002/logistica/reporte?desde=2026-05&hasta=2026-06', { token: 't', method: 'GET' });

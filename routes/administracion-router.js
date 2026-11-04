@@ -556,6 +556,47 @@ function createAdministracionRouter({
 
   // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
   // the database: production_report_v3, validated again with Production on 4 Nov 2026). Content decided by the Production Manager; costs only for owners.
+  // Finca and Finanzas reports (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (checked by the database with
+  // report_range_check). Contents decided by the Farm and Finance Managers; Finanzas only for owners.
+  for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report']]) {
+    router.get(`/:businessId/${ruta}/reporte`, async (req, res) => {
+      try {
+        const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+        const { desde, hasta } = req.query;
+        if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
+        const [ha, hm] = hasta.split('-').map(Number);
+        const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10);
+        const r = await db(req, `rpc/${fn}`, { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+        if (!r.ok) return sendDbError(res, r);
+        return res.json({ reporte: r.data });
+      } catch (err) {
+        return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+      }
+    });
+  }
+
+  // The Gastos tab of a process (4 Nov 2026): that area's gastos, newest first, 20 at a time (at most 50); only for
+  // the people of that area (owners have every area).
+  const AREAS_GASTOS = new Set(['farm', 'sourcing', 'production', 'fulfillment', 'commercial', 'finance']);
+  router.get('/:businessId/gastos-area', async (req, res) => {
+    const area = String(req.query.area || '');
+    if (!AREAS_GASTOS.has(area)) return res.status(400).json({ error: 'Área no válida.' });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    try {
+      if (!(await tieneArea(req, area))) return res.status(403).json({ error: 'Esa área no es de tus áreas.' });
+      const r = await db(req, `area_expenses_recent_v2?${new URLSearchParams({
+        select: '*', business_id: `eq.${req.admin.farmId}`, area: `eq.${area}`, order: 'expense_date.desc,id.desc',
+        offset: String(offset), limit: String(limit + 1),
+      })}`);
+      if (!r.ok) return sendDbError(res, r);
+      const filas = Array.isArray(r.data) ? r.data : [];
+      return res.json({ gastos: filas.slice(0, limit), hayMas: filas.length > limit });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Logística report (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by the database:
   // logistics_report). Content decided by the Logistics Manager; money only for owners.
   router.get('/:businessId/logistica/reporte', async (req, res) => {
