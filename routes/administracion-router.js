@@ -163,6 +163,8 @@ function createAdministracionRouter({
   publishableKey = () => process.env.SUPABASE_PUBLISHABLE_KEY || '',
   // Only for the private evidence bucket, and only after the database said yes with the person's own login.
   serviceKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  // The store orders as the Pedidos tab gets them, so an order opens the same detail (Comercialización, 4 Nov 2026).
+  pedidosPorIds = (farmId, ids) => require('../core/services/supabase-service').getOrdersByFarm(farmId, { ids, limite: ids.length || 1 }),
 } = {}) {
   const router = express.Router();
 
@@ -593,6 +595,31 @@ function createAdministracionRouter({
       }
     });
   }
+
+  // Comercialización, Últimos pagos (General Manager, 4 Nov 2026): the payments recorded on store orders, newest first,
+  // 20 at a time (commercial_payments_page decides who is a member and hides the amounts from staff); each comes with
+  // its order as the Pedidos tab has it, so it opens the same order detail.
+  router.get('/:businessId/comercial/pagos', async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    try {
+      if (!(await tieneArea(req, 'commercial'))) return res.status(403).json({ error: 'Comercialización no es de tus áreas.' });
+      const r = await db(req, 'rpc/commercial_payments_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      const pagos = Array.isArray(r.data && r.data.pagos) ? r.data.pagos : [];
+      const ids = [...new Set(pagos.map(p => p.pedido_id).filter(Boolean))];
+      let porId = {};
+      if (ids.length) {
+        try {
+          const o = await pedidosPorIds(req.admin.farmId, ids);
+          for (const p of (o && o.pedidos) || []) porId[p.supabaseId] = p;
+        } catch (_) { porId = {}; } // without the orders the list still shows; the row just doesn't open
+      }
+      return res.json({ ...r.data, pagos: pagos.map(p => (porId[p.pedido_id] ? { ...p, pedido: porId[p.pedido_id] } : p)) });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
 
   // The Gastos tab of a process (4 Nov 2026): that area's gastos, newest first, 20 at a time (at most 50); only for
   // the people of that area (owners have every area).

@@ -549,6 +549,24 @@ describe('compras list and detail', () => {
     }
     await new Promise(res => server.close(res));
   });
+  test('Comercialización, Últimos pagos: the payments with their orders, only for the Comercial area', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'commercial' }]
+      : { pagos: [{ id: 'p1', pedido_id: 'o1', numero: 'ORD-1' }, { id: 'p2', pedido_id: 'o9', numero: 'ORD-9' }], total: 2, hay_mas: false }));
+    const pedidosPorIds = jest.fn(async () => ({ pedidos: [{ supabaseId: 'o1', id: 'ORD-1', cliente: 'Cafe Uno' }] }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl, pedidosPorIds,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/comercial/pagos?offset=20', { token: 't', method: 'GET' });
+    expect(r.body.pagos[0].pedido).toEqual({ supabaseId: 'o1', id: 'ORD-1', cliente: 'Cafe Uno' });
+    expect(r.body.pagos[1].pedido).toBeUndefined(); // not this farm's: no detail, but the row stays
+    expect(pedidosPorIds).toHaveBeenCalledWith('farm-rosal', ['o1', 'o9']);
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/commercial_payments_page'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_offset: 20, p_limit: 20 });
+    await new Promise(res => server.close(res));
+  });
   test('Comercialización: its report, customers and products, only for the Comercial area', async () => {
     const { server, fetchImpl } = await servidor(['commercial'], () => reply(200, { clientes: [], total: 0 }));
     const r = await call(server, '/api/administracion/BIZ-002/comercial/reporte?desde=2026-10&hasta=2026-10', { token: 't', method: 'GET' });

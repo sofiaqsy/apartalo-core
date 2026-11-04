@@ -742,12 +742,15 @@ function mapOrder(o, items = [], payments = []) {
 }
 
 async function getOrdersByFarm(farmId, filters = {}) {
-  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50, orden } = filters;
+  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50, orden, ids } = filters;
 
   const itemRows = await get('order_items', { farm_id: `eq.${farmId}`, select: 'order_id' });
   if (!itemRows.length) return { total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false };
 
-  const orderIds = [...new Set(itemRows.map(i => i.order_id))];
+  // ids: only these orders, if they are of this farm (Comercialización, Últimos pagos; 4 Nov 2026).
+  const pedidas = Array.isArray(ids) ? new Set(ids) : null;
+  const orderIds = [...new Set(itemRows.map(i => i.order_id))].filter(id => !pedidas || pedidas.has(id));
+  if (!orderIds.length) return { total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false };
   const idList = orderIds.join(',');
 
   const [orders, allPayments, allItems] = await Promise.all([

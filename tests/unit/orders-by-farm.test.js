@@ -13,7 +13,11 @@ beforeEach(() => {
   axios.get.mockImplementation(async url => {
     if (url.includes('/order_items?farm_id=')) return { data: [{ order_id: 'a' }, { order_id: 'b' }, { order_id: 'c' }] };
     // The database sends the orders newest first.
-    if (url.includes('/orders?')) return { data: [pedido('c', 3, 'pending'), pedido('b', 2, 'confirmed'), pedido('a', 1, 'pending')] };
+    if (url.includes('/orders?')) {
+      // Like the database: only the orders in id=in.(...).
+      const pedidas = decodeURIComponent(url).match(/id=in\.\(([^)]*)\)/)[1].split(',');
+      return { data: [pedido('c', 3, 'pending'), pedido('b', 2, 'confirmed'), pedido('a', 1, 'pending')].filter(o => pedidas.includes(o.id)) };
+    }
     return { data: [] };
   });
 });
@@ -29,4 +33,11 @@ test('orden=antiguos gives the oldest first, and pages keep that order', async (
   expect([...p1.pedidos, ...p2.pedidos].map(p => p.id)).toEqual(['ORD-a', 'ORD-b', 'ORD-c']);
   expect(p1.hayMas).toBe(true);
   expect(p2.hayMas).toBe(false);
+});
+
+test('ids: only those orders, and only if they are of this farm (Comercialización, Últimos pagos)', async () => {
+  const r = await getOrdersByFarm('farm', { ids: ['b', 'z'], limite: 2 });
+  expect(r.pedidos.map(p => p.id)).toEqual(['ORD-b']);
+  const vacio = await getOrdersByFarm('farm', { ids: ['z'] });
+  expect(vacio.pedidos).toEqual([]);
 });
