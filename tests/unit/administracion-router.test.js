@@ -571,7 +571,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['commercial'], () => reply(200, { clientes: [], total: 0 }));
     const r = await call(server, '/api/administracion/BIZ-002/comercial/reporte?desde=2026-10&hasta=2026-10', { token: 't', method: 'GET' });
     expect(r.status).toBe(200);
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/commercial_report_v2'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/commercial_report_v3'))).toBe(true);
     await call(server, '/api/administracion/BIZ-002/comercial/clientes?offset=20&q=cafe', { token: 't', method: 'GET' });
     expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/commercial_customers_page'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_offset: 20, p_limit: 20, p_buscar: 'cafe' });

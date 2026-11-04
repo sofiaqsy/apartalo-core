@@ -560,7 +560,7 @@ function createAdministracionRouter({
   // the database: production_report_v3, validated again with Production on 4 Nov 2026). Content decided by the Production Manager; costs only for owners.
   // Finca, Finanzas and Comercialización reports (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (checked by the database with
   // report_range_check). Contents decided by the Farm and Finance Managers; Finanzas only for owners.
-  for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report'], ['comercial', 'commercial_report_v2']]) {
+  for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report'], ['comercial', 'commercial_report_v3']]) {
     router.get(`/:businessId/${ruta}/reporte`, async (req, res) => {
       try {
         const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
