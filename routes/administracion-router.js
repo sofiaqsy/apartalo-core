@@ -556,9 +556,9 @@ function createAdministracionRouter({
 
   // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
   // the database: production_report_v3, validated again with Production on 4 Nov 2026). Content decided by the Production Manager; costs only for owners.
-  // Finca and Finanzas reports (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (checked by the database with
+  // Finca, Finanzas and Comercialización reports (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (checked by the database with
   // report_range_check). Contents decided by the Farm and Finance Managers; Finanzas only for owners.
-  for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report']]) {
+  for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report'], ['comercial', 'commercial_report_v2']]) {
     router.get(`/:businessId/${ruta}/reporte`, async (req, res) => {
       try {
         const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
@@ -569,6 +569,25 @@ function createAdministracionRouter({
         const r = await db(req, `rpc/${fn}`, { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
         if (!r.ok) return sendDbError(res, r);
         return res.json({ reporte: r.data });
+      } catch (err) {
+        return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+      }
+    });
+  }
+
+  // Comercialización (4 Nov 2026): its customers (from its orders) and its best-selling products this year, 20 at a time;
+  // only for the Comercial area (owners have every area); money only for owners, decided by the database.
+  for (const [ruta, fn, conBusqueda] of [['clientes', 'commercial_customers_page', true], ['productos', 'commercial_products_page_v2', false]]) {
+    router.get(`/:businessId/comercial/${ruta}`, async (req, res) => {
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      try {
+        if (!(await tieneArea(req, 'commercial'))) return res.status(403).json({ error: 'Comercialización no es de tus áreas.' });
+        const body = { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit };
+        if (conBusqueda) body.p_buscar = typeof req.query.q === 'string' ? req.query.q.slice(0, 60) : null;
+        const r = await db(req, `rpc/${fn}`, { method: 'POST', body });
+        if (!r.ok) return sendDbError(res, r);
+        return res.json(r.data || {});
       } catch (err) {
         return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
       }

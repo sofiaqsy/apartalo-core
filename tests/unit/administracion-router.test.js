@@ -549,6 +549,22 @@ describe('compras list and detail', () => {
     }
     await new Promise(res => server.close(res));
   });
+  test('Comercialización: its report, customers and products, only for the Comercial area', async () => {
+    const { server, fetchImpl } = await servidor(['commercial'], () => reply(200, { clientes: [], total: 0 }));
+    const r = await call(server, '/api/administracion/BIZ-002/comercial/reporte?desde=2026-10&hasta=2026-10', { token: 't', method: 'GET' });
+    expect(r.status).toBe(200);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/commercial_report_v2'))).toBe(true);
+    await call(server, '/api/administracion/BIZ-002/comercial/clientes?offset=20&q=cafe', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/commercial_customers_page'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_offset: 20, p_limit: 20, p_buscar: 'cafe' });
+    await call(server, '/api/administracion/BIZ-002/comercial/productos', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/commercial_products_page_v2'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 20 });
+    await new Promise(res => server.close(res));
+    const otro = await servidor(['sourcing'], () => reply(200, {}));
+    expect((await call(otro.server, '/api/administracion/BIZ-002/comercial/clientes', { token: 't', method: 'GET' })).status).toBe(403);
+    await new Promise(res => otro.server.close(res));
+  });
   test('the Gastos tab of a process: 20 at a time, only for that area', async () => {
     const filas = Array.from({ length: 21 }, (_, i) => ({ id: `EX-${i}` }));
     const { server, fetchImpl } = await servidor(['farm'], () => reply(200, filas));
