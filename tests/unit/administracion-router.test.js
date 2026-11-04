@@ -505,7 +505,11 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote, p_counted_kg: 0, p_reason: 'Conteo', p_client_ref: null });
     r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}`, { token: 't', method: 'GET' });
     expect(r.body).toEqual({ lote: { lote: 'L-7' } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/green_lot_detail_v4'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/green_lot_detail_v3'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote });
+    r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/cuenta?offset=20&limit=500`, { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ cuenta: { lote: 'L-7' } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/green_lot_statement_page'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote, p_offset: 20, p_limit: 50 }); // never more than 50
     r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/compras`, { token: 't', method: 'GET' });
     expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/green_lot_compras_v2'))).toBe(true);
     const n = fetchImpl.mock.calls.length;

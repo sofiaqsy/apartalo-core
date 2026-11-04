@@ -592,14 +592,30 @@ function createAdministracionRouter({
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const numero = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
   const ref = v => (typeof v === 'string' ? v.slice(0, 80) : null);
-  // The detail of a green lot (4 Nov 2026): data, product, its compras with their estimated green, and the lot as an account statement (green_lot_detail_v4).
+  // The detail of a green lot (4 Nov 2026): data, product, its compras with their estimated green (green_lot_detail_v3); its account statement comes a page at a time from /cuenta.
   router.get('/:businessId/produccion/lotes-verdes/:id', async (req, res) => {
     if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
     try {
       if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
-      const r = await db(req, 'rpc/green_lot_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      const r = await db(req, 'rpc/green_lot_detail_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ lote: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  // The account statement of a green lot, 20 lines at a time (General Manager, 4 Nov 2026: "don't forget the pagination").
+  router.get('/:businessId/produccion/lotes-verdes/:id/cuenta', async (req, res) => {
+    if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    try {
+      if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
+      const r = await db(req, 'rpc/green_lot_statement_page', {
+        method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id, p_offset: offset, p_limit: limit },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ cuenta: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
