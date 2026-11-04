@@ -417,7 +417,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary_v4' }, // by product (v3) and every open green lot with its product (4 Nov 2026)
+    { key: 'produccion', area: 'production', fn: 'production_summary_v5' }, // by product, every open green lot with its product, and the Blend compras por pilar (4 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
@@ -592,12 +592,12 @@ function createAdministracionRouter({
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const numero = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
   const ref = v => (typeof v === 'string' ? v.slice(0, 80) : null);
-  // The detail of a green lot (4 Nov 2026): data, product, additions and closing, last roasts (green_lot_detail).
+  // The detail of a green lot (4 Nov 2026): data, product, compras por pilar, additions and closing, last roasts (green_lot_detail_v2).
   router.get('/:businessId/produccion/lotes-verdes/:id', async (req, res) => {
     if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
     try {
       if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
-      const r = await db(req, 'rpc/green_lot_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      const r = await db(req, 'rpc/green_lot_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ lote: r.data });
     } catch (err) {
@@ -607,7 +607,7 @@ function createAdministracionRouter({
   router.get('/:businessId/produccion/lotes-verdes/:id/compras', async (req, res) => {
     if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
     try {
-      const r = await db(req, 'rpc/green_lot_compras', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      const r = await db(req, 'rpc/green_lot_compras_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ compras: Array.isArray(r.data) ? r.data : [] });
     } catch (err) {

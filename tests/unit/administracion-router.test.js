@@ -365,7 +365,7 @@ describe('procesos', () => {
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 },
       finanzas: { compras: { n: 1 } } });
     // Producción counts roasted coffee by product, in the order of the Productos tab (4 Nov 2026).
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v4'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v5'))).toBe(true);
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
@@ -505,9 +505,9 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote, p_counted_kg: 0, p_reason: 'Conteo', p_client_ref: null });
     r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}`, { token: 't', method: 'GET' });
     expect(r.body).toEqual({ lote: { lote: 'L-7' } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/green_lot_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/green_lot_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote });
     r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/compras`, { token: 't', method: 'GET' });
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/green_lot_compras'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/green_lot_compras_v2'))).toBe(true);
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/produccion/lotes-verdes/L-7/cerrar', { token: 't', method: 'POST', body: {} })).status).toBe(400);
     expect(fetchImpl.mock.calls.length).toBe(n);
