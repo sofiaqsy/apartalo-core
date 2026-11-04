@@ -538,6 +538,19 @@ describe('compras list and detail', () => {
     expect(otro.fetchImpl.mock.calls.some(c => c[0].includes('roast_lot_detail'))).toBe(false);
     await new Promise(res => otro.server.close(res));
   });
+  test('the Logística report asks the database for a range of months; a bad month is refused before it', async () => {
+    const { server, fetchImpl } = await servidor(['fulfillment'], () => reply(200, { meses: 2, franja: { creados: 3 } }));
+    const r = await call(server, '/api/administracion/BIZ-002/logistica/reporte?desde=2026-05&hasta=2026-06', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ reporte: { meses: 2, franja: { creados: 3 } } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/logistics_report'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-05-01', p_to: '2026-06-30' });
+    const n = fetchImpl.mock.calls.length;
+    for (const q of ['desde=2026-13&hasta=2026-01', 'hasta=2026-05', '']) {
+      expect((await call(server, `/api/administracion/BIZ-002/logistica/reporte?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
+    }
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
   test('the Producción report asks the database for a range of months; a bad month is refused before it', async () => {
     const { server, fetchImpl } = await servidor(['production'], () => reply(200, { meses: 3, franja: { tuestes: 2 } }));
     const r = await call(server, '/api/administracion/BIZ-002/produccion/reporte?desde=2026-05&hasta=2026-07', { token: 't', method: 'GET' });

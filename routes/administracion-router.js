@@ -556,6 +556,23 @@ function createAdministracionRouter({
 
   // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
   // the database: production_report_v3, validated again with Production on 4 Nov 2026). Content decided by the Production Manager; costs only for owners.
+  // Logística report (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by the database:
+  // logistics_report). Content decided by the Logistics Manager; money only for owners.
+  router.get('/:businessId/logistica/reporte', async (req, res) => {
+    try {
+      const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+      const { desde, hasta } = req.query;
+      if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
+      const [ha, hm] = hasta.split('-').map(Number);
+      const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10); // last day of the Hasta month
+      const r = await db(req, 'rpc/logistics_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ reporte: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   router.get('/:businessId/produccion/reporte', async (req, res) => {
     try {
       const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);

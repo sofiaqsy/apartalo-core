@@ -294,12 +294,13 @@ router.put('/conversaciones/:businessId/:conversacionId', async (req, res) => {
 router.get('/pedidos/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const { estado, vista, cliente, pagina = 1, limite = 50 } = req.query;
+    const { estado, vista, cliente, pagina = 1, limite = 50, orden } = req.query;
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     if (negocio.plataformaExterna && negocio.farmId) {
-      const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, cliente, pagina, limite });
+      // orden=antiguos: the oldest first (Logística, Por despachar; 4 Nov 2026). Without it, the newest first as always.
+      const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, cliente, pagina, limite, orden });
       return res.json(result);
     }
 

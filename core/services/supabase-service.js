@@ -742,7 +742,7 @@ function mapOrder(o, items = [], payments = []) {
 }
 
 async function getOrdersByFarm(farmId, filters = {}) {
-  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50 } = filters;
+  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50, orden } = filters;
 
   const itemRows = await get('order_items', { farm_id: `eq.${farmId}`, select: 'order_id' });
   if (!itemRows.length) return { total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false };
@@ -780,6 +780,7 @@ async function getOrdersByFarm(farmId, filters = {}) {
   if (cliente)    pedidos = pedidos.filter(p => p.cliente.toLowerCase().includes(cliente.toLowerCase()));
   if (fecha)      pedidos = pedidos.filter(p => p.fecha === fecha);
 
+  if (orden === 'antiguos') pedidos.reverse(); // the oldest first (orders come newest first)
   const total = pedidos.length;
   const paginaNum = parseInt(pagina) || 1;
   const limiteNum = parseInt(limite) || 50;
