@@ -467,6 +467,20 @@ describe('compras list and detail', () => {
     expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
+  test('the Compras report asks the database for a month or a year; a bad month is refused before it', async () => {
+    const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { tipo: 'mensual', franja: { kg: 40 } }));
+    const r = await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026&mes=3', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ reporte: { tipo: 'mensual', franja: { kg: 40 } } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchasing_report'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_year: 2026, p_month: 3 });
+    await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('purchasing_report')).pop()[1].body).p_month).toBeNull();
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026&mes=13', { token: 't', method: 'GET' })).status).toBe(400);
+    expect((await call(server, '/api/administracion/BIZ-002/compras/reporte', { token: 't', method: 'GET' })).status).toBe(400);
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
   test('Finanzas lists a page of one tab, with hayMas; an unknown tab is refused before the database', async () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
