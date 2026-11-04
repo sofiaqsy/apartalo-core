@@ -592,6 +592,18 @@ function createAdministracionRouter({
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const numero = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
   const ref = v => (typeof v === 'string' ? v.slice(0, 80) : null);
+  // The detail of a green lot (4 Nov 2026): data, product, additions and closing, last roasts (green_lot_detail).
+  router.get('/:businessId/produccion/lotes-verdes/:id', async (req, res) => {
+    if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
+    try {
+      if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
+      const r = await db(req, 'rpc/green_lot_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ lote: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
   router.get('/:businessId/produccion/lotes-verdes/:id/compras', async (req, res) => {
     if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
     try {
