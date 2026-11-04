@@ -417,7 +417,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary' },
+    { key: 'produccion', area: 'production', fn: 'production_summary_v2' }, // v2: roasted coffee by product, as the product screen (4 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
@@ -555,7 +555,7 @@ function createAdministracionRouter({
   });
 
   // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
-  // the database: production_report). Content decided by the Production Manager; costs only for owners.
+  // the database: production_report_v2, roasted coffee by product as the product screen). Content decided by the Production Manager; costs only for owners.
   router.get('/:businessId/produccion/reporte', async (req, res) => {
     try {
       const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
@@ -563,7 +563,7 @@ function createAdministracionRouter({
       if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
       const [ha, hm] = hasta.split('-').map(Number);
       const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10); // last day of the Hasta month
-      const r = await db(req, 'rpc/production_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+      const r = await db(req, 'rpc/production_report_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
     } catch (err) {

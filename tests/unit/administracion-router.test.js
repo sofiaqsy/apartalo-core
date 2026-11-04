@@ -364,6 +364,8 @@ describe('procesos', () => {
     expect(r.body).toEqual({ finca: { parcelas: { n: 1 } }, compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 },
       finanzas: { compras: { n: 1 } } });
+    // Producción counts roasted coffee by product, as the product screen (4 Nov 2026).
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v2'))).toBe(true);
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
@@ -490,7 +492,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['production'], () => reply(200, { meses: 3, franja: { tuestes: 2 } }));
     const r = await call(server, '/api/administracion/BIZ-002/produccion/reporte?desde=2026-05&hasta=2026-07', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ reporte: { meses: 3, franja: { tuestes: 2 } } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('production_report'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/production_report_v2'))[1].body)) // v2: roasted coffee by product (4 Nov 2026)
       .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-05-01', p_to: '2026-07-31' });
     const n = fetchImpl.mock.calls.length;
     for (const q of ['desde=2026-00&hasta=2026-01', 'desde=2026-05', '']) {
