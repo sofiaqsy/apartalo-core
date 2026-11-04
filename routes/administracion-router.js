@@ -84,13 +84,14 @@ const FORMS = Object.freeze({
     fn: 'admin_archive_evidence',
     fields: { evidenciaId: 'p_evidence_id' },
   },
-  // Registrar compra (3 Nov 2026): v3 also links the product the coffee is for (checked to be this farm's).
+  // Registrar compra (3 Nov 2026): links the product the coffee is for; v4 (fincas 0026) never uses advances by itself.
   entrega: {
-    fn: 'admin_record_delivery_v3',
+    fn: 'admin_record_delivery_v4',
     fields: { agricultorId: 'p_farmer_id', estado: 'p_coffee_state', kg: 'p_kg', compradorId: 'p_buyer_id', precioKg: 'p_price_per_kg', humedad: 'p_moisture_pct', rendimiento: 'p_yield_factor', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date', productoId: 'p_product_id' },
   },
+  // Poner precio: v3 (fincas 0026) never uses advances by itself.
   precio: {
-    fn: 'admin_set_price_v2',
+    fn: 'admin_set_price_v3',
     fields: { entregaId: 'p_delivery_id', precioKg: 'p_price_per_kg', metodoPago: 'p_pay_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
   // Solicitar pago (3 Nov 2026): on demand, with the amount and how (transfer, or the farmer's own advance).
@@ -102,6 +103,11 @@ const FORMS = Object.freeze({
   pagoConAdelanto: {
     fn: 'admin_pay_purchase_with_advance',
     fields: { solicitudId: 'p_request_id' },
+  },
+  // Marcar como pagado desde adelantos (3 Nov 2026): the farmer's own open advances, owners only (decided by the database).
+  pagoDesdeAdelantos: {
+    fn: 'admin_pay_purchase_from_advances',
+    fields: { compraId: 'p_purchase_id' },
   },
   pago: {
     fn: 'admin_pay_purchase_v2',

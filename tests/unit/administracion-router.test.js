@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -438,8 +438,8 @@ describe('providers of a process', () => {
 });
 
 describe('Registrar compra', () => {
-  test('sends the linked product to admin_record_delivery_v3', () => {
-    expect(FORMS.entrega.fn).toBe('admin_record_delivery_v3');
+  test('sends the linked product to admin_record_delivery_v4', () => {
+    expect(FORMS.entrega.fn).toBe('admin_record_delivery_v4');
     expect(toParams(FORMS.entrega, { agricultorId: 'P-1', estado: 'parchment', kg: 40, productoId: 'prod-blend' }, 'f'))
       .toEqual({ p_business_id: 'f', p_farmer_id: 'P-1', p_coffee_state: 'parchment', p_kg: 40, p_product_id: 'prod-blend' });
   });
@@ -489,6 +489,12 @@ describe('Solicitar pago', () => {
     expect(toParams(FORMS.solicitarPago, { compraId: 'PU-0001', monto: 300, metodo: 'advance', adelantoId: 'ADV-001', hack: 1 }, 'f'))
       .toEqual({ p_business_id: 'f', p_purchase_id: 'PU-0001', p_amount: 300, p_method: 'advance', p_advance_id: 'ADV-001' });
     expect(toParams(FORMS.pagoConAdelanto, { solicitudId: 7 }, 'f')).toEqual({ p_business_id: 'f', p_request_id: 7 });
+  });
+
+  test('prices never use advances by themselves; marking from advances is its own form', () => {
+    expect(FORMS.precio.fn).toBe('admin_set_price_v3');
+    expect(FORMS.pagoDesdeAdelantos.fn).toBe('admin_pay_purchase_from_advances');
+    expect(toParams(FORMS.pagoDesdeAdelantos, { compraId: 'PU-0001', monto: 5 }, 'f')).toEqual({ p_business_id: 'f', p_purchase_id: 'PU-0001' });
   });
 });
 
