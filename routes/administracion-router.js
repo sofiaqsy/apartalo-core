@@ -573,6 +573,26 @@ function createAdministracionRouter({
 
   // Detail of a roasted lot (General Manager, 4 Nov 2026): what went in and out, the loss, the green lot, the roast data
   // that was recorded, notes, photos and kg by product (roast_lot_detail). Only for the Producción area.
+  // Estado de lote of a roasted lot for one product, 20 lines at a time (General Manager, 4 Nov 2026).
+  router.get('/:businessId/produccion/tostados/:eventId/cuenta', async (req, res) => {
+    const evento = String(req.params.eventId);
+    const producto = String(req.query.producto || '');
+    const UUIDS = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUIDS.test(evento) || !UUIDS.test(producto)) return res.status(400).json({ error: 'Lote de tostado no válido.' });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    try {
+      if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
+      const r = await db(req, 'rpc/roast_lot_statement_page', {
+        method: 'POST',
+        body: { p_business_id: req.admin.farmId, p_event_id: evento, p_product_id: producto, p_offset: offset, p_limit: limit },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ cuenta: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
   router.get('/:businessId/produccion/tostados/:eventId', async (req, res) => {
     try {
       const eventId = String(req.params.eventId);

@@ -526,6 +526,12 @@ describe('compras list and detail', () => {
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/produccion/tostados/abc', { token: 't', method: 'GET' })).status).toBe(400);
     expect(fetchImpl.mock.calls.length).toBe(n);
+    const producto = '64203b65-4f36-4131-9daf-8c18d3bee8b2';
+    const c = await call(server, `/api/administracion/BIZ-002/produccion/tostados/${id}/cuenta?producto=${producto}&offset=20`, { token: 't', method: 'GET' });
+    expect(c.body).toEqual({ cuenta: { lote: 'L-7', kg_verde: 100 } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].endsWith('rpc/roast_lot_statement_page'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_event_id: id, p_product_id: producto, p_offset: 20, p_limit: 20 });
+    expect((await call(server, `/api/administracion/BIZ-002/produccion/tostados/${id}/cuenta?producto=x`, { token: 't', method: 'GET' })).status).toBe(400);
     await new Promise(res => server.close(res));
     const otro = await servidor(['sourcing'], () => reply(200, {}));
     expect((await call(otro.server, `/api/administracion/BIZ-002/produccion/tostados/${id}`, { token: 't', method: 'GET' })).status).toBe(403);
