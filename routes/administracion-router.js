@@ -526,15 +526,27 @@ function createAdministracionRouter({
   });
 
   // Generar reporte: everything for the PDF, read only when asked (money only for owners, decided by the database).
-  // Compras report (4 Nov 2026): a month (?anio=2026&mes=11) or a whole year (?anio=2026). Content decided by the
-  // Sourcing Manager; money only for owners, decided by the database.
+  // Compras report (4 Nov 2026): a range of months, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by the
+  // database: purchasing_report_v2). The old ?anio=2026&mes=11 still works (one month, or the whole year without mes).
+  // Content decided by the Sourcing Manager; money only for owners, decided by the database.
   router.get('/:businessId/compras/reporte', async (req, res) => {
     try {
-      const anio = parseInt(req.query.anio, 10);
-      const mes = req.query.mes === undefined || req.query.mes === '' ? null : parseInt(req.query.mes, 10);
-      if (!Number.isInteger(anio) || anio < 2000 || anio > 2100) return res.status(400).json({ error: 'Elige un año.' });
-      if (mes !== null && (!Number.isInteger(mes) || mes < 1 || mes > 12)) return res.status(400).json({ error: 'Elige un mes del 1 al 12.' });
-      const r = await db(req, 'rpc/purchasing_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_year: anio, p_month: mes } });
+      const mesValido = v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+      let desde = req.query.desde;
+      let hasta = req.query.hasta;
+      if (desde === undefined && hasta === undefined) {
+        const anio = parseInt(req.query.anio, 10);
+        const mes = req.query.mes === undefined || req.query.mes === '' ? null : parseInt(req.query.mes, 10);
+        if (!Number.isInteger(anio) || anio < 2000 || anio > 2100) return res.status(400).json({ error: 'Elige un año.' });
+        if (mes !== null && (!Number.isInteger(mes) || mes < 1 || mes > 12)) return res.status(400).json({ error: 'Elige un mes del 1 al 12.' });
+        const mm = String(mes || 1).padStart(2, '0');
+        desde = `${anio}-${mm}`;
+        hasta = mes === null ? `${anio}-12` : `${anio}-${mm}`;
+      }
+      if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
+      const [ha, hm] = hasta.split('-').map(Number);
+      const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10); // last day of the Hasta month
+      const r = await db(req, 'rpc/purchasing_report_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
     } catch (err) {

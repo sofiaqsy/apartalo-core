@@ -467,17 +467,22 @@ describe('compras list and detail', () => {
     expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
-  test('the Compras report asks the database for a month or a year; a bad month is refused before it', async () => {
-    const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { tipo: 'mensual', franja: { kg: 40 } }));
-    const r = await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026&mes=3', { token: 't', method: 'GET' });
-    expect(r.body).toEqual({ reporte: { tipo: 'mensual', franja: { kg: 40 } } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchasing_report'))[1].body))
-      .toEqual({ p_business_id: 'farm-rosal', p_year: 2026, p_month: 3 });
-    await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026', { token: 't', method: 'GET' });
-    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('purchasing_report')).pop()[1].body).p_month).toBeNull();
+  test('the Compras report asks the database for a range of months; a bad month is refused before it', async () => {
+    const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { meses: 5, franja: { kg: 60 } }));
+    const ultimo = () => JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('purchasing_report_v2')).pop()[1].body);
+    const r = await call(server, '/api/administracion/BIZ-002/compras/reporte?desde=2026-05&hasta=2026-09', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ reporte: { meses: 5, franja: { kg: 60 } } });
+    expect(ultimo()).toEqual({ p_business_id: 'farm-rosal', p_from: '2026-05-01', p_to: '2026-09-30' });
+    await call(server, '/api/administracion/BIZ-002/compras/reporte?desde=2026-02&hasta=2026-02', { token: 't', method: 'GET' });
+    expect(ultimo().p_to).toBe('2026-02-28');
+    await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026', { token: 't', method: 'GET' }); // the old form still works
+    expect(ultimo()).toMatchObject({ p_from: '2026-01-01', p_to: '2026-12-31' });
+    await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026&mes=3', { token: 't', method: 'GET' });
+    expect(ultimo()).toMatchObject({ p_from: '2026-03-01', p_to: '2026-03-31' });
     const n = fetchImpl.mock.calls.length;
-    expect((await call(server, '/api/administracion/BIZ-002/compras/reporte?anio=2026&mes=13', { token: 't', method: 'GET' })).status).toBe(400);
-    expect((await call(server, '/api/administracion/BIZ-002/compras/reporte', { token: 't', method: 'GET' })).status).toBe(400);
+    for (const q of ['desde=2026-13&hasta=2026-12', 'desde=2026-05', 'anio=2026&mes=13', '']) {
+      expect((await call(server, `/api/administracion/BIZ-002/compras/reporte?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
+    }
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });
