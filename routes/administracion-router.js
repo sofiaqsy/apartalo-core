@@ -417,7 +417,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary_v3' }, // roasted coffee by product, in the order of the Productos tab (4 Nov 2026)
+    { key: 'produccion', area: 'production', fn: 'production_summary_v4' }, // by product (v3) and every open green lot with its product (4 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
@@ -581,6 +581,59 @@ function createAdministracionRouter({
       const r = await db(req, 'rpc/roast_lot_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_event_id: eventId } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ tostado: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Green lots (General Manager, 4 Nov 2026, "Yes, as recommended" after the meeting on green lots). Owners only, decided
+  // by the database: the compras that can join the Blend lot, Agregar café al lote (milled coffee with its compras,
+  // parchment in, green out, Quality's approval and cost) and Cerrar lote (only after a count of 0 kg).
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const numero = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  const ref = v => (typeof v === 'string' ? v.slice(0, 80) : null);
+  router.get('/:businessId/produccion/lotes-verdes/:id/compras', async (req, res) => {
+    if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
+    try {
+      const r = await db(req, 'rpc/green_lot_compras', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ compras: Array.isArray(r.data) ? r.data : [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  router.post('/:businessId/produccion/lotes-verdes/:id/agregar', async (req, res) => {
+    if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
+    const b = req.body || {};
+    const compras = Array.isArray(b.compras) ? b.compras.filter(c => typeof c === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(c)).slice(0, 100) : [];
+    try {
+      const r = await db(req, 'rpc/add_green_kg', {
+        method: 'POST',
+        body: {
+          p_business_id: req.admin.farmId, p_green_lot_id: req.params.id, p_green_kg: numero(b.kgVerde), p_parchment_kg: numero(b.kgPergamino),
+          p_compras: compras, p_quality_ok: b.calidadAprobo === true, p_cost_total: numero(b.costo),
+          p_note: typeof b.nota === 'string' ? b.nota.slice(0, 300) : null, p_client_ref: ref(b.clientRef),
+        },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true, resultado: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  router.post('/:businessId/produccion/lotes-verdes/:id/cerrar', async (req, res) => {
+    if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
+    const b = req.body || {};
+    try {
+      const r = await db(req, 'rpc/close_green_lot', {
+        method: 'POST',
+        body: {
+          p_business_id: req.admin.farmId, p_green_lot_id: req.params.id, p_counted_kg: numero(b.kgContados),
+          p_reason: typeof b.motivo === 'string' ? b.motivo.slice(0, 300) : null, p_client_ref: ref(b.clientRef),
+        },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true, resultado: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }

@@ -365,7 +365,7 @@ describe('procesos', () => {
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 },
       finanzas: { compras: { n: 1 } } });
     // Producción counts roasted coffee by product, in the order of the Productos tab (4 Nov 2026).
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v3'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v4'))).toBe(true);
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
@@ -485,6 +485,28 @@ describe('compras list and detail', () => {
     for (const q of ['desde=2026-13&hasta=2026-12', 'desde=2026-05', 'anio=2026&mes=13', '']) {
       expect((await call(server, `/api/administracion/BIZ-002/compras/reporte?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
     }
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
+  test('green lots: Agregar café al lote and Cerrar lote send the person\'s data to the database, which decides', async () => {
+    const lote = '11111111-2222-3333-4444-555555555555';
+    const { server, fetchImpl } = await servidor(['production'], () => reply(200, { lote: 'L-7' }));
+    let r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/agregar`, {
+      token: 't', method: 'POST', body: { kgVerde: '240', kgPergamino: 300, compras: ['DL-0001', 'x y', 5], calidadAprobo: true, costo: 2400, clientRef: 'c1' },
+    });
+    expect(r.body).toEqual({ ok: true, resultado: { lote: 'L-7' } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/add_green_kg'))[1].body)).toEqual({
+      p_business_id: 'farm-rosal', p_green_lot_id: lote, p_green_kg: 240, p_parchment_kg: 300, p_compras: ['DL-0001'],
+      p_quality_ok: true, p_cost_total: 2400, p_note: null, p_client_ref: 'c1',
+    });
+    r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/cerrar`, { token: 't', method: 'POST', body: { kgContados: 0, motivo: 'Conteo' } });
+    expect(r.body.ok).toBe(true);
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/close_green_lot'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_green_lot_id: lote, p_counted_kg: 0, p_reason: 'Conteo', p_client_ref: null });
+    r = await call(server, `/api/administracion/BIZ-002/produccion/lotes-verdes/${lote}/compras`, { token: 't', method: 'GET' });
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/green_lot_compras'))).toBe(true);
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/produccion/lotes-verdes/L-7/cerrar', { token: 't', method: 'POST', body: {} })).status).toBe(400);
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });
