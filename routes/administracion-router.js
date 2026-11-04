@@ -463,6 +463,24 @@ function createAdministracionRouter({
     }
   });
 
+  // Finanzas lists (3 Nov 2026): compras, gastos or adelantos; what waits (Pendiente or Urgente) and the last 30 days
+  // of what was paid or decided, a page at a time (limit at most 50). Owners only, decided by the database.
+  router.get('/:businessId/finanzas/lista', async (req, res) => {
+    try {
+      const tipo = String(req.query.tipo || '');
+      if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const r = await db(req, 'rpc/finance_list', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      const total = (r.data && r.data.total) || 0;
+      const filas = (r.data && r.data.filas) || [];
+      return res.json({ filas, total, hayMas: offset + filas.length < total });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Compras → Adelantos (3 Nov 2026): the requests waiting for Finanzas (first page only) and the advances, newest
   // first, a page at a time (limit at most 50), with the person's name. Only for the Compras area.
   router.get('/:businessId/adelantos', async (req, res) => {

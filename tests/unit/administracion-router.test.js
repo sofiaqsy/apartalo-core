@@ -467,6 +467,17 @@ describe('compras list and detail', () => {
     expect(body).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
     await new Promise(res => server.close(res));
   });
+  test('Finanzas lists a page of one tab, with hayMas; an unknown tab is refused before the database', async () => {
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ filas: [{ id: 'EX-1', estado: 'Urgente' }], total: 21, hayMas: false });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_kind: 'gastos', p_offset: 20, p_limit: 50 });
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=otro', { token: 't', method: 'GET' })).status).toBe(400);
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
   test('detail of one purchase', async () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
     const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
