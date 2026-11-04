@@ -364,8 +364,8 @@ describe('procesos', () => {
     expect(r.body).toEqual({ finca: { parcelas: { n: 1 } }, compras: { mes: { recibidos: 2 } }, produccion: { verde_kg: 760 },
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 },
       finanzas: { compras: { n: 1 } } });
-    // Producción counts roasted coffee by product, as the product screen (4 Nov 2026).
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v2'))).toBe(true);
+    // Producción counts roasted coffee by product, in the order of the Productos tab (4 Nov 2026).
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v3'))).toBe(true);
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
@@ -487,6 +487,21 @@ describe('compras list and detail', () => {
     }
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
+  });
+  test('the detail of a roasted lot: only for the Producción area, and a bad id never reaches the database', async () => {
+    const id = '244280b8-69d7-4f62-a0ef-b158729e7e25';
+    const { server, fetchImpl } = await servidor(['production'], () => reply(200, { lote: 'L-7', kg_verde: 100 }));
+    const r = await call(server, `/api/administracion/BIZ-002/produccion/tostados/${id}`, { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ tostado: { lote: 'L-7', kg_verde: 100 } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/roast_lot_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_event_id: id });
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/produccion/tostados/abc', { token: 't', method: 'GET' })).status).toBe(400);
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+    const otro = await servidor(['sourcing'], () => reply(200, {}));
+    expect((await call(otro.server, `/api/administracion/BIZ-002/produccion/tostados/${id}`, { token: 't', method: 'GET' })).status).toBe(403);
+    expect(otro.fetchImpl.mock.calls.some(c => c[0].includes('roast_lot_detail'))).toBe(false);
+    await new Promise(res => otro.server.close(res));
   });
   test('the Producción report asks the database for a range of months; a bad month is refused before it', async () => {
     const { server, fetchImpl } = await servidor(['production'], () => reply(200, { meses: 3, franja: { tuestes: 2 } }));

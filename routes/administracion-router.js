@@ -417,7 +417,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary_v2' }, // v2: roasted coffee by product, as the product screen (4 Nov 2026)
+    { key: 'produccion', area: 'production', fn: 'production_summary_v3' }, // roasted coffee by product, in the order of the Productos tab (4 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
@@ -566,6 +566,21 @@ function createAdministracionRouter({
       const r = await db(req, 'rpc/production_report_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Detail of a roasted lot (General Manager, 4 Nov 2026): what went in and out, the loss, the green lot, the roast data
+  // that was recorded, notes, photos and kg by product (roast_lot_detail). Only for the Producción area.
+  router.get('/:businessId/produccion/tostados/:eventId', async (req, res) => {
+    try {
+      const eventId = String(req.params.eventId);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) return res.status(400).json({ error: 'Lote de tostado no válido.' });
+      if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
+      const r = await db(req, 'rpc/roast_lot_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_event_id: eventId } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ tostado: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
