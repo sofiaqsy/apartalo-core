@@ -206,8 +206,9 @@ router.get('/:businessId/:clienteId/pedidos', async (req, res) => {
 
 // ── GET /:businessId/:clienteId/reporte?desde=2026-05&hasta=2026-10 — the customer's report ─────────────────────
 // The same form as Administración's reports (Mensual or Anual, at most 12 months; General Manager, 5 Nov 2026): every
-// order registered in the period, cancelled ones too, with its status, whether it is paid, partly paid or not, the day
-// it was registered and the day it was completed, and each payment with its day, amount and BCP operation number.
+// order registered in the period with its products and quantities, whether it is paid, partly paid or not, the day it
+// was registered and the day it was completed, and each payment with its day, amount and BCP operation number.
+// Cancelled orders are not in the report (General Manager, 5 Nov 2026: "don't print cancelled").
 
 const diaLima = iso => (iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Lima' }) : null);
 
@@ -221,8 +222,14 @@ function lineaReporte(p) {
     return { fecha: diaLima(pg.fecha), monto: Number(pg.monto) || 0, operacion: ops.length ? ops.join(', ') : null };
   });
   const pagado = Math.round(pagos.reduce((s, x) => s + x.monto, 0) * 100) / 100;
+  const molienda = { whole: 'grano', ground: 'molido' };
   return {
     pedido: p.id,
+    // What was ordered, in place of the order number in the PDF (General Manager, 5 Nov 2026).
+    productos: (p.productosDetalle || []).map(i => ({
+      nombre: i.nombre || '', cantidad: Number(i.cantidad) || 0,
+      molienda: i.grind && !/\(/.test(i.nombre || '') ? (molienda[i.grind] || i.grind) : null,
+    })),
     registrado: diaLima(p.tracking && p.tracking.creadoEn),
     estado: p.estado,
     pago: pagado >= total && total > 0 ? 'Pagado' : (pagado > 0 ? 'Parcial' : 'Sin pagar'),
@@ -249,16 +256,13 @@ router.get('/:businessId/:clienteId/reporte', async (req, res) => {
     const r = await supabaseService.getOrdersByFarm(c.negocio.farmId, {
       comprador: { id: c.profile.id, telefono: c.profile.phone }, limite: 100000, orden: 'antiguos',
     });
-    const pedidos = (r.pedidos || []).map(lineaReporte).filter(p => p.registrado && p.registrado >= inicio && p.registrado <= fin);
-    const vigentes = pedidos.filter(p => p.estado !== 'CANCELADO');
+    const pedidos = (r.pedidos || []).map(lineaReporte)
+      .filter(p => p.estado !== 'CANCELADO' && p.registrado && p.registrado >= inicio && p.registrado <= fin);
     const suma = (xs, k) => Math.round(xs.reduce((s, x) => s + x[k], 0) * 100) / 100;
     res.json({ reporte: {
       cliente: c.profile.business_name || c.profile.full_name || c.profile.phone || 'Cliente',
       desde: inicio, hasta: fin, meses, anual: dm === 1 && hm === 12 && da === ha, generado: new Date().toISOString(),
-      franja: {
-        pedidos: pedidos.length, cancelados: pedidos.length - vigentes.length,
-        total: suma(vigentes, 'total'), pagado: suma(vigentes, 'pagado'), debe: suma(vigentes, 'debe'),
-      },
+      franja: { pedidos: pedidos.length, total: suma(pedidos, 'total'), pagado: suma(pedidos, 'pagado'), debe: suma(pedidos, 'debe') },
       pedidos,
     } });
   } catch (error) {

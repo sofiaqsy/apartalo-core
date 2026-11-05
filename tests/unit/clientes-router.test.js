@@ -25,7 +25,8 @@ const PEDIDOS = [
     { fechaCompletado: '2026-10-02T17:00:00Z', evidencias: [{ paymentId: 'p1', verificacion: { operacionBCP: '06090112' } }] }),
   pedido(2, '2026-10-12T10:00:00-05:00', 'COMPLETADO', 4800,
     [{ id: 'p2', monto: 2400, fecha: '2026-10-13T01:40:00Z' }, { id: 'p3', monto: 2400, fecha: '2026-11-04T03:32:00Z' }],
-    { fechaCompletado: '2026-11-04T20:00:00Z', evidencias: [{ paymentId: 'p3', verificacion: { operacionBCP: '7396343' } }, { paymentId: 'p2', verificacion: null }] }),
+    { fechaCompletado: '2026-11-04T20:00:00Z', evidencias: [{ paymentId: 'p3', verificacion: { operacionBCP: '7396343' } }, { paymentId: 'p2', verificacion: null }],
+      productosDetalle: [{ nombre: 'Café finca Rosal 1Kg (grano)', cantidad: 120 }, { nombre: 'Blend – 1kg', cantidad: 10, grind: 'ground' }] }),
   pedido(3, '2026-10-20T09:00:00-05:00', 'CONFIRMADO', 500, [{ id: 'p4', monto: 200, fecha: '2026-10-21T15:00:00Z' }]),
   pedido(4, '2026-10-25T09:00:00-05:00', 'CANCELADO', 300),
   pedido(5, '2026-11-02T09:00:00-05:00', 'PENDIENTE', 100),
@@ -53,21 +54,21 @@ describe('client orders and report', () => {
     expect((await get(server, '/api/clientes/BIZ-002/no-uuid/pedidos')).status).toBe(400);
   });
 
-  test('the report: orders registered in the months (Lima time), cancelled marked, paid or partly, payment days and operation numbers', async () => {
+  test('the report: orders registered in the months (Lima time) with their products, no cancelled ones, paid or partly, payment days and operation numbers', async () => {
     const r = await get(server, `/api/clientes/BIZ-002/${ID}/reporte?desde=2026-10&hasta=2026-10`);
     expect(r.status).toBe(200);
     const rep = r.body.reporte;
     expect(rep).toMatchObject({ cliente: 'Café Cirilo', desde: '2026-10-01', hasta: '2026-10-31', meses: 1, anual: false });
     // ORD-1 was registered on 30 Sep in Lima (its UTC day is 1 Oct): not in October. ORD-5 is November.
-    expect(rep.pedidos.map(p => p.pedido)).toEqual(['ORD-2', 'ORD-3', 'ORD-4']);
+    // ORD-4 is cancelled: not in the report (5 Nov 2026).
+    expect(rep.pedidos.map(p => p.pedido)).toEqual(['ORD-2', 'ORD-3']);
     expect(rep.pedidos[0]).toMatchObject({
+      productos: [{ nombre: 'Café finca Rosal 1Kg (grano)', cantidad: 120, molienda: null }, { nombre: 'Blend – 1kg', cantidad: 10, molienda: 'molido' }],
       registrado: '2026-10-12', estado: 'COMPLETADO', pago: 'Pagado', total: 4800, pagado: 4800, debe: 0, completado: '2026-11-04',
       pagos: [{ fecha: '2026-10-12', monto: 2400, operacion: null }, { fecha: '2026-11-03', monto: 2400, operacion: '7396343' }],
     });
     expect(rep.pedidos[1]).toMatchObject({ pago: 'Parcial', pagado: 200, debe: 300, completado: null });
-    expect(rep.pedidos[2]).toMatchObject({ estado: 'CANCELADO', pago: 'Sin pagar', debe: 0 });
-    // Cancelled orders are counted apart and never add to what is owed.
-    expect(rep.franja).toEqual({ pedidos: 3, cancelados: 1, total: 5300, pagado: 5000, debe: 300 });
+    expect(rep.franja).toEqual({ pedidos: 2, total: 5300, pagado: 5000, debe: 300 });
   });
 
   test('the report checks the months like Administración: at most 12, Hasta after Desde', async () => {
