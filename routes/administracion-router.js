@@ -488,14 +488,47 @@ function createAdministracionRouter({
   // newest first, 20 at a time (limit at most 50), with the balance after each movement and the opening balance on
   // the last page. Owners only, decided by the database; without ?cuenta it is the bank.
   // v2 (5 Nov 2026): the real bank lines the extension saves, matched with the app's payments, each with its status.
+  // v3 (5 Nov 2026): each bank row carries its line id (movimiento) for the detail, and ITF is apart.
   router.get('/:businessId/finanzas/movimientos', async (req, res) => {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       const cuenta = req.query.cuenta ? String(req.query.cuenta) : null;
-      const r = await db(req, 'rpc/finance_account_statement_page_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_account_statement_page_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ cuentas: [], filas: [], ...(r.data || {}), hayMas: !!(r.data && r.data.hay_mas) });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Finanzas → Movimientos → one bank line (General Manager, 5 Nov 2026): what it was matched with, or the records
+  // of the same amount that could be it (bank_movement_detail, owners only). Conciliar links one of them, or pays the
+  // gasto or compra from that bank line (bank_match_confirm). ITF is never conciliated.
+  const TIPOS_CONCILIAR = new Set(['pago', 'pedido', 'gasto', 'compra']);
+  router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
+    if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
+    try {
+      const r = await db(req, 'rpc/bank_movement_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ movimiento: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  router.post('/:businessId/finanzas/movimientos/:id/conciliar', async (req, res) => {
+    const b = req.body || {};
+    if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
+    if (!TIPOS_CONCILIAR.has(b.tipo) || typeof b.ref !== 'string' || !b.ref || b.ref.length > 80) {
+      return res.status(400).json({ error: 'Elige con qué conciliar.' });
+    }
+    try {
+      const r = await db(req, 'rpc/bank_match_confirm', {
+        method: 'POST',
+        body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id), p_kind: b.tipo, p_ref: b.ref, p_client_ref: ref(b.clientRef) },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true, resultado: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
