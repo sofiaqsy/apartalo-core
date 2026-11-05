@@ -690,6 +690,22 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20, p_buscar: null, p_estado: null });
     await new Promise(res => server.close(res));
   });
+  test('paying shows where the money goes: the compra, gasto or adelanto is asked by its kind; bad input never reaches the database', async () => {
+    const destino = { persona: 'P-1', nombre: 'Agricultor', telefono: '999', cuentas: [{ tipo: 'phone_wallet', numero: '955' }] };
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, destino));
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/destino?tipo=compra&id=PU-0001', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ destino });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('payment_target'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_kind: 'purchase', p_ref: 'PU-0001' });
+    await call(server, '/api/administracion/BIZ-002/finanzas/destino?tipo=adelanto&id=SOL-0002', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('payment_target')).pop()[1].body)).toMatchObject({ p_kind: 'advance_request' });
+    const n = fetchImpl.mock.calls.length;
+    for (const q of ['tipo=otro&id=PU-1', 'tipo=gasto&id=1;drop', 'tipo=gasto']) {
+      expect((await call(server, `/api/administracion/BIZ-002/finanzas/destino?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
+    }
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
   test('a bank line opens its detail, and Conciliar sends the chosen record; bad input never reaches the database', async () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });

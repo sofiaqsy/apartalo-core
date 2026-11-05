@@ -553,6 +553,21 @@ function createAdministracionRouter({
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
   });
+  // Where a payment goes (General Manager, 5 Nov 2026: choosing Yape or transferencia shows the phone or account): for a
+  // compra, gasto or adelanto request, the person paid, their phone and active accounts (payment_target, owners only).
+  const TIPOS_DESTINO = { compra: 'purchase', gasto: 'expense', adelanto: 'advance_request' };
+  router.get('/:businessId/finanzas/destino', async (req, res) => {
+    const kind = TIPOS_DESTINO[String(req.query.tipo || '')];
+    const ref = String(req.query.id || '');
+    if (!kind || !/^[A-Z]{2,4}-[A-Z0-9]{1,12}$/.test(ref)) return res.status(400).json({ error: 'Pago no válido.' });
+    try {
+      const r = await db(req, 'rpc/payment_target', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: kind, p_ref: ref } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ destino: r.data || { cuentas: [] } });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
   router.post('/:businessId/finanzas/pagos/:id/operacion', async (req, res) => {
     const b = req.body || {};
     if (!/^[A-Z]{2,4}-\d{1,8}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Pago no válido.' });
