@@ -651,7 +651,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
     expect(d.body).toEqual({ movimiento: { id: 7, estado: 'Falta en la app', sugerencias: [] } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v3'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v4'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
     const c = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-0003', clientRef: 'conciliar-abc12345' } });
     expect(c.status).toBe(200);
     expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v2'))[1].body))

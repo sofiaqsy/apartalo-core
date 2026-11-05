@@ -510,7 +510,7 @@ function createAdministracionRouter({
   router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
     try {
-      const r = await db(req, 'rpc/bank_movement_detail_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      const r = await db(req, 'rpc/bank_movement_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ movimiento: r.data });
     } catch (err) {
