@@ -651,7 +651,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
     expect(d.body).toEqual({ movimiento: { id: 7, estado: 'Falta en la app', sugerencias: [] } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v3'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
     const c = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-0003', clientRef: 'conciliar-abc12345' } });
     expect(c.status).toBe(200);
     expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v2'))[1].body))
@@ -659,6 +659,20 @@ describe('compras list and detail', () => {
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/abc', { token: 't', method: 'GET' })).status).toBe(400);
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'otro', ref: 'x' } })).status).toBe(400);
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
+  test('a payment opens its detail, and the operation number goes to the database; bad input is refused first', async () => {
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 'PY-0008', estado: 'No está en el banco' }));
+    const d = await call(server, '/api/administracion/BIZ-002/finanzas/pagos/PY-0008', { token: 't', method: 'GET' });
+    expect(d.body).toEqual({ pago: { id: 'PY-0008', estado: 'No está en el banco' } });
+    const o = await call(server, '/api/administracion/BIZ-002/finanzas/pagos/PY-0008/operacion', { token: 't', method: 'POST', body: { operacion: '6003252', clientRef: 'operacion-abc12345' } });
+    expect(o.status).toBe(200);
+    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('admin_set_payment_operation'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_payment_id: 'PY-0008', p_operation: '6003252', p_client_ref: 'operacion-abc12345' });
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/finanzas/pagos/x;drop', { token: 't', method: 'GET' })).status).toBe(400);
+    expect((await call(server, '/api/administracion/BIZ-002/finanzas/pagos/PY-0008/operacion', { token: 't', method: 'POST', body: { operacion: 'sin numero' } })).status).toBe(400);
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });

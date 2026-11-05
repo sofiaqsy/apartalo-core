@@ -510,9 +510,39 @@ function createAdministracionRouter({
   router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
     try {
-      const r = await db(req, 'rpc/bank_movement_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      const r = await db(req, 'rpc/bank_movement_detail_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ movimiento: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  // One app payment in Movimientos (General Manager, 5 Nov 2026): its data, status against the bank and evidence; and
+  // the bank operation number written on it, for when the bank file and the payment did not meet by themselves (the
+  // forms still never ask for it). Owners only, decided by the database.
+  router.get('/:businessId/finanzas/pagos/:id', async (req, res) => {
+    if (!/^[A-Z]{2,4}-\d{1,8}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Pago no válido.' });
+    try {
+      const r = await db(req, 'rpc/payment_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_payment_id: req.params.id } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ pago: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  router.post('/:businessId/finanzas/pagos/:id/operacion', async (req, res) => {
+    const b = req.body || {};
+    if (!/^[A-Z]{2,4}-\d{1,8}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Pago no válido.' });
+    if (typeof b.operacion !== 'string' || !/\d/.test(b.operacion) || b.operacion.length > 40) {
+      return res.status(400).json({ error: 'Escribe el número de operación del banco.' });
+    }
+    try {
+      const r = await db(req, 'rpc/admin_set_payment_operation', {
+        method: 'POST',
+        body: { p_business_id: req.admin.farmId, p_payment_id: req.params.id, p_operation: b.operacion, p_client_ref: ref(b.clientRef) },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true, resultado: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
