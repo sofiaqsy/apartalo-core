@@ -489,12 +489,13 @@ function createAdministracionRouter({
   // the last page. Owners only, decided by the database; without ?cuenta it is the bank.
   // v2 (5 Nov 2026): the real bank lines the extension saves, matched with the app's payments, each with its status.
   // v3 (5 Nov 2026): each bank row carries its line id (movimiento) for the detail, and ITF is apart.
+  // v4 (5 Nov 2026): the bank's own charges (ITF, maintenance, statement) apart; the detail and Conciliar too (_v2).
   router.get('/:businessId/finanzas/movimientos', async (req, res) => {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       const cuenta = req.query.cuenta ? String(req.query.cuenta) : null;
-      const r = await db(req, 'rpc/finance_account_statement_page_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_account_statement_page_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ cuentas: [], filas: [], ...(r.data || {}), hayMas: !!(r.data && r.data.hay_mas) });
     } catch (err) {
@@ -509,7 +510,7 @@ function createAdministracionRouter({
   router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
     try {
-      const r = await db(req, 'rpc/bank_movement_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      const r = await db(req, 'rpc/bank_movement_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ movimiento: r.data });
     } catch (err) {
@@ -523,7 +524,7 @@ function createAdministracionRouter({
       return res.status(400).json({ error: 'Elige con qué conciliar.' });
     }
     try {
-      const r = await db(req, 'rpc/bank_match_confirm', {
+      const r = await db(req, 'rpc/bank_match_confirm_v2', {
         method: 'POST',
         body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id), p_kind: b.tipo, p_ref: b.ref, p_client_ref: ref(b.clientRef) },
       });

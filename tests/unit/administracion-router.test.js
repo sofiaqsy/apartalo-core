@@ -640,10 +640,10 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, statement));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos?cuenta=AC-02&offset=20&limit=99', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ ...statement, hayMas: true });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_account_statement_page_v3'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_account_statement_page_v4'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_account: 'AC-02', p_offset: 20, p_limit: 50 });
     await call(server, '/api/administracion/BIZ-002/finanzas/movimientos', { token: 't', method: 'GET' });
-    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('finance_account_statement_page_v3')).pop()[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('finance_account_statement_page_v4')).pop()[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20 });
     await new Promise(res => server.close(res));
   });
@@ -651,10 +651,10 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
     expect(d.body).toEqual({ movimiento: { id: 7, estado: 'Falta en la app', sugerencias: [] } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
     const c = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-0003', clientRef: 'conciliar-abc12345' } });
     expect(c.status).toBe(200);
-    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v2'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7, p_kind: 'gasto', p_ref: 'EX-0003', p_client_ref: 'conciliar-abc12345' });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/abc', { token: 't', method: 'GET' })).status).toBe(400);
