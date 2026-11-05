@@ -585,6 +585,31 @@ describe('compras list and detail', () => {
     expect(r.body.movimiento.pedido.pedido_app).toEqual({ supabaseId: 'o2', id: 'ORD-2', pagos: [] });
     await new Promise(res => server.close(res));
   });
+  test('Conciliar an order verifies the voucher of the matching payment, with the bank operation number', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'finance' }]
+      : url.includes('bank_match_confirm_v2') ? { movimiento: 7, estado: 'Conciliado', pedido: 'o1' }
+      : { id: 7, monto: 2400, fecha: '2026-11-04', operacion: '7396343', pedido: { id: 'o1' } }));
+    const pedidosPorIds = jest.fn(async () => ({ pedidos: [{ supabaseId: 'o1', id: 'ORD-1',
+      pagos: [{ id: 'pg1', monto: 2400, fecha: '2026-10-13T01:40:00Z' }, { id: 'pg2', monto: 2400, fecha: '2026-11-04T03:32:00Z' }],
+      evidencias: [{ id: 'e1', paymentId: 'pg1', verificacion: { estado: 'VERIFICADO' } }, { id: 'e2', paymentId: 'pg2' }, { id: 'e3', paymentId: 'pg2' }] }] }));
+    const verificarComprobante = jest.fn(async () => ({}));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl, pedidosPorIds, verificarComprobante,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'pedido', ref: 'o1' } });
+    expect(r.body.resultado).toEqual({ movimiento: 7, estado: 'Conciliado', pedido: 'o1', comprobantes_verificados: 2 });
+    // Only the 3 Nov payment's vouchers (the 12 Oct one is a month away and already verified).
+    expect(verificarComprobante.mock.calls.map(c => c[0])).toEqual(['e2', 'e3']);
+    expect(verificarComprobante).toHaveBeenCalledWith('e2', { bcpOpCode: '7396343', amountVerifiedCents: 240000, verifiedBy: 'CONCILIACION' });
+    // A gasto never touches the store.
+    verificarComprobante.mockClear();
+    await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-1' } });
+    expect(verificarComprobante).not.toHaveBeenCalled();
+    await new Promise(res => server.close(res));
+  });
   test('Comercialización: its report, customers and products, only for the Comercial area', async () => {
     const { server, fetchImpl } = await servidor(['commercial'], () => reply(200, { clientes: [], total: 0 }));
     const r = await call(server, '/api/administracion/BIZ-002/comercial/reporte?desde=2026-10&hasta=2026-10', { token: 't', method: 'GET' });

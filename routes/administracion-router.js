@@ -165,6 +165,8 @@ function createAdministracionRouter({
   serviceKey = () => process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   // The store orders as the Pedidos tab gets them, so an order opens the same detail (Comercialización, 4 Nov 2026).
   pedidosPorIds = (farmId, ids) => require('../core/services/supabase-service').getOrdersByFarm(farmId, { ids, limite: ids.length || 1 }),
+  // Apartalo's own "verify this voucher against BCP" (the same as the Pedidos screen and the BCP extension do).
+  verificarComprobante = (id, datos) => require('../core/services/supabase-service').verifyPaymentProof(id, datos),
 } = {}) {
   const router = express.Router();
 
@@ -563,6 +565,29 @@ function createAdministracionRouter({
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
   });
+  // The payment of the conciliated order that this bank line is: the same amount, the closest day within 7 days; its
+  // vouchers not verified yet are verified with the bank's operation number and amount. Returns how many.
+  async function certificarComprobantes(req, movimientoId) {
+    const d = await db(req, 'rpc/bank_movement_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: movimientoId } });
+    const m = (d.ok && d.data) || {};
+    if (!m.pedido || !m.pedido.id) return 0;
+    const o = await pedidosPorIds(req.admin.farmId, [m.pedido.id]);
+    const pedido = ((o && o.pedidos) || []).find(p => p.supabaseId === m.pedido.id);
+    if (!pedido) return 0;
+    const monto = Math.abs(Number(m.monto) || 0);
+    const dia = Date.parse(`${m.fecha}T12:00:00-05:00`);
+    const pago = (pedido.pagos || [])
+      .filter(p => Math.abs((Number(p.monto) || 0) - monto) < 0.005 && Math.abs(Date.parse(p.fecha) - dia) <= 8 * 86400000)
+      .sort((a, b) => Math.abs(Date.parse(a.fecha) - dia) - Math.abs(Date.parse(b.fecha) - dia))[0];
+    if (!pago) return 0;
+    const pendientes = (pedido.evidencias || []).filter(e => String(e.paymentId) === String(pago.id) && e.id
+      && !(e.verificacion && e.verificacion.estado === 'VERIFICADO'));
+    for (const e of pendientes) {
+      await verificarComprobante(e.id, { bcpOpCode: m.operacion || null, amountVerifiedCents: Math.round(monto * 100), verifiedBy: 'CONCILIACION' });
+    }
+    return pendientes.length;
+  }
+
   router.post('/:businessId/finanzas/movimientos/:id/conciliar', async (req, res) => {
     const b = req.body || {};
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
@@ -575,7 +600,14 @@ function createAdministracionRouter({
         body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id), p_kind: b.tipo, p_ref: b.ref, p_client_ref: ref(b.clientRef) },
       });
       if (!r.ok) return sendDbError(res, r);
-      return res.json({ ok: true, resultado: r.data });
+      // A store sale: its voucher becomes verified (the green certified look in the order), the same way the BCP
+      // extension does it, with the bank line's operation number and amount (General Manager, 5 Nov 2026). The
+      // conciliation is already saved: if this step fails, it is reported and nothing is undone.
+      let verificados = 0;
+      if (b.tipo === 'pedido') {
+        try { verificados = await certificarComprobantes(req, Number(req.params.id)); } catch (_) { verificados = -1; }
+      }
+      return res.json({ ok: true, resultado: { ...(r.data || {}), ...(b.tipo === 'pedido' ? { comprobantes_verificados: verificados } : {}) } });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
