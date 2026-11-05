@@ -678,16 +678,16 @@ describe('compras list and detail', () => {
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });
-  test('Finanzas Movimientos asks the statement of the chosen account, a page at a time, with hayMas', async () => {
+  test('Finanzas Movimientos asks the statement of the chosen account, a page at a time, with hayMas, search and status', async () => {
     const statement = { cuenta: { id: 'AC-02', nombre: 'Caja' }, cuentas: [{ id: 'AC-01' }, { id: 'AC-02' }], filas: [{ id: 'PY-1', monto: -10, saldo: 90 }], hay_mas: true };
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, statement));
-    const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos?cuenta=AC-02&offset=20&limit=99', { token: 't', method: 'GET' });
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos?cuenta=AC-02&offset=20&limit=99&buscar=%20cirilo%20&estado=Conciliado', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ ...statement, hayMas: true });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_account_statement_page_v4'))[1].body))
-      .toEqual({ p_business_id: 'farm-rosal', p_account: 'AC-02', p_offset: 20, p_limit: 50 });
-    await call(server, '/api/administracion/BIZ-002/finanzas/movimientos', { token: 't', method: 'GET' });
-    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('finance_account_statement_page_v4')).pop()[1].body))
-      .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_account_statement_page_v5'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_account: 'AC-02', p_offset: 20, p_limit: 50, p_buscar: 'cirilo', p_estado: 'Conciliado' });
+    await call(server, '/api/administracion/BIZ-002/finanzas/movimientos?buscar=%20', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('finance_account_statement_page_v5')).pop()[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20, p_buscar: null, p_estado: null });
     await new Promise(res => server.close(res));
   });
   test('a bank line opens its detail, and Conciliar sends the chosen record; bad input never reaches the database', async () => {

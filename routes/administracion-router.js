@@ -492,12 +492,17 @@ function createAdministracionRouter({
   // v2 (5 Nov 2026): the real bank lines the extension saves, matched with the app's payments, each with its status.
   // v3 (5 Nov 2026): each bank row carries its line id (movimiento) for the detail, and ITF is apart.
   // v4 (5 Nov 2026): the bank's own charges (ITF, maintenance, statement) apart; the detail and Conciliar too (_v2).
+  // v5 (5 Nov 2026, the bank app's design): with resumen (balance now, the month's ingresos and gastos), ?buscar and
+  // ?estado (at most 60 characters each).
   router.get('/:businessId/finanzas/movimientos', async (req, res) => {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       const cuenta = req.query.cuenta ? String(req.query.cuenta) : null;
-      const r = await db(req, 'rpc/finance_account_statement_page_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
+      const texto = v => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : null);
+      const r = await db(req, 'rpc/finance_account_statement_page_v5', { method: 'POST', body: {
+        p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit,
+        p_buscar: texto(req.query.buscar), p_estado: texto(req.query.estado) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ cuentas: [], filas: [], ...(r.data || {}), hayMas: !!(r.data && r.data.hay_mas) });
     } catch (err) {
