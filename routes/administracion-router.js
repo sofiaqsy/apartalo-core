@@ -484,6 +484,22 @@ function createAdministracionRouter({
     }
   });
 
+  // Finanzas → Movimientos (General Manager, 5 Nov 2026, in place of Proveedores): the statement of one account, the
+  // newest first, 20 at a time (limit at most 50), with the balance after each movement and the opening balance on
+  // the last page. Owners only, decided by the database; without ?cuenta it is the bank.
+  router.get('/:businessId/finanzas/movimientos', async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const cuenta = req.query.cuenta ? String(req.query.cuenta) : null;
+      const r = await db(req, 'rpc/finance_account_statement_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_account: cuenta, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ cuentas: [], filas: [], ...(r.data || {}), hayMas: !!(r.data && r.data.hay_mas) });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Compras → Adelantos (3 Nov 2026): the requests waiting for Finanzas (first page only) and the advances, newest
   // first, a page at a time (limit at most 50), with the person's name. Only for the Compras area.
   router.get('/:businessId/adelantos', async (req, res) => {

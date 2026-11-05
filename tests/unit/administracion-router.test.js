@@ -635,6 +635,18 @@ describe('compras list and detail', () => {
     expect(fetchImpl.mock.calls.length).toBe(n);
     await new Promise(res => server.close(res));
   });
+  test('Finanzas Movimientos asks the statement of the chosen account, a page at a time, with hayMas', async () => {
+    const statement = { cuenta: { id: 'AC-02', nombre: 'Caja' }, cuentas: [{ id: 'AC-01' }, { id: 'AC-02' }], filas: [{ id: 'PY-1', monto: -10, saldo: 90 }], hay_mas: true };
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, statement));
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos?cuenta=AC-02&offset=20&limit=99', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ ...statement, hayMas: true });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_account_statement_page'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_account: 'AC-02', p_offset: 20, p_limit: 50 });
+    await call(server, '/api/administracion/BIZ-002/finanzas/movimientos', { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('finance_account_statement_page')).pop()[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20 });
+    await new Promise(res => server.close(res));
+  });
   test('detail of one purchase', async () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
     const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
