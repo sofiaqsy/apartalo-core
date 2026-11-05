@@ -742,7 +742,7 @@ function mapOrder(o, items = [], payments = []) {
 }
 
 async function getOrdersByFarm(farmId, filters = {}) {
-  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50, orden, ids } = filters;
+  const { vista, estado, estadoPago, cliente, fecha, pagina = 1, limite = 50, orden, ids, comprador } = filters;
 
   const itemRows = await get('order_items', { farm_id: `eq.${farmId}`, select: 'order_id' });
   if (!itemRows.length) return { total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false };
@@ -782,6 +782,13 @@ async function getOrdersByFarm(farmId, filters = {}) {
   if (estadoPago) pedidos = pedidos.filter(p => p.estadoPago === estadoPago.toUpperCase());
   if (cliente)    pedidos = pedidos.filter(p => p.cliente.toLowerCase().includes(cliente.toLowerCase()));
   if (fecha)      pedidos = pedidos.filter(p => p.fecha === fecha);
+  // comprador: one customer's orders (client detail, General Manager 5 Nov 2026): the orders saved with their id, or,
+  // for older orders without it, with the same phone digits.
+  if (comprador) {
+    const digitos = v => String(v || '').replace(/\D/g, '');
+    const tel = digitos(comprador.telefono);
+    pedidos = pedidos.filter(p => (comprador.id && p.clienteId === comprador.id) || (tel && digitos(p.telefono) === tel));
+  }
 
   if (orden === 'antiguos') pedidos.reverse(); // the oldest first (orders come newest first)
   const total = pedidos.length;

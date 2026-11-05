@@ -41,3 +41,19 @@ test('ids: only those orders, and only if they are of this farm (ComercializaciÃ
   const vacio = await getOrdersByFarm('farm', { ids: ['z'] });
   expect(vacio.pedidos).toEqual([]);
 });
+
+test('comprador: one customer orders, by their id or, for older orders, by the same phone digits', async () => {
+  axios.get.mockImplementation(async url => {
+    if (url.includes('/order_items?farm_id=')) return { data: [{ order_id: 'a' }, { order_id: 'b' }, { order_id: 'c' }] };
+    if (url.includes('/orders?')) {
+      return { data: [
+        { ...pedido('c', 3, 'pending'), customer_id: 'u-1', customer_phone: '' },
+        { ...pedido('b', 2, 'pending'), customer_id: null, customer_phone: '51 999-888-777' },
+        { ...pedido('a', 1, 'pending'), customer_id: 'u-2', customer_phone: '+51 111' },
+      ] };
+    }
+    return { data: [] };
+  });
+  const r = await getOrdersByFarm('farm', { comprador: { id: 'u-1', telefono: '+51 999 888 777' } });
+  expect(r.pedidos.map(p => p.id)).toEqual(['ORD-c', 'ORD-b']);
+});
