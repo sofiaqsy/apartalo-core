@@ -567,6 +567,24 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_offset: 20, p_limit: 20 });
     await new Promise(res => server.close(res));
   });
+  test('a bank line detail brings each store order as the Pedidos tab has it (pedido_app)', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'finance' }]
+      : { id: 7, estado: 'Conciliado', pedido: { id: 'o2', numero: 'ORD-2' },
+          sugerencias: [{ tipo: 'pedido', ref: 'o1', titulo: 'Cafe Uno' }, { tipo: 'gasto', ref: 'EX-1' }] }));
+    const pedidosPorIds = jest.fn(async () => ({ pedidos: [{ supabaseId: 'o1', id: 'ORD-1' }, { supabaseId: 'o2', id: 'ORD-2', pagos: [] }] }));
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl, pedidosPorIds,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
+    expect(pedidosPorIds).toHaveBeenCalledWith('farm-rosal', ['o1', 'o2']);
+    expect(r.body.movimiento.sugerencias[0].pedido_app).toEqual({ supabaseId: 'o1', id: 'ORD-1' });
+    expect(r.body.movimiento.sugerencias[1].pedido_app).toBeUndefined();
+    expect(r.body.movimiento.pedido.pedido_app).toEqual({ supabaseId: 'o2', id: 'ORD-2', pagos: [] });
+    await new Promise(res => server.close(res));
+  });
   test('Comercialización: its report, customers and products, only for the Comercial area', async () => {
     const { server, fetchImpl } = await servidor(['commercial'], () => reply(200, { clientes: [], total: 0 }));
     const r = await call(server, '/api/administracion/BIZ-002/comercial/reporte?desde=2026-10&hasta=2026-10', { token: 't', method: 'GET' });

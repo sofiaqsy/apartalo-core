@@ -512,7 +512,23 @@ function createAdministracionRouter({
     try {
       const r = await db(req, 'rpc/bank_movement_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
-      return res.json({ movimiento: r.data });
+      // A store order comes as the Pedidos tab has it (pedido_app), so the app shows its Pago part with the same design
+      // as the order detail (General Manager, 5 Nov 2026). Without it the detail still shows the database's summary.
+      const m = r.data || {};
+      const sugerencias = Array.isArray(m.sugerencias) ? m.sugerencias : [];
+      const ids = [...new Set([...sugerencias.filter(x => x.tipo === 'pedido').map(x => x.ref), m.pedido && m.pedido.id].filter(Boolean))];
+      let porId = {};
+      if (ids.length) {
+        try {
+          const o = await pedidosPorIds(req.admin.farmId, ids);
+          for (const p of (o && o.pedidos) || []) porId[p.supabaseId] = p;
+        } catch (_) { porId = {}; }
+      }
+      return res.json({ movimiento: {
+        ...m,
+        sugerencias: sugerencias.map(x => (x.tipo === 'pedido' && porId[x.ref] ? { ...x, pedido_app: porId[x.ref] } : x)),
+        ...(m.pedido && porId[m.pedido.id] ? { pedido: { ...m.pedido, pedido_app: porId[m.pedido.id] } } : {}),
+      } });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
