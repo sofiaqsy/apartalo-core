@@ -851,6 +851,10 @@ describe('provider report and editing', () => {
     await new Promise(res => server.close(res));
   });
   test('edit forms map to the owner-only functions', () => {
+    expect(FORMS.proveedor.fn).toBe('admin_register_party_v2');
+    expect(toParams(FORMS.proveedor, { nombre: 'Imprenta', rol: 'supplier', area: 'commercial' }, 'f'))
+      .toMatchObject({ p_name: 'Imprenta', p_role: 'supplier', p_area: 'commercial' });
+    expect(toParams(FORMS.proveedor, { nombre: 'Tito', rol: 'farmer' }, 'f')).not.toHaveProperty('p_area');
     expect(toParams(FORMS.editarProveedor, { proveedorId: 'P-1', nombre: 'Ana', telefono: '999' }, 'f'))
       .toEqual({ p_business_id: 'f', p_party_id: 'P-1', p_name: 'Ana', p_phone: '999' });
     expect(toParams(FORMS.cuentaProveedor, { proveedorId: 'P-1', tipo: 'bank_account', numero: '000', reemplazaId: 7 }, 'f'))
