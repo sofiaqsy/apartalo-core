@@ -690,6 +690,19 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_account: null, p_offset: 0, p_limit: 20, p_buscar: null, p_estado: null });
     await new Promise(res => server.close(res));
   });
+  test('Tostar café asks the lot of the chosen product; a bad product never reaches the database', async () => {
+    const lote = { id: '205c3eed-9c72-4d63-a342-a3f4927617a0', codigo: 'L-9', kg: 24, de: 'compra' };
+    const { server, fetchImpl } = await servidor(['production'], () => reply(200, lote));
+    const id = '47a61056-9c83-4638-8590-4ab8776cccf4';
+    const r = await call(server, `/api/administracion/BIZ-002/produccion/lote-del-producto?producto=${id}`, { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ lote });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('product_green_lot'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_product_id: id });
+    const n = fetchImpl.mock.calls.length;
+    expect((await call(server, '/api/administracion/BIZ-002/produccion/lote-del-producto?producto=x', { token: 't', method: 'GET' })).status).toBe(400);
+    expect(fetchImpl.mock.calls.length).toBe(n);
+    await new Promise(res => server.close(res));
+  });
   test('paying shows where the money goes: the compra, gasto or adelanto is asked by its kind; bad input never reaches the database', async () => {
     const destino = { persona: 'P-1', nombre: 'Agricultor', telefono: '999', cuentas: [{ tipo: 'phone_wallet', numero: '955' }] };
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, destino));
