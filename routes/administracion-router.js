@@ -60,11 +60,12 @@ const FORMS = Object.freeze({
     fn: 'admin_reject_advance',
     fields: { solicitudId: 'p_request_id', motivo: 'p_reason' },
   },
-  // A new farmer, buyer or supplier. From a process screen (Comercialización, 6 Nov 2026) area also puts the provider in
-  // that process's Proveedores (party_areas, done by the database).
+  // A new farmer, buyer, supplier or service provider (rol service, with its codigo saved as a Nº de servicio account: fincas 0064, 6 Nov 2026). From a
+  // process screen (Comercialización, 6 Nov 2026) area also puts the provider in that process's Proveedores (party_areas,
+  // done by the database).
   proveedor: {
-    fn: 'admin_register_party_v2',
-    fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community', area: 'p_area' },
+    fn: 'admin_register_party_v4',
+    fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community', area: 'p_area', codigo: 'p_service_code' },
   },
   // Editar proveedor and its payment accounts (3 Nov 2026, owners only, decided by the database). An account is
   // never edited in place: cuentaProveedor with reemplazaId archives the old one and adds the new one.
@@ -279,7 +280,7 @@ function createAdministracionRouter({
     const area = typeof req.query.area === 'string' && /^[a-z_]{2,30}$/.test(req.query.area) ? req.query.area : null;
     try {
       // The database filters and cuts the page (3 Nov 2026); before, every provider was read and cut here.
-      const r = await db(req, 'rpc/parties_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_q: q || null, p_rol: rol, p_area: area, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/parties_page_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_q: q || null, p_rol: rol, p_area: area, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const personas = (r.data && r.data.personas) || [];

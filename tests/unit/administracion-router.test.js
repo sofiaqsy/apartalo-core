@@ -227,7 +227,7 @@ describe('buscar personas', () => {
     expect(r.body).toMatchObject({ total: 31, hayMas: true });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/parties_page');
+    expect(url).toBe('https://db.example/rest/v1/rpc/parties_page_v3');
     expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal', p_q: 'chato', p_rol: 'agricultor', p_area: null, p_offset: 0, p_limit: 20 });
     await new Promise(res => server.close(res));
   });
@@ -851,7 +851,9 @@ describe('provider report and editing', () => {
     await new Promise(res => server.close(res));
   });
   test('edit forms map to the owner-only functions', () => {
-    expect(FORMS.proveedor.fn).toBe('admin_register_party_v2');
+    expect(FORMS.proveedor.fn).toBe('admin_register_party_v4');
+    expect(toParams(FORMS.proveedor, { nombre: 'Entel', rol: 'service', codigo: '1234567' }, 'f'))
+      .toMatchObject({ p_name: 'Entel', p_role: 'service', p_service_code: '1234567' });
     expect(toParams(FORMS.proveedor, { nombre: 'Imprenta', rol: 'supplier', area: 'commercial' }, 'f'))
       .toMatchObject({ p_name: 'Imprenta', p_role: 'supplier', p_area: 'commercial' });
     expect(toParams(FORMS.proveedor, { nombre: 'Tito', rol: 'farmer' }, 'f')).not.toHaveProperty('p_area');
