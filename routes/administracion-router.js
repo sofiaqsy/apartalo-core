@@ -24,9 +24,10 @@ const FORMS = Object.freeze({
   gasto: {
     // For Combustible the database finds the area itself (same-day purchase or delivery, the person's default);
     // paraQue is the optional one tap when it cannot.
-    fn: 'admin_request_expense_v5',
+    // proveedorId: the optional provider who is paid (General Manager, 6 Nov 2026; fincas 0065).
+    fn: 'admin_request_expense_v6',
     fields: {
-      paraQue: 'p_purpose',
+      paraQue: 'p_purpose', proveedorId: 'p_supplier_id',
       categoria: 'p_category', monto: 'p_amount', descripcion: 'p_description', area: 'p_area', centro: 'p_cost_centre',
       inversion: 'p_is_investment', loteId: 'p_lot_id', entregaId: 'p_delivery_id', compraId: 'p_purchase_id', envioId: 'p_shipment_id',
       equipoId: 'p_equipment_id', muestraId: 'p_sample_id', eventoId: 'p_event_booking_id', documentoId: 'p_document_id',

@@ -59,7 +59,7 @@ describe('administración router', () => {
     });
     expect(r).toEqual({ status: 200, body: { ok: true, result: { expense_id: 'EX-0001', payment_id: 'PY-0001' } } });
     const [url, opts] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v5');
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_request_expense_v6');
     expect(opts.headers.Authorization).toBe('Bearer person-token');
     expect(opts.headers.apikey).toBe('sb_publishable_x');
     // A gasto is a request: how it was paid and the operation number are not sent (Administración pays it).
@@ -67,6 +67,8 @@ describe('administración router', () => {
       p_business_id: 'farm-rosal', p_category: 'Transporte', p_cost_centre: 'coffee', p_amount: 80,
       p_description: 'Flete', p_client_ref: 'exp-0001-abcd',
     });
+    // The optional provider who is paid (6 Nov 2026).
+    expect(toParams(FORMS.gasto, { categoria: 'Servicios', monto: 120, proveedorId: 'P-0090' }, 'f')).toMatchObject({ p_supplier_id: 'P-0090' });
   });
   test('database refusals come back as the plain message', async () => {
     fetchImpl.mockResolvedValue(reply(400, { code: 'P0001', message: 'Only the owner releases advances.' }));
