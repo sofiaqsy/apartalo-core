@@ -367,7 +367,7 @@ describe('procesos', () => {
       comercial: { meses: [{ month: '2026-11-01', orders: 3, total: 3088 }] }, logistica: { por_despachar: 3 },
       finanzas: { compras: { n: 1 } } });
     // Producción counts roasted coffee by product, in the order of the Productos tab (4 Nov 2026).
-    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v6'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(c => c[0].endsWith('rpc/production_summary_v7'))).toBe(true);
     for (const [, opts] of fetchImpl.mock.calls) {
       expect(opts.headers.Authorization).toBe('Bearer person-token');
       expect(JSON.parse(opts.body)).toEqual({ p_business_id: 'farm-rosal' });
@@ -524,7 +524,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['production'], () => reply(200, { lote: 'L-7', kg_verde: 100 }));
     const r = await call(server, `/api/administracion/BIZ-002/produccion/tostados/${id}`, { token: 't', method: 'GET' });
     expect(r.body).toEqual({ tostado: { lote: 'L-7', kg_verde: 100 } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/roast_lot_detail'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_event_id: id });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/roast_lot_detail_v2'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_event_id: id });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/produccion/tostados/abc', { token: 't', method: 'GET' })).status).toBe(400);
     expect(fetchImpl.mock.calls.length).toBe(n);
@@ -659,7 +659,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['production'], () => reply(200, { meses: 3, franja: { tuestes: 2 } }));
     const r = await call(server, '/api/administracion/BIZ-002/produccion/reporte?desde=2026-05&hasta=2026-07', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ reporte: { meses: 3, franja: { tuestes: 2 } } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/production_report_v3'))[1].body)) // v3: validated again with Production (4 Nov 2026)
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/production_report_v4'))[1].body)) // v4: each roasted lot with its own code (7 Nov 2026)
       .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-05-01', p_to: '2026-07-31' });
     const n = fetchImpl.mock.calls.length;
     for (const q of ['desde=2026-00&hasta=2026-01', 'desde=2026-05', '']) {

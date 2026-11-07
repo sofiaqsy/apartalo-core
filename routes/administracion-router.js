@@ -424,7 +424,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary_v6' }, // by product, every open green lot with its product, and the Blend lot's compras with their estimated green (4 Nov 2026)
+    { key: 'produccion', area: 'production', fn: 'production_summary_v7' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
@@ -709,7 +709,7 @@ function createAdministracionRouter({
   });
 
   // Producción report (4 Nov 2026): the same form as Compras, ?desde=2026-05&hasta=2026-09 (at most 12 months, checked by
-  // the database: production_report_v3, validated again with Production on 4 Nov 2026). Content decided by the Production Manager; costs only for owners.
+  // the database: production_report_v3, validated again with Production on 4 Nov 2026; v4 since 7 Nov 2026: each roasted lot with its own code). Content decided by the Production Manager; costs only for owners.
   // Finca, Finanzas and Comercialización reports (4 Nov 2026): the same form, ?desde=2026-05&hasta=2026-09 (checked by the database with
   // report_range_check). Contents decided by the Farm and Finance Managers; Finanzas only for owners.
   for (const [ruta, fn] of [['finca', 'farm_report'], ['finanzas', 'finance_report'], ['comercial', 'commercial_report_v3']]) {
@@ -819,7 +819,7 @@ function createAdministracionRouter({
       if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
       const [ha, hm] = hasta.split('-').map(Number);
       const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10); // last day of the Hasta month
-      const r = await db(req, 'rpc/production_report_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+      const r = await db(req, 'rpc/production_report_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
     } catch (err) {
@@ -854,7 +854,7 @@ function createAdministracionRouter({
       const eventId = String(req.params.eventId);
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) return res.status(400).json({ error: 'Lote de tostado no válido.' });
       if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
-      const r = await db(req, 'rpc/roast_lot_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_event_id: eventId } });
+      const r = await db(req, 'rpc/roast_lot_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_event_id: eventId } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ tostado: r.data });
     } catch (err) {
