@@ -11,7 +11,7 @@ describe('push por área (10 Nov 2026)', () => {
   };
 
   function armar(eventos) {
-    const fetchImpl = jest.fn(async url => reply(200, url.endsWith('push_events_claim') ? eventos : true));
+    const fetchImpl = jest.fn(async url => reply(200, url.endsWith('push_events_claim_v2') ? eventos : true));
     const sendEachForMulticast = jest.fn(async () => ({
       successCount: 1,
       responses: [{ success: true }, { success: false, error: { code: 'messaging/registration-token-not-registered' } }],
@@ -30,7 +30,7 @@ describe('push por área (10 Nov 2026)', () => {
   test('each new event goes to the phones of its area, with the service key, and a dead phone is removed', async () => {
     const { push, fetchImpl, sendEachForMulticast } = armar([evento]);
     expect(await push.revisar()).toEqual({ eventos: 1, enviados: 1 });
-    const claims = fetchImpl.mock.calls.filter(c => c[0].endsWith('rpc/push_events_claim'));
+    const claims = fetchImpl.mock.calls.filter(c => c[0].endsWith('rpc/push_events_claim_v2'));
     expect(claims).toHaveLength(1);
     expect(JSON.parse(claims[0][1].body)).toEqual({ p_business_id: 'farm-rosal' });
     expect(claims[0][1].headers.Authorization).toBe('Bearer service');

@@ -1,7 +1,7 @@
 /**
  * PUSH POR ÁREA (General Manager, 10 Nov 2026): every minute, for each business linked to fincas, the database gives the
- * new events not sent yet (fincas 0069, push_events_claim, service role only), each with the phones of the people who
- * have its area marked:
+ * new events not sent yet (fincas 0070, push_events_claim_v2, service role only; 12 hours back, so what happens while
+ * the server sleeps is sent when it wakes), each with the phones of the people who have its area marked:
  *   Nuevo pedido   -> Comercialización
  *   Pago pendiente -> Finanzas (gasto to pay, adelanto to approve, Solicitar pago of a compra)
  * The database marks each event sent before it comes back, so a phone never gets the same event twice. A phone that
@@ -65,7 +65,7 @@ function createPushPorArea({
     let enviados = 0;
     for (const n of negocios().filter(x => x && x.farmId)) {
       try {
-        const lista = await rpc('push_events_claim', { p_business_id: n.farmId });
+        const lista = await rpc('push_events_claim_v2', { p_business_id: n.farmId });
         for (const e of Array.isArray(lista) ? lista : []) {
           eventos++;
           try {
