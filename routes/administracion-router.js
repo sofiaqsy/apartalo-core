@@ -214,6 +214,32 @@ function createAdministracionRouter({
     return res.status(status).json({ error: message });
   }
 
+  // This phone receives the push notifications of the person's own areas (fincas 0069, 10 Nov 2026). DELETE on sign-out.
+  router.post('/:businessId/push-token', async (req, res) => {
+    const { token, platform } = req.body || {};
+    if (typeof token !== 'string' || !token) return res.status(400).json({ error: 'Falta el token del teléfono.' });
+    try {
+      const r = await db(req, 'rpc/push_register_device', {
+        method: 'POST', body: { p_business_id: req.admin.farmId, p_token: token, p_platform: typeof platform === 'string' ? platform : null },
+      });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+  router.delete('/:businessId/push-token', async (req, res) => {
+    const { token } = req.body || {};
+    if (typeof token !== 'string' || !token) return res.status(400).json({ error: 'Falta el token del teléfono.' });
+    try {
+      const r = await db(req, 'rpc/push_unregister_device', { method: 'POST', body: { p_token: token } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Forms.
   router.post('/:businessId/registrar/:form', async (req, res) => {
     const form = FORMS[req.params.form];

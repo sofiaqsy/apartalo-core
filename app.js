@@ -253,6 +253,12 @@ async function initialize() {
   console.log('\n⚙️ Cargando handlers...');
   webhookRouter.initializeHandlers();
 
+  // Push por área (10 Nov 2026): Nuevo pedido → Comercialización, Pago pendiente → Finanzas, cada minuto.
+  require('./core/services/push-por-area').createPushPorArea({
+    negocios: () => negociosService.getAll(),
+    messaging: () => (firebaseService.initialized ? firebaseService.messaging : null),
+  }).iniciar();
+
   // 4. Iniciar servidor
   const PORT = config.app.port;
   

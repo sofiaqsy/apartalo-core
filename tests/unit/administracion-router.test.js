@@ -551,6 +551,18 @@ describe('compras list and detail', () => {
     }
     await new Promise(res => server.close(res));
   });
+  test('a phone is saved for the person signed in (push by area), and removed on sign-out', async () => {
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, true));
+    const r = await call(server, '/api/administracion/BIZ-002/push-token', { token: 't', method: 'POST', body: { token: 'fcm-token-1234567890', platform: 'ios' } });
+    expect(r.body).toEqual({ ok: true });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/push_register_device'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_token: 'fcm-token-1234567890', p_platform: 'ios' });
+    expect((await call(server, '/api/administracion/BIZ-002/push-token', { token: 't', method: 'POST', body: {} })).status).toBe(400);
+    expect((await call(server, '/api/administracion/BIZ-002/push-token', { token: 't', method: 'DELETE', body: { token: 'fcm-token-1234567890' } })).body).toEqual({ ok: true });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/push_unregister_device'))[1].body)).toEqual({ p_token: 'fcm-token-1234567890' });
+    await new Promise(res => server.close(res));
+  });
+
   test('the Finanzas report can be only what is por conciliar, money in or money out', async () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { lado: 'salidas' }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/reporte?desde=2026-11&hasta=2026-11&solo=salidas', { token: 't', method: 'GET' });
