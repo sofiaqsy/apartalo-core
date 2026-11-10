@@ -720,7 +720,13 @@ function createAdministracionRouter({
         if (!mesValido(desde) || !mesValido(hasta)) return res.status(400).json({ error: 'Elige el mes Desde y el mes Hasta.' });
         const [ha, hm] = hasta.split('-').map(Number);
         const fin = new Date(Date.UTC(ha, hm, 0)).toISOString().slice(0, 10);
-        const r = await db(req, `rpc/${fn}`, { method: 'POST', body: { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin } });
+        // Finanzas, por conciliar (9 Nov 2026): ?solo=entradas or ?solo=salidas, only the lines not matched yet (fincas 0068).
+        const solo = ruta === 'finanzas' ? req.query.solo : undefined;
+        if (solo !== undefined && solo !== 'entradas' && solo !== 'salidas') return res.status(400).json({ error: 'Elige entradas o salidas.' });
+        const body = { p_business_id: req.admin.farmId, p_from: `${desde}-01`, p_to: fin };
+        const r = solo
+          ? await db(req, 'rpc/finance_pending_report', { method: 'POST', body: { ...body, p_lado: solo } })
+          : await db(req, `rpc/${fn}`, { method: 'POST', body });
         if (!r.ok) return sendDbError(res, r);
         return res.json({ reporte: r.data });
       } catch (err) {

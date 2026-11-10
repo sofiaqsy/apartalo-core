@@ -551,6 +551,15 @@ describe('compras list and detail', () => {
     }
     await new Promise(res => server.close(res));
   });
+  test('the Finanzas report can be only what is por conciliar, money in or money out', async () => {
+    const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { lado: 'salidas' }));
+    const r = await call(server, '/api/administracion/BIZ-002/finanzas/reporte?desde=2026-11&hasta=2026-11&solo=salidas', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ reporte: { lado: 'salidas' } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].endsWith('rpc/finance_pending_report'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_from: '2026-11-01', p_to: '2026-11-30', p_lado: 'salidas' });
+    expect((await call(server, '/api/administracion/BIZ-002/finanzas/reporte?desde=2026-11&hasta=2026-11&solo=todo', { token: 't', method: 'GET' })).status).toBe(400);
+    await new Promise(res => server.close(res));
+  });
   test('Comercialización, Últimos pagos: the payments with their orders, only for the Comercial area', async () => {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'commercial' }]
       : { pagos: [{ id: 'p1', pedido_id: 'o1', numero: 'ORD-1' }, { id: 'p2', pedido_id: 'o9', numero: 'ORD-9' }], total: 2, hay_mas: false }));
