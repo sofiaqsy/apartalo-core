@@ -655,7 +655,7 @@ describe('compras list and detail', () => {
     const r = await call(server, '/api/administracion/BIZ-002/gastos-area?area=farm&offset=20', { token: 't', method: 'GET' });
     expect(r.body.gastos).toHaveLength(20);
     expect(r.body.hayMas).toBe(true);
-    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v2'))[0];
+    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v3'))[0];
     expect(url).toContain('area=eq.farm');
     expect(url).toContain('offset=20');
     expect(url).toContain('limit=21');
@@ -694,7 +694,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ filas: [{ id: 'EX-1', estado: 'Urgente' }], total: 21, hayMas: false });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v2'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v3'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_kind: 'gastos', p_offset: 20, p_limit: 50 });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=otro', { token: 't', method: 'GET' })).status).toBe(400);
@@ -775,7 +775,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['sourcing'], () => reply(200, { id: 'DL-1', agricultor: 'Agricultor Uno' }));
     const r = await call(server, '/api/administracion/BIZ-002/compras/DL-1', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ compra: { id: 'DL-1', agricultor: 'Agricultor Uno' } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail_v4'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('purchase_detail_v5'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_delivery_id: 'DL-1' });
     await new Promise(res => server.close(res));
   });
   test('someone without the Compras area gets 403 and the database is not asked', async () => {
@@ -809,6 +809,7 @@ describe('Compras → Adelantos', () => {
       if (url.includes('/advance_balances?')) return reply(200, [{ id: 'ADV-002', party_id: 'P-1', open_balance: 200 }]);
       if (url.includes('/advance_requests_pending?')) return reply(200, [{ id: 'SOL-1', party: 'Misael', amount: 1500 }]);
       if (url.includes('/parties?')) return reply(200, [{ id: 'P-1', name: 'Agricultor Uno' }]);
+      if (url.includes('rpc/operations_of')) return reply(200, { 'ADV-002': '6011697' });
       return reply(200, []);
     });
     const app = express(); app.use(express.json());
@@ -819,10 +820,30 @@ describe('Compras → Adelantos', () => {
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/adelantos?limit=999', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ porAprobar: [{ id: 'SOL-1', party: 'Misael', amount: 1500 }],
-      adelantos: [{ id: 'ADV-002', party_id: 'P-1', open_balance: 200, nombre: 'Agricultor Uno' }], hayMas: false });
+      adelantos: [{ id: 'ADV-002', party_id: 'P-1', open_balance: 200, nombre: 'Agricultor Uno', operacion: '6011697' }], hayMas: false });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('rpc/operations_of'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_kind: 'advance', p_refs: ['ADV-002'] });
     expect(decodeURIComponent(fetchImpl.mock.calls.find(c => c[0].includes('/advance_balances?'))[0])).toContain('limit=50');
     const r2 = await call(server, '/api/administracion/BIZ-002/adelantos?offset=20', { token: 't', method: 'GET' });
     expect(r2.body.porAprobar).toEqual([]);
+    await new Promise(res => server.close(res));
+  });
+  test('one adelanto opens its detail from the database', async () => {
+    const fetchImpl = jest.fn(async url => {
+      if (url.includes('my_areas_v2')) return reply(200, [{ area: 'sourcing' }]);
+      if (url.includes('rpc/advance_detail')) return reply(200, { id: 'ADV-014', monto: 4000, partes: [] });
+      return reply(200, []);
+    });
+    const app = express(); app.use(express.json());
+    app.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/adelantos/ADV-014', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ adelanto: { id: 'ADV-014', monto: 4000, partes: [] } });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('rpc/advance_detail'))[1].body))
+      .toEqual({ p_business_id: 'farm-rosal', p_advance_id: 'ADV-014' });
     await new Promise(res => server.close(res));
   });
   test('without the Compras area: 403', async () => {
@@ -957,6 +978,18 @@ describe('evidence', () => {
     expect(r.body.evidencias).toEqual([{ id: 3, tipo: 'image/jpeg', nota: 'Voucher',
       url: 'https://db.example/storage/v1/object/sign/operations-evidence/farm-rosal/purchase/PU-1/a.jpg?token=t' }]);
     expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({ expiresIn: 600, paths: ['farm-rosal/purchase/PU-1/a.jpg'] });
+    await new Promise(res => server.close(res));
+  });
+
+  test('the provider report with evidence: every evidence of the provider with its link, never the path', async () => {
+    const fetchImpl = jest.fn(async url => url.includes('party_evidence')
+      ? reply(200, [{ id: 7, path: 'farm-rosal/advance/ADV-14/b.pdf', tipo: 'application/pdf', que: 'Adelanto ADV-14 · S/ 4,000.00', fecha: '2026-10-23' }])
+      : reply(200, [{ path: 'farm-rosal/advance/ADV-14/b.pdf', signedURL: '/object/sign/operations-evidence/farm-rosal/advance/ADV-14/b.pdf?token=t' }]));
+    const server = await servidor(fetchImpl);
+    const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0017/evidencias', { token: 'owner-token', method: 'GET' });
+    expect(r.body.evidencias).toEqual([{ id: 7, tipo: 'application/pdf', que: 'Adelanto ADV-14 · S/ 4,000.00', fecha: '2026-10-23',
+      url: 'https://db.example/storage/v1/object/sign/operations-evidence/farm-rosal/advance/ADV-14/b.pdf?token=t' }]);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ p_business_id: 'farm-rosal', p_party_id: 'P-0017' });
     await new Promise(res => server.close(res));
   });
 

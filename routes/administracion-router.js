@@ -498,14 +498,15 @@ function createAdministracionRouter({
 
   // Finanzas lists (3 Nov 2026): compras, gastos or adelantos; what waits (Pendiente or Urgente) and the last 30 days
   // of what was paid or decided, a page at a time (limit at most 50). Owners only, decided by the database.
-  // finance_list_v2 (4 Nov 2026): each gasto also says whether its area needs review (revisar).
+  // finance_list_v2 (4 Nov 2026): each gasto also says whether its area needs review (revisar). finance_list_v3 (10 Nov
+  // 2026): each row also has the operation number (operacion) once its payment is matched with the bank.
   router.get('/:businessId/finanzas/lista', async (req, res) => {
     try {
       const tipo = String(req.query.tipo || '');
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -684,11 +685,30 @@ function createAdministracionRouter({
         const pr = await db(req, `parties?${new URLSearchParams({ select: 'id,name', business_id: farm, id: `in.(${ids.join(',')})` })}`);
         if (pr.ok) nombre = new Map((pr.data || []).map(x => [x.id, x.name]));
       }
+      // The operation number of each adelanto once its payment is matched with the bank (fincas 0071, 10 Nov 2026).
+      let operacion = {};
+      if (filas.length) {
+        const op = await db(req, 'rpc/operations_of', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: 'advance', p_refs: filas.map(a => a.id) } });
+        if (op.ok && op.data && typeof op.data === 'object') operacion = op.data;
+      }
       return res.json({
         porAprobar: pedidos.data || [],
-        adelantos: filas.map(a => ({ ...a, nombre: nombre.get(a.party_id) || null })),
+        adelantos: filas.map(a => ({ ...a, nombre: nombre.get(a.party_id) || null, operacion: operacion[a.id] || null })),
         hayMas: filas.length === limit,
       });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // One adelanto with its parts, the compras that used it and its operation number (General Manager, 10 Nov 2026:
+  // fincas 0072, advance_detail). Only for the Compras area, like the list.
+  router.get('/:businessId/adelantos/:id', async (req, res) => {
+    try {
+      if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
+      const r = await db(req, 'rpc/advance_detail', { method: 'POST', body: { p_business_id: req.admin.farmId, p_advance_id: String(req.params.id).slice(0, 40) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ adelanto: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
@@ -815,7 +835,7 @@ function createAdministracionRouter({
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     try {
       if (!(await tieneArea(req, area))) return res.status(403).json({ error: 'Esa área no es de tus áreas.' });
-      const r = await db(req, `area_expenses_recent_v2?${new URLSearchParams({
+      const r = await db(req, `area_expenses_recent_v3?${new URLSearchParams({
         select: '*', business_id: `eq.${req.admin.farmId}`, area: `eq.${area}`, order: 'expense_date.desc,id.desc',
         offset: String(offset), limit: String(limit + 1),
       })}`);
@@ -1003,7 +1023,7 @@ function createAdministracionRouter({
   router.get('/:businessId/compras/:id', async (req, res) => {
     try {
       if (!(await tieneArea(req, 'sourcing'))) return res.status(403).json({ error: 'Compras no es de tus áreas.' });
-      const r = await db(req, 'rpc/purchase_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
+      const r = await db(req, 'rpc/purchase_detail_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_delivery_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ compra: r.data });
     } catch (err) {
@@ -1098,6 +1118,23 @@ function createAdministracionRouter({
     if (!tipo || !id) return res.status(400).json({ error: 'Falta el registro.' });
     try {
       const r = await db(req, 'rpc/evidence_of', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_target_id: id } });
+      if (!r.ok) return sendDbError(res, r);
+      const filas = Array.isArray(r.data) ? r.data : [];
+      if (!filas.length || !serviceKey()) return res.json({ evidencias: filas.map(({ path, ...e }) => e) });
+      const firmas = await storage(`object/sign/${BUCKET}`, { body: { expiresIn: 600, paths: filas.map(e => e.path) } });
+      const porPath = new Map((firmas.ok && Array.isArray(firmas.data) ? firmas.data : [])
+        .filter(f => f && f.signedURL).map(f => [f.path, f.signedURL.startsWith('http') ? f.signedURL : `${supabaseUrl()}/storage/v1${f.signedURL}`]));
+      return res.json({ evidencias: filas.map(({ path, ...e }) => ({ ...e, url: porPath.get(path) || null })) });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Provider report with evidence (General Manager, 10 Nov 2026): every evidence of the provider's compras, adelantos,
+  // requests and gastos (fincas 0073, party_evidence: owners only), each with a link that works for 10 minutes.
+  router.get('/:businessId/proveedores/:id/evidencias', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/party_evidence', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       const filas = Array.isArray(r.data) ? r.data : [];
       if (!filas.length || !serviceKey()) return res.json({ evidencias: filas.map(({ path, ...e }) => e) });
