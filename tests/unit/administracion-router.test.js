@@ -890,7 +890,7 @@ describe('provider report and editing', () => {
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0001/reporte', { token: 'tk', method: 'GET' });
     expect(r.body.reporte.nombre).toBe('Agricultor Uno');
-    expect(fetchImpl.mock.calls[0][0]).toContain('rpc/party_report');
+    expect(fetchImpl.mock.calls[0][0]).toContain('rpc/party_report_v2');
     expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer tk');
     await new Promise(res => server.close(res));
   });

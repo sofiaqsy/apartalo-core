@@ -1011,7 +1011,7 @@ function createAdministracionRouter({
 
   router.get('/:businessId/proveedores/:id/reporte', async (req, res) => {
     try {
-      const r = await db(req, 'rpc/party_report', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      const r = await db(req, 'rpc/party_report_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
     } catch (err) {
