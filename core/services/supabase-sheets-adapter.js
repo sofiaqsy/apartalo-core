@@ -5,6 +5,10 @@
  */
 
 const supabase = require('./supabase-service');
+const { createOrderOrigin } = require('./order-origin');
+
+// Pedidos taken by the WhatsApp bot are recorded as such (fincas 0074, 11 Nov 2026).
+const origenPedido = createOrderOrigin({ rpc: (fn, body) => supabase.post(`rpc/${fn}`, body) });
 const config = require('../../config');
 
 class SupabaseSheetsAdapter {
@@ -162,6 +166,7 @@ class SupabaseSheetsAdapter {
     });
 
     if (!order) return null;
+    await origenPedido.registrar(order.id, 'whatsapp');
     const { fecha, hora } = (() => {
       const d = new Date(order.created_at || Date.now());
       const lima = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).formatToParts(d);

@@ -8,6 +8,14 @@ const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const supabaseService = require('../core/services/supabase-service');
 const { guards } = require('../core/services/ownership-instance');
+const firebaseService = require('../core/services/firebase-service');
+const { createOrderOrigin } = require('../core/services/order-origin');
+
+// Who created each pedido (fincas 0074, 11 Nov 2026): Nuevo Pedido in the app records the person signed in.
+const origenPedido = createOrderOrigin({
+  rpc: (fn, body) => supabaseService.post(`rpc/${fn}`, body),
+  verifyToken: token => firebaseService.verifyIdToken(token),
+});
 
 // ==================== GET PEDIDOS ====================
 
@@ -49,7 +57,8 @@ router.get('/:businessId/:pedidoId', guards.order, async (req, res) => {
 
     const pedido = await supabaseService.getOrderByIdOrNumber(pedidoId);
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
-    return res.json(pedido);
+    // Where it came from and who created it (pedidos from 11 Nov 2026 on; null before).
+    return res.json({ ...pedido, creadoPor: await origenPedido.de(pedido.supabaseId) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -218,6 +227,7 @@ router.post('/:businessId', async (req, res) => {
     });
 
     if (!order) return res.status(500).json({ error: 'Error creando pedido en Supabase' });
+    await origenPedido.registrar(order.id, 'app', await origenPedido.persona(req));
 
     if (notificarCliente) {
       try {
