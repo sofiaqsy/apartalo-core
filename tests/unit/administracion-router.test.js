@@ -610,7 +610,7 @@ describe('compras list and detail', () => {
   });
   test('Conciliar an order verifies the voucher of the matching payment, with the bank operation number', async () => {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'finance' }]
-      : url.includes('bank_match_confirm_v2') ? { movimiento: 7, estado: 'Conciliado', pedido: 'o1' }
+      : url.includes('bank_match_confirm_v3') ? { movimiento: 7, estado: 'Conciliado', pedido: 'o1' }
       : { id: 7, monto: 2400, fecha: '2026-11-04', operacion: '7396343', pedido: { id: 'o1' } }));
     const pedidosPorIds = jest.fn(async () => ({ pedidos: [{ supabaseId: 'o1', id: 'ORD-1',
       pagos: [{ id: 'pg1', monto: 2400, fecha: '2026-10-13T01:40:00Z' }, { id: 'pg2', monto: 2400, fecha: '2026-11-04T03:32:00Z' }],
@@ -746,10 +746,10 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
     expect(d.body).toEqual({ movimiento: { id: 7, estado: 'Falta en la app', sugerencias: [] } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v4'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v5'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
     const c = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-0003', clientRef: 'conciliar-abc12345' } });
     expect(c.status).toBe(200);
-    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v2'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v3'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7, p_kind: 'gasto', p_ref: 'EX-0003', p_client_ref: 'conciliar-abc12345' });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/abc', { token: 't', method: 'GET' })).status).toBe(400);

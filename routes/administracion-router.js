@@ -547,7 +547,7 @@ function createAdministracionRouter({
   router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
     try {
-      const r = await db(req, 'rpc/bank_movement_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      const r = await db(req, 'rpc/bank_movement_detail_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
       // A store order comes as the Pedidos tab has it (pedido_app), so the app shows its Pago part with the same design
       // as the order detail (General Manager, 5 Nov 2026). Without it the detail still shows the database's summary.
@@ -618,7 +618,7 @@ function createAdministracionRouter({
   // The payment of the conciliated order that this bank line is: the same amount, the closest day within 7 days; its
   // vouchers not verified yet are verified with the bank's operation number and amount. Returns how many.
   async function certificarComprobantes(req, movimientoId) {
-    const d = await db(req, 'rpc/bank_movement_detail_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: movimientoId } });
+    const d = await db(req, 'rpc/bank_movement_detail_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: movimientoId } });
     const m = (d.ok && d.data) || {};
     if (!m.pedido || !m.pedido.id) return 0;
     const o = await pedidosPorIds(req.admin.farmId, [m.pedido.id]);
@@ -645,7 +645,7 @@ function createAdministracionRouter({
       return res.status(400).json({ error: 'Elige con qué conciliar.' });
     }
     try {
-      const r = await db(req, 'rpc/bank_match_confirm_v2', {
+      const r = await db(req, 'rpc/bank_match_confirm_v3', {
         method: 'POST',
         body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id), p_kind: b.tipo, p_ref: b.ref, p_client_ref: ref(b.clientRef) },
       });
