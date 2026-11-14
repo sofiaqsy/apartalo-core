@@ -259,6 +259,12 @@ async function initialize() {
     messaging: () => (firebaseService.initialized ? firebaseService.messaging : null),
   }).iniciar();
 
+  // Lector de comprobantes (14 Nov 2026): lee la fecha, el monto y el Nº de operación de los comprobantes de los pedidos,
+  // cada 2 minutos, para que Movimientos sugiera primero el pedido cuyo comprobante es esa línea del banco.
+  require('./core/services/lector-comprobantes').createLectorComprobantes({
+    negocios: () => negociosService.getAll(),
+  }).iniciar();
+
   // 4. Iniciar servidor
   const PORT = config.app.port;
   
