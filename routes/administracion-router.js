@@ -124,6 +124,12 @@ const FORMS = Object.freeze({
     fn: 'admin_cash_withdrawal',
     fields: { monto: 'p_amount', operacion: 'p_bank_reference', notas: 'p_notes', fecha: 'p_date' },
   },
+  // Registrar inversión (General Manager, 14 Nov 2026): an owner puts money into the business (fincas 0079); owners only,
+  // decided by the database. A transfer is matched with the bank line right away when it is already uploaded.
+  inversion: {
+    fn: 'admin_register_investment',
+    fields: { monto: 'p_amount', quien: 'p_contributor', para: 'p_purpose', descripcion: 'p_description', como: 'p_method', fecha: 'p_date' },
+  },
 });
 
 /** Read-only lists for the Pendientes and Resumen parts (views; the rules show only the farm's rows). */
@@ -828,6 +834,32 @@ function createAdministracionRouter({
   // The Gastos tab of a process (4 Nov 2026): that area's gastos, newest first, 20 at a time (at most 50); only for
   // the people of that area (owners have every area).
   const AREAS_GASTOS = new Set(['farm', 'sourcing', 'production', 'fulfillment', 'commercial', 'finance']);
+  // Finca → Inversiones (14 Nov 2026): the owners' money in, newest first, 20 at a time; and the owners' names for the
+  // form. Owners only, decided by the database (fincas 0079).
+  router.get('/:businessId/finca/inversiones', async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+      const r = await db(req, 'rpc/investments_page', { method: 'POST', body: { p_business_id: req.admin.farmId, p_offset: offset, p_limit: limit } });
+      if (!r.ok) return sendDbError(res, r);
+      const filas = (r.data && r.data.filas) || [];
+      const total = (r.data && r.data.total) || 0;
+      return res.json({ filas, total, hayMas: offset + filas.length < total });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  router.get('/:businessId/finca/aportantes', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/investment_contributors', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ aportantes: Array.isArray(r.data) ? r.data : [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   router.get('/:businessId/gastos-area', async (req, res) => {
     const area = String(req.query.area || '');
     if (!AREAS_GASTOS.has(area)) return res.status(400).json({ error: 'Área no válida.' });

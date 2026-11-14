@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -799,6 +799,36 @@ describe('Solicitar pago', () => {
     expect(FORMS.precio.fn).toBe('admin_set_price_v3');
     expect(FORMS.pagoDesdeAdelantos.fn).toBe('admin_pay_purchase_from_advances');
     expect(toParams(FORMS.pagoDesdeAdelantos, { compraId: 'PU-0001', monto: 5 }, 'f')).toEqual({ p_business_id: 'f', p_purchase_id: 'PU-0001' });
+  });
+});
+
+describe('Finca → Inversiones (14 Nov 2026)', () => {
+  function app(fetchImpl) {
+    const a = express(); a.use(express.json());
+    a.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    return new Promise(r => { const s = a.listen(0, () => r(s)); });
+  }
+
+  test('the form goes to admin_register_investment with its fields', () => {
+    expect(FORMS.inversion.fn).toBe('admin_register_investment');
+    expect(toParams(FORMS.inversion, { monto: 3500, quien: 'Jared Cusi', para: 'equipment', descripcion: 'Secadora', como: 'transfer', fecha: '2026-11-14', clientRef: 'inversion-1' }, 'f'))
+      .toEqual({ p_business_id: 'f', p_amount: 3500, p_contributor: 'Jared Cusi', p_purpose: 'equipment', p_description: 'Secadora', p_method: 'transfer', p_date: '2026-11-14', p_client_ref: 'inversion-1' });
+  });
+
+  test('the list, 20 at a time, and the owners for the form', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('investments_page')
+      ? { total: 1, filas: [{ id: 'CAP-0001', monto: 3500, estado: 'Conciliado' }] }
+      : ['Jared Cusi', 'Keyla Cusi']));
+    const server = await app(fetchImpl);
+    const r = await call(server, '/api/administracion/BIZ-002/finca/inversiones?offset=0&limit=999', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ filas: [{ id: 'CAP-0001', monto: 3500, estado: 'Conciliado' }], total: 1, hayMas: false });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ p_business_id: 'farm-rosal', p_offset: 0, p_limit: 50 });
+    const a = await call(server, '/api/administracion/BIZ-002/finca/aportantes', { token: 't', method: 'GET' });
+    expect(a.body).toEqual({ aportantes: ['Jared Cusi', 'Keyla Cusi'] });
+    await new Promise(res => server.close(res));
   });
 });
 
