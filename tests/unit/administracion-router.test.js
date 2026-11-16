@@ -802,6 +802,24 @@ describe('Solicitar pago', () => {
   });
 });
 
+describe('Registrar gasto: category from the provider (16 Nov 2026)', () => {
+  test('asks the database with the provider, and needs one', async () => {
+    const fetchImpl = jest.fn(async () => reply(200, { categoria: 'Servicios', por: 'servicio' }));
+    const a = express(); a.use(express.json());
+    a.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = a.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/sugerir-categoria?proveedor=P-0031', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ categoria: 'Servicios', por: 'servicio' });
+    expect(fetchImpl.mock.calls[0][0]).toContain('rpc/suggest_expense_category_for_party');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ p_business_id: 'farm-rosal', p_party_id: 'P-0031' });
+    expect((await call(server, '/api/administracion/BIZ-002/sugerir-categoria', { token: 't', method: 'GET' })).status).toBe(400);
+    await new Promise(res => server.close(res));
+  });
+});
+
 describe('Finca → Inversiones (14 Nov 2026)', () => {
   function app(fetchImpl) {
     const a = express(); a.use(express.json());

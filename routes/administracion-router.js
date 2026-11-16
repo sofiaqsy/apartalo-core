@@ -423,6 +423,20 @@ function createAdministracionRouter({
     }
   });
 
+  // Registrar gasto (16 Nov 2026): the category for the chosen provider, from its last gasto, or Servicios for a
+  // service (fincas 0080). {categoria: null} when nothing is known.
+  router.get('/:businessId/sugerir-categoria', async (req, res) => {
+    const proveedor = typeof req.query.proveedor === 'string' ? req.query.proveedor.trim().slice(0, 40) : '';
+    if (!proveedor) return res.status(400).json({ error: 'Falta el proveedor' });
+    try {
+      const r = await db(req, 'rpc/suggest_expense_category_for_party', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: proveedor } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json(r.data || { categoria: null });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   // Mi área: the person's areas, and for the chosen ones (one, several, or "todas") their costs by month and
   // latest expenses. Only areas the person belongs to count (owners: every area); each expense has one area,
   // so adding areas never counts a cost twice.
