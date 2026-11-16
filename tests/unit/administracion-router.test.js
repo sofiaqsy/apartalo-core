@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -610,7 +610,7 @@ describe('compras list and detail', () => {
   });
   test('Conciliar an order verifies the voucher of the matching payment, with the bank operation number', async () => {
     const fetchImpl = jest.fn(async url => reply(200, url.includes('my_areas_v2') ? [{ area: 'finance' }]
-      : url.includes('bank_match_confirm_v4') ? { movimiento: 7, estado: 'Conciliado', pedido: 'o1' }
+      : url.includes('bank_match_confirm_v5') ? { movimiento: 7, estado: 'Conciliado', pedido: 'o1' }
       : { id: 7, monto: 2400, fecha: '2026-11-04', operacion: '7396343', pedido: { id: 'o1' } }));
     const pedidosPorIds = jest.fn(async () => ({ pedidos: [{ supabaseId: 'o1', id: 'ORD-1',
       pagos: [{ id: 'pg1', monto: 2400, fecha: '2026-10-13T01:40:00Z' }, { id: 'pg2', monto: 2400, fecha: '2026-11-04T03:32:00Z' }],
@@ -694,7 +694,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ filas: [{ id: 'EX-1', estado: 'Urgente' }], total: 21, hayMas: false });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v3'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v4'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_kind: 'gastos', p_offset: 20, p_limit: 50 });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=otro', { token: 't', method: 'GET' })).status).toBe(400);
@@ -746,10 +746,10 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { id: 7, estado: 'Falta en la app', sugerencias: [] }));
     const d = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7', { token: 't', method: 'GET' });
     expect(d.body).toEqual({ movimiento: { id: 7, estado: 'Falta en la app', sugerencias: [] } });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v7'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('bank_movement_detail_v8'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7 });
     const c = await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/7/conciliar', { token: 't', method: 'POST', body: { tipo: 'gasto', ref: 'EX-0003', clientRef: 'conciliar-abc12345' } });
     expect(c.status).toBe(200);
-    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v4'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(x => x[0].includes('bank_match_confirm_v5'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_movement_id: 7, p_kind: 'gasto', p_ref: 'EX-0003', p_client_ref: 'conciliar-abc12345' });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/movimientos/abc', { token: 't', method: 'GET' })).status).toBe(400);
@@ -910,7 +910,8 @@ describe('Compras → Adelantos', () => {
 
 describe('provider detail', () => {
   test('asks party_detail with the person\'s own token', async () => {
-    const fetchImpl = jest.fn(async () => reply(200, { id: 'P-0001', nombre: 'Agricultor Uno' }));
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('monthly_service_of')
+      ? { id: 'MS-0001', nombre: 'Luz', dia: 15 } : { id: 'P-0001', nombre: 'Agricultor Uno' }));
     const app = express(); app.use(express.json());
     app.use('/api/administracion', createAdministracionRouter({
       getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
@@ -918,7 +919,8 @@ describe('provider detail', () => {
     }));
     const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
     const r = await call(server, '/api/administracion/BIZ-002/proveedores/P-0001', { token: 'person-token', method: 'GET' });
-    expect(r.body).toEqual({ proveedor: { id: 'P-0001', nombre: 'Agricultor Uno' } });
+    // With its monthly payment (16 Nov 2026).
+    expect(r.body).toEqual({ proveedor: { id: 'P-0001', nombre: 'Agricultor Uno', pago_mensual: { id: 'MS-0001', nombre: 'Luz', dia: 15 } } });
     const [url, opts] = fetchImpl.mock.calls[0];
     expect(url).toContain('rpc/party_detail_v2');
     expect(opts.headers.Authorization).toBe('Bearer person-token');

@@ -126,6 +126,20 @@ const FORMS = Object.freeze({
   },
   // Registrar inversión (General Manager, 14 Nov 2026): an owner puts money into the business (fincas 0079); owners only,
   // decided by the database. A transfer is matched with the bank line right away when it is already uploaded.
+  // Monthly services (General Manager, 16 Nov 2026; fincas 0081, owners only, decided by the database): mark a provider
+  // as paid every month (Luz, day 15), stop it, and pay a month's bill with the amount from the bill.
+  servicioMensual: {
+    fn: 'admin_set_monthly_service',
+    fields: { proveedorId: 'p_party_id', nombre: 'p_name', dia: 'p_day', categoria: 'p_category' },
+  },
+  quitarMensual: {
+    fn: 'admin_stop_monthly_service',
+    fields: { proveedorId: 'p_party_id' },
+  },
+  pagoMensual: {
+    fn: 'admin_pay_monthly_bill',
+    fields: { mensualId: 'p_bill_id', monto: 'p_amount', metodo: 'p_method', fecha: 'p_date' },
+  },
   inversion: {
     fn: 'admin_register_investment',
     fields: { monto: 'p_amount', quien: 'p_contributor', para: 'p_purpose', descripcion: 'p_description', como: 'p_method', fecha: 'p_date' },
@@ -526,7 +540,7 @@ function createAdministracionRouter({
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -563,11 +577,11 @@ function createAdministracionRouter({
   // Finanzas → Movimientos → one bank line (General Manager, 5 Nov 2026): what it was matched with, or the records
   // of the same amount that could be it (bank_movement_detail, owners only). Conciliar links one of them, or pays the
   // gasto or compra from that bank line (bank_match_confirm). ITF is never conciliated.
-  const TIPOS_CONCILIAR = new Set(['pago', 'pedido', 'gasto', 'compra']);
+  const TIPOS_CONCILIAR = new Set(['pago', 'pedido', 'gasto', 'compra', 'mensual']);
   router.get('/:businessId/finanzas/movimientos/:id', async (req, res) => {
     if (!/^\d{1,15}$/.test(String(req.params.id))) return res.status(400).json({ error: 'Movimiento no válido.' });
     try {
-      const r = await db(req, 'rpc/bank_movement_detail_v7', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
+      const r = await db(req, 'rpc/bank_movement_detail_v8', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id) } });
       if (!r.ok) return sendDbError(res, r);
       // A store order comes as the Pedidos tab has it (pedido_app), so the app shows its Pago part with the same design
       // as the order detail (General Manager, 5 Nov 2026). Without it the detail still shows the database's summary.
@@ -638,7 +652,7 @@ function createAdministracionRouter({
   // The payment of the conciliated order that this bank line is: the same amount, the closest day within 7 days; its
   // vouchers not verified yet are verified with the bank's operation number and amount. Returns how many.
   async function certificarComprobantes(req, movimientoId) {
-    const d = await db(req, 'rpc/bank_movement_detail_v7', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: movimientoId } });
+    const d = await db(req, 'rpc/bank_movement_detail_v8', { method: 'POST', body: { p_business_id: req.admin.farmId, p_movement_id: movimientoId } });
     const m = (d.ok && d.data) || {};
     if (!m.pedido || !m.pedido.id) return 0;
     const o = await pedidosPorIds(req.admin.farmId, [m.pedido.id]);
@@ -665,7 +679,7 @@ function createAdministracionRouter({
       return res.status(400).json({ error: 'Elige con qué conciliar.' });
     }
     try {
-      const r = await db(req, 'rpc/bank_match_confirm_v4', {
+      const r = await db(req, 'rpc/bank_match_confirm_v5', {
         method: 'POST',
         body: { p_business_id: req.admin.farmId, p_movement_id: Number(req.params.id), p_kind: b.tipo, p_ref: b.ref, p_client_ref: ref(b.clientRef) },
       });
@@ -737,9 +751,14 @@ function createAdministracionRouter({
   // A provider's detail (3 Nov 2026). The database gives DNI or RUC, phone, accounts and money only to owners.
   router.get('/:businessId/proveedores/:id', async (req, res) => {
     try {
-      const r = await db(req, 'rpc/party_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      const id = String(req.params.id).slice(0, 40);
+      const [r, mensual] = await Promise.all([
+        db(req, 'rpc/party_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: id } }),
+        // Its monthly payment, if it has one (owners; fincas 0081, 16 Nov 2026).
+        db(req, 'rpc/monthly_service_of', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: id } }),
+      ]);
       if (!r.ok) return sendDbError(res, r);
-      return res.json({ proveedor: r.data });
+      return res.json({ proveedor: { ...(r.data || {}), pago_mensual: mensual.ok ? mensual.data || null : null } });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
