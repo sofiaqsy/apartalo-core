@@ -6,6 +6,16 @@
 
 const express = require('express');
 const router = express.Router();
+const acceso = require('../core/services/acceso-instancia');
+
+// Only a signed-in person, and only images of our own storage or Google Drive (17 Nov 2026: before, it fetched any
+// address for anyone).
+const HOSTS = new Set(['nrapvmbzovoimzepvinq.supabase.co', 'drive.google.com', 'drive.usercontent.google.com']);
+router.use(acceso.login, (req, res, next) => {
+  let host = '';
+  try { host = new URL(String(req.query.url || '')).hostname; } catch (_) { host = ''; }
+  return HOSTS.has(host) ? next() : res.status(400).json({ error: 'Esa imagen no es de Apartalo.' });
+});
 const { createWorker } = require('tesseract.js');
 const axios = require('axios');
 

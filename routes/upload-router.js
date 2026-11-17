@@ -15,6 +15,11 @@
 
 const express = require('express');
 const router  = express.Router();
+const acceso  = require('../core/services/acceso-instancia');
+
+// Only signed-in members of the business (17 Nov 2026): before, anyone could upload or delete any stored file
+// (payment vouchers, evidence, product photos). /api/upload/voucher is the general router's (login checked there).
+router.use('/:businessId', (req, res, next) => (req.params.businessId === 'voucher' ? next('router') : acceso.acceso(req, res, next)));
 const axios   = require('axios');
 
 // ── helpers Supabase ─────��────────────────────────────────────────────────────

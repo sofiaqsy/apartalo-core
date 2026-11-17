@@ -12,6 +12,10 @@
 
 const express = require('express');
 const router = express.Router();
+const acceso = require('../core/services/acceso-instancia');
+
+// Only signed-in members of the business (17 Nov 2026): WhatsApp conversations and sending messages.
+router.use(acceso.accesoPor(req => (req.path.match(/^\/[^/]+\/([^/]+)/) || [])[1]));
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SheetsService = require('../core/services/sheets-service');

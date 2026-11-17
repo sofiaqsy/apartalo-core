@@ -8,6 +8,35 @@
 const express = require('express');
 const { guards } = require('../core/services/ownership-instance');
 const router = express.Router();
+const acceso = require('../core/services/acceso-instancia');
+
+// Roasting only for signed-in members (17 Nov 2026: before, anyone could list, start or finish roasts). Green lots and
+// a new roast: a member of that business. A roast event: a member of its business. A roaster profile (profileId):
+// a member of one of the person's businesses. The phone login only finds roasters of the person's businesses.
+const EVENTO = /^\/events\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/|$)/i;
+router.use((req, res, next) => {
+  if (req.path === '/green-lots') return acceso.accesoPor(r => r.query.businessId)(req, res, next);
+  if (req.path === '/events/create') return acceso.accesoPor(r => r.body && r.body.businessId)(req, res, next);
+  return acceso.login(req, res, async () => {
+    try {
+      const perfil = (req.query && req.query.profileId) || (req.body && req.body.profileId);
+      if (perfil) {
+        const r = await req.persona.rpc('profile_in_my_farms', { p_profile_id: String(perfil) });
+        if (!r.ok || r.data !== true) return res.status(403).json({ error: 'Ese tostador no es de tus negocios.' });
+      }
+      const m = req.path.match(EVENTO);
+      if (m) {
+        const r = await req.persona.rpc('roast_event_member', { p_event_id: m[1] });
+        if (!r.ok || r.data !== true) return res.status(404).json({ error: 'Evento no encontrado' });
+      } else if (req.path.startsWith('/events/') && req.path !== '/events/create') {
+        return res.status(404).json({ error: 'Evento no encontrado' });
+      }
+      return next();
+    } catch (_) {
+      return res.status(503).json({ error: 'No se pudo verificar el acceso' });
+    }
+  });
+});
 const axios  = require('axios');
 const negociosService = require('../config/negocios');
 
@@ -94,6 +123,11 @@ router.post('/login', async (req, res) => {
     }
 
     if (!profile) {
+      return res.status(404).json({ error: 'Tostador no encontrado. Verifica tu número.' });
+    }
+    // Only a roaster of one of the businesses of the person signed in (17 Nov 2026).
+    const mio = await req.persona.rpc('profile_in_my_farms', { p_profile_id: profile.id }).catch(() => null);
+    if (!mio || !mio.ok || mio.data !== true) {
       return res.status(404).json({ error: 'Tostador no encontrado. Verifica tu número.' });
     }
 

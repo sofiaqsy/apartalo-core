@@ -8,6 +8,30 @@
 
 const express = require('express');
 const router = express.Router();
+const acceso = require('../core/services/acceso-instancia');
+
+// Access (17 Nov 2026, phase 1): before, every route here worked without a login (sending WhatsApp messages as the
+// business, changing products, prices, stock, recipes and pre-sales, reading conversations). Now:
+//   public, reading only: the businesses, the product catalog and the pre-sale events (the store shows them);
+//   a route with the business in the path: a signed-in member of that business;
+//   sending a message: a member of the business in the body; the rest of this router's routes: a signed-in person.
+// This router is mounted at /api before tracking, auth and roasting, so it only looks at its own paths.
+const PUBLICO_GET = [
+  /^\/negocios$/, /^\/negocios\/por-whatsapp\/[^/]+$/,
+  /^\/productos\/[^/]+$/, /^\/productos\/[^/]+\/[^/]+$/, /^\/productos\/[^/]+\/[^/]+\/(presentaciones|info)$/,
+  /^\/preventas\/[^/]+\/eventos$/,
+];
+const CON_NEGOCIO = /^\/(push-token|conversaciones|pedidos|clientes|precios-cliente|productos|recetas|preventas)\/([^/]+)/;
+const DEBUG_NEGOCIO = /^\/debug\/negocio\/([^/]+)/;
+const PROPIAS = /^\/(mensaje|negocios|upload\/voucher|debug)(\/|$)/;
+router.use((req, res, next) => {
+  if (req.method === 'GET' && PUBLICO_GET.some(r => r.test(req.path))) return next();
+  const m = req.path.match(CON_NEGOCIO) || req.path.match(DEBUG_NEGOCIO);
+  if (m) return acceso.accesoPor(() => m[m.length - 1])(req, res, next);
+  if (/^\/mensaje(\/|$)/.test(req.path)) return acceso.accesoPor(r => r.body && r.body.businessId)(req, res, next);
+  if (PROPIAS.test(req.path)) return acceso.login(req, res, next);
+  return next(); // not this router's: tracking, auth, roasting go on
+});
 const negociosService = require('../config/negocios');
 const WhatsAppService = require('../core/services/whatsapp-service');
 const SupabaseSheetsAdapter = require('../core/services/supabase-sheets-adapter');

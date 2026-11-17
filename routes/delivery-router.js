@@ -23,6 +23,10 @@
 
 const express = require('express');
 const router  = express.Router();
+const acceso  = require('../core/services/acceso-instancia');
+
+// Only signed-in members of the business (17 Nov 2026): deliveries have names and addresses.
+router.use('/:businessId', acceso.acceso);
 const negociosService = require('../config/negocios');
 const SheetsService   = require('../core/services/sheets-service');
 
