@@ -228,6 +228,8 @@ router.post('/:businessId', async (req, res) => {
 
     if (!order) return res.status(500).json({ error: 'Error creando pedido en Supabase' });
     await origenPedido.registrar(order.id, 'app', await origenPedido.persona(req));
+    // Credited to the seller of the client, with the seller's % of today (fincas 0083, 17 Nov 2026).
+    await supabaseService.post('rpc/order_commission_assign', { p_order_id: order.id }).catch(err => console.error('⚠️ Comisión del pedido:', err.message));
 
     if (notificarCliente) {
       try {

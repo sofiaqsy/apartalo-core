@@ -159,6 +159,9 @@ router.get('/:businessId/:clienteId', async (req, res) => {
     } catch (_) {}
 
     const cliente = mapCliente(profile, addr);
+    // Its seller, if it has one (17 Nov 2026; fincas 0083).
+    const vendedor = await req.clientes.rpc('customer_seller', { p_business_id: negocio.farmId, p_customer_id: clienteId }).catch(() => null);
+    cliente.vendedor = vendedor && vendedor.ok && vendedor.data ? vendedor.data : null;
 
     // Orders from Supabase: this customer's (before 5 Nov 2026 only the farm's 50 newest orders were looked at, so older
     // orders of a customer were missed).

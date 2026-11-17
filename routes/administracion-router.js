@@ -140,6 +140,23 @@ const FORMS = Object.freeze({
     fn: 'admin_pay_monthly_bill',
     fields: { mensualId: 'p_bill_id', monto: 'p_amount', metodo: 'p_method', fecha: 'p_date' },
   },
+  // Sellers and commissions (General Manager, 17 Nov 2026; fincas 0083, owners only, decided by the database).
+  vendedor: {
+    fn: 'admin_set_seller',
+    fields: { perfilId: 'p_profile_id', porcentaje: 'p_pct' },
+  },
+  quitarVendedor: {
+    fn: 'admin_stop_seller',
+    fields: { perfilId: 'p_profile_id' },
+  },
+  moverCliente: {
+    fn: 'admin_move_customer',
+    fields: { clienteId: 'p_customer_id', vendedorId: 'p_to_seller' },
+  },
+  pagarComision: {
+    fn: 'admin_request_commission_payment',
+    fields: { perfilId: 'p_profile_id', mes: 'p_month' },
+  },
   inversion: {
     fn: 'admin_register_investment',
     fields: { monto: 'p_amount', quien: 'p_contributor', para: 'p_purpose', descripcion: 'p_description', como: 'p_method', fecha: 'p_date' },
@@ -869,6 +886,30 @@ function createAdministracionRouter({
   const AREAS_GASTOS = new Set(['farm', 'sourcing', 'production', 'fulfillment', 'commercial', 'finance']);
   // Finca → Inversiones (14 Nov 2026): the owners' money in, newest first, 20 at a time; and the owners' names for the
   // form. Owners only, decided by the database (fincas 0079).
+  // Comercialización → Vendedores (17 Nov 2026): the team, who sells with which %, clients and this month's commission
+  // (owners and Comercial); one seller's commissions month by month (owners). Decided by the database (fincas 0083).
+  router.get('/:businessId/comercial/vendedores', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/sellers_list', { method: 'POST', body: { p_business_id: req.admin.farmId } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json(r.data || { equipo: [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  router.get('/:businessId/comercial/vendedores/:perfil', async (req, res) => {
+    const perfil = String(req.params.perfil);
+    if (!/^[0-9a-f-]{36}$/i.test(perfil)) return res.status(400).json({ error: 'Vendedor no válido.' });
+    try {
+      const r = await db(req, 'rpc/seller_commissions', { method: 'POST', body: { p_business_id: req.admin.farmId, p_profile_id: perfil } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json(r.data || { meses: [] });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
   router.get('/:businessId/finca/inversiones', async (req, res) => {
     try {
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);

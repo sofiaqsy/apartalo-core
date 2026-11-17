@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual', 'vendedor', 'quitarVendedor', 'moverCliente', 'pagarComision'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -816,6 +816,32 @@ describe('Registrar gasto: category from the provider (16 Nov 2026)', () => {
     expect(fetchImpl.mock.calls[0][0]).toContain('rpc/suggest_expense_category_for_party');
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ p_business_id: 'farm-rosal', p_party_id: 'P-0031' });
     expect((await call(server, '/api/administracion/BIZ-002/sugerir-categoria', { token: 't', method: 'GET' })).status).toBe(400);
+    await new Promise(res => server.close(res));
+  });
+});
+
+describe('Comercialización → Vendedores (17 Nov 2026)', () => {
+  test('forms go to the seller functions; moving to the house sends no seller', () => {
+    expect(toParams(FORMS.vendedor, { perfilId: 'p1', porcentaje: 5 }, 'f')).toEqual({ p_business_id: 'f', p_profile_id: 'p1', p_pct: 5 });
+    expect(toParams(FORMS.moverCliente, { clienteId: 'c1', vendedorId: '' }, 'f')).toEqual({ p_business_id: 'f', p_customer_id: 'c1' });
+    expect(toParams(FORMS.pagarComision, { perfilId: 'p1', mes: '2026-11' }, 'f')).toEqual({ p_business_id: 'f', p_profile_id: 'p1', p_month: '2026-11' });
+    expect(FORMS.quitarVendedor.fn).toBe('admin_stop_seller');
+  });
+
+  test('the team and one seller months, with the person token', async () => {
+    const fetchImpl = jest.fn(async url => reply(200, url.includes('sellers_list') ? { puede_editar: true, equipo: [{ perfil: 'p1', vendedor: true }] } : { meses: [] }));
+    const a = express(); a.use(express.json());
+    a.use('/api/administracion', createAdministracionRouter({
+      getNegocio: () => ({ farmId: 'farm-rosal' }), verifyToken: async () => ({ uid: 'u' }), fetchImpl,
+      supabaseUrl: () => 'https://db.example', publishableKey: () => 'k',
+    }));
+    const server = await new Promise(r => { const s = a.listen(0, () => r(s)); });
+    const r = await call(server, '/api/administracion/BIZ-002/comercial/vendedores', { token: 't', method: 'GET' });
+    expect(r.body).toEqual({ puede_editar: true, equipo: [{ perfil: 'p1', vendedor: true }] });
+    const id = '0a534c52-144a-45a9-bd36-bd2f7e52b6c6';
+    await call(server, `/api/administracion/BIZ-002/comercial/vendedores/${id}`, { token: 't', method: 'GET' });
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('seller_commissions'))[1].body)).toEqual({ p_business_id: 'farm-rosal', p_profile_id: id });
+    expect((await call(server, '/api/administracion/BIZ-002/comercial/vendedores/x', { token: 't', method: 'GET' })).status).toBe(400);
     await new Promise(res => server.close(res));
   });
 });
