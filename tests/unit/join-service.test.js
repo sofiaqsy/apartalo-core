@@ -15,13 +15,20 @@ function build({ code = 'ABCD-EFGH', over = {}, settings = [] } = {}) {
       expires_at: '2026-10-22T12:00:00Z', revoked_at: null, ...over }],
     join_requests: [],
     farm_join_settings: settings,
+    seller_invitations: [],
   };
   const match = (row, params) => Object.entries(params).every(([k, v]) => {
     if (['select', 'limit', 'order'].includes(k)) return true;
     const s = String(v); return s.startsWith('eq.') ? String(row[k]) === s.slice(3) : true;
   });
   const get = jest.fn(async (t, p = {}) => db[t].filter(r => match(r, p)).slice(0, p.limit || 99));
-  const post = jest.fn(async (t, row) => { const r = { id: `id-${db[t].length + 1}`, status: 'pending', ...row }; db[t].push(r); return [r]; });
+  const post = jest.fn(async (t, row) => {
+    if (t === 'rpc/seller_invitation_use') {
+      const i = db.seller_invitations.find(x => x.code_id === row.p_code_id);
+      if (!i) return false;
+      db.farm_members.push({ seller: true, user_id: `seller:${row.p_profile_id}`, farm_id: i.farm_id, pct: i.commission_pct });
+      return true;
+    } const r = { id: `id-${db[t].length + 1}`, status: 'pending', ...row }; db[t].push(r); return [r]; });
   const patch = jest.fn(async (t, p, f) => { const rows = db[t].filter(r => match(r, p)); rows.forEach(r => Object.assign(r, f)); return rows; });
   const createProfile = jest.fn(async () => 'p-new');
   const svc = createJoinService({ get, post, patch, getNegocios: () => NEGOCIOS, createProfile, log: { log: jest.fn(), error: jest.fn() }, now: () => NOW });
@@ -168,5 +175,49 @@ describe('join without approval (farm_join_settings)', () => {
     expect(r.status).toBe('join_pending');
     expect(b.db.join_requests[0].status).toBe('pending');
     expect(b.db.farm_members).toHaveLength(2);
+  });
+});
+
+describe('seller invitations (17 Nov 2026)', () => {
+  const settings = [{ farm_id: 'farm-A', join_without_approval: true }];
+  const sellers = db => db.farm_members.filter(m => m.seller);
+
+  test('an owner creates one with the %; it is saved with the code', async () => {
+    const b = build();
+    const r = await b.svc.createCode(owner, { businessId: 'BIZ-A', vendedor: { porcentaje: '5,5' } });
+    expect(r).toMatchObject({ vendedor: true, porcentaje: 5.5 });
+    const code = b.db.join_codes[b.db.join_codes.length - 1];
+    expect(b.db.seller_invitations).toEqual([expect.objectContaining({ code_id: code.id, farm_id: 'farm-A', commission_pct: 5.5, created_by: 'p-owner' })]);
+  });
+
+  test('a wrong % is refused before any code is made', async () => {
+    const b = build();
+    await expectErr(b.svc.createCode(owner, { businessId: 'BIZ-A', vendedor: { porcentaje: 80 } }), 400, 'invalid-pct');
+    await expectErr(b.svc.createCode(owner, { businessId: 'BIZ-A', vendedor: { porcentaje: 'x' } }), 400, 'invalid-pct');
+    expect(b.db.join_codes).toHaveLength(1);
+  });
+
+  test('a person with no account yet joins with it and is a seller at once', async () => {
+    const b = build({ settings });
+    b.db.seller_invitations.push({ code_id: 'c1', farm_id: 'farm-A', commission_pct: 7 });
+    const r = await b.svc.submit(newbie, 'ABCD-EFGH');
+    expect(r).toMatchObject({ status: 'joined', vendedor: true });
+    expect(sellers(b.db)).toEqual([expect.objectContaining({ user_id: 'seller:p-new', pct: 7 })]);
+  });
+
+  test('someone already in the team becomes a seller and the code is used', async () => {
+    const b = build({ settings });
+    b.db.seller_invitations.push({ code_id: 'c1', farm_id: 'farm-A', commission_pct: 7 });
+    b.db.firebase_identities.push({ firebase_uid: 'staff-uid', profile_id: 'p-staff', status: 'active' });
+    b.db.farm_members.push({ user_id: 'p-staff', farm_id: 'farm-A', role: 'staff' });
+    expect(await b.svc.submit({ uid: 'staff-uid' }, 'ABCD-EFGH')).toMatchObject({ status: 'already_member', vendedor: true });
+    expect(b.db.join_codes[0].uses).toBe(1);
+    await expectErr(b.svc.submit({ uid: 'staff-uid' }, 'ABCD-EFGH'), 400, 'invalid-code');
+  });
+
+  test('a plain team invitation never makes a seller', async () => {
+    const b = build({ settings });
+    expect(await b.svc.submit(newbie, 'ABCD-EFGH')).toEqual({ status: 'joined', businessName: 'Finca A' });
+    expect(sellers(b.db)).toHaveLength(0);
   });
 });
