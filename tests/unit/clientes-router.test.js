@@ -10,7 +10,8 @@ const router = require('../../routes/clientes-router');
 const ID = '11111111-2222-3333-4444-555555555555';
 function get(server, path) {
   return new Promise((resolve, reject) => {
-    http.get({ port: server.address().port, path }, res => {
+    // A member of the business, signed in (Clientes asks the database first since 17 Nov 2026).
+    http.get({ port: server.address().port, path, headers: { authorization: 'Bearer miembro' } }, res => {
       let out = ''; res.on('data', c => out += c); res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(out || '{}') }));
     }).on('error', reject);
   });
@@ -35,11 +36,17 @@ const PEDIDOS = [
 describe('client orders and report', () => {
   let server;
   beforeAll(done => {
+    // The database says: a member who sees all the clients, and this client is visible.
+    global.fetch = jest.fn(async url => {
+      const fn = String(url).split('/rpc/')[1];
+      const body = fn === 'farm_customer_access' ? { miembro: true, ve_todos: true } : true;
+      return { ok: true, status: 200, text: async () => JSON.stringify(body) };
+    });
     const app = express();
     app.use('/api/clientes', router);
     server = app.listen(0, done);
   });
-  afterAll(done => server.close(done));
+  afterAll(() => new Promise(res => server.close(res)));
   beforeEach(() => {
     supabaseService.getCustomerById.mockResolvedValue({ id: ID, phone: '+51 999 888 777', business_name: 'Café Cirilo' });
     supabaseService.getOrdersByFarm.mockImplementation(async (farm, f) => ({ pedidos: f.orden === 'antiguos' ? PEDIDOS : [...PEDIDOS].reverse() }));

@@ -8,6 +8,12 @@ const router  = express.Router();
 const negociosService  = require('../config/negocios');
 const WhatsAppService  = require('../core/services/whatsapp-service');
 const supabaseService  = require('../core/services/supabase-service');
+const { createClientesAcceso } = require('../core/services/clientes-acceso');
+
+// Clientes only for members of the business, and a seller only his own (17 Nov 2026; fincas 0082).
+const accesoClientes = createClientesAcceso({ getNegocio: id => negociosService.getById(id) });
+router.use('/:businessId', accesoClientes.acceso);
+router.param('clienteId', accesoClientes.visible);
 
 function isUUID(str) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
@@ -79,7 +85,10 @@ router.get('/:businessId', async (req, res) => {
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
     const limiteNum = parseInt(limite) || 50;
-    const profiles  = await supabaseService.getAllCustomers({ search: buscar, limit: limiteNum });
+    // Only this business's clients, and for a seller only his (the database decides with the person's login).
+    const lista = await req.clientes.rpc('farm_customers_list', { p_business_id: negocio.farmId, p_search: buscar || null, p_limit: limiteNum });
+    if (!lista.ok) return res.status(lista.status === 400 ? 403 : 503).json({ error: 'No se pudieron cargar los clientes' });
+    const profiles = (lista.data && lista.data.clientes) || [];
 
     // Batch fetch primary addresses
     const customerIds = profiles.map(p => p.id);
@@ -93,10 +102,10 @@ router.get('/:businessId', async (req, res) => {
       console.warn('[Clientes GET] No se pudieron cargar direcciones:', e.message);
     }
 
-    let clientes = profiles.map(p => mapCliente(p, addrMap[p.id]));
+    let clientes = profiles.map(p => ({ ...mapCliente(p, addrMap[p.id]), vendedor: p.vendedor || null }));
 
-    // Merge guest customers (orders placed without an account)
-    try {
+    // Merge guest customers (orders placed without an account): only for who sees all the clients.
+    if (req.clientes.veTodos) try {
       // Normalize phone: strip leading 51 country code for comparison
       const normalizePhone = p => String(p || '').replace(/^51/, '');
       const seen = new Set(profiles.map(p => normalizePhone(p.phone)).filter(Boolean));
@@ -292,6 +301,8 @@ router.post('/:businessId', async (req, res) => {
       email:        email || null
     });
     if (!nuevo) return res.status(500).json({ error: 'Error creando cliente' });
+    // The client is this business's, and the seller's who created it (fincas 0082).
+    await req.clientes.rpc('farm_customer_link', { p_business_id: negocio.farmId, p_customer_id: nuevo.id });
 
     res.status(201).json({
       success: true, mensaje: 'Cliente creado',
@@ -368,14 +379,19 @@ router.post('/:businessId/importar', async (req, res) => {
 
         // Check duplicate
         const existing = await supabaseService.getCustomerByPhone(whatsappLimpio).catch(() => null);
-        if (existing) { resultados.existentes.push(whatsappLimpio); continue; }
+        if (existing) {
+          await req.clientes.rpc('farm_customer_link', { p_business_id: negocio.farmId, p_customer_id: existing.id });
+          resultados.existentes.push(whatsappLimpio);
+          continue;
+        }
 
-        await supabaseService.createCustomer({
+        const creado = await supabaseService.createCustomer({
           fullName:     cli.nombreResponsable || cli.responsable || '',
           businessName: cli.nombreNegocio     || cli.empresa     || cli.nombre || '',
           phone:        whatsappLimpio,
           email:        cli.email || null
         });
+        if (creado && creado.id) await req.clientes.rpc('farm_customer_link', { p_business_id: negocio.farmId, p_customer_id: creado.id });
         resultados.creados.push(whatsappLimpio);
       } catch (e) {
         resultados.errores.push({ whatsapp: cli.whatsapp, error: e.message });
