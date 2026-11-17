@@ -10,6 +10,30 @@ const supabaseService = require('../core/services/supabase-service');
 const { guards } = require('../core/services/ownership-instance');
 const firebaseService = require('../core/services/firebase-service');
 const { createOrderOrigin } = require('../core/services/order-origin');
+const { createClientesAcceso } = require('../core/services/clientes-acceso');
+
+// Pedidos only for signed-in members of the business, and a seller only the pedidos of his clients and the ones he
+// created (General Manager, 17 Nov 2026: before, these routes answered anyone without a login; fincas 0084).
+const accesoPedidos = createClientesAcceso({ getNegocio: id => negociosService.getById(id) });
+// B2B "pedidos solicitados": another business asked this one's Pedidos and got all of them (the filter was never
+// applied). Someone who is not a member now gets an empty list, not this business's pedidos.
+router.get('/:businessId', (req, res, next) => {
+  if (!req.query.negocioSolicitante) return next();
+  return accesoPedidos.acceso(req, {
+    status: () => ({ json: () => res.json({ total: 0, pedidos: [], pagina: 1, totalPaginas: 0, hayMas: false }) }),
+  }, next);
+});
+router.use('/:businessId', accesoPedidos.acceso);
+router.param('pedidoId', async (req, res, next, pedidoId) => {
+  if (req.clientes && req.clientes.veTodos) return next();
+  try {
+    const r = await req.clientes.rpc('farm_order_visible', { p_business_id: req.clientes.farmId, p_order_ref: String(pedidoId).slice(0, 80) });
+    if (!r.ok) return res.status(503).json({ error: 'No se pudo verificar el acceso' });
+    return r.data === true ? next() : res.status(404).json({ error: 'Pedido no encontrado' });
+  } catch (_) {
+    return res.status(503).json({ error: 'No se pudo verificar el acceso' });
+  }
+});
 
 // Who created each pedido (fincas 0074, 11 Nov 2026): Nuevo Pedido in the app records the person signed in.
 const origenPedido = createOrderOrigin({
@@ -39,7 +63,14 @@ router.get('/:businessId', async (req, res) => {
     const negocio = negociosService.getById(businessId);
     if (!negocio) return res.status(404).json({ error: 'Negocio no encontrado' });
 
-    const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, estadoPago, cliente, fecha, pagina, limite });
+    // A seller: only his clients' pedidos and the ones he created (fincas 0084).
+    let ids;
+    if (!req.clientes.veTodos) {
+      const r = await req.clientes.rpc('farm_seller_order_ids', { p_business_id: negocio.farmId });
+      if (!r.ok) return res.status(503).json({ error: 'No se pudieron cargar los pedidos' });
+      ids = Array.isArray(r.data) ? r.data : [];
+    }
+    const result = await supabaseService.getOrdersByFarm(negocio.farmId, { vista, estado, estadoPago, cliente, fecha, pagina, limite, ids });
     return res.json(result);
   } catch (error) {
     console.error('❌ Error obteniendo pedidos:', error);
