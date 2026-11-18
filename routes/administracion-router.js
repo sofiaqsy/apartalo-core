@@ -120,8 +120,8 @@ const FORMS = Object.freeze({
   },
   // Cerrar cuentas with a farmer (18 Nov 2026, owners): advances pay the compras, the rest is requested (fincas 0093).
   cerrarCuentas: {
-    fn: 'admin_close_party_account',
-    fields: { proveedorId: 'p_party_id' },
+    fn: 'admin_close_party_account_v2', // with the amount asked now; the rest stays owed (fincas 0094)
+    fields: { proveedorId: 'p_party_id', monto: 'p_amount' },
   },
   pago: {
     fn: 'admin_pay_purchase_v2',
