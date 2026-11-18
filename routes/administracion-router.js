@@ -118,6 +118,11 @@ const FORMS = Object.freeze({
     fn: 'admin_pay_purchase_from_advances',
     fields: { compraId: 'p_purchase_id' },
   },
+  // Cerrar cuentas with a farmer (18 Nov 2026, owners): advances pay the compras, the rest is requested (fincas 0093).
+  cerrarCuentas: {
+    fn: 'admin_close_party_account',
+    fields: { proveedorId: 'p_party_id' },
+  },
   pago: {
     fn: 'admin_pay_purchase_v2',
     fields: { compraId: 'p_purchase_id', monto: 'p_amount', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
@@ -1127,6 +1132,17 @@ function createAdministracionRouter({
       const r = await db(req, 'rpc/party_report_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ reporte: r.data });
+    } catch (err) {
+      return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
+    }
+  });
+
+  // Cerrar cuentas, before confirming (owners, decided by the database; fincas 0093, 18 Nov 2026).
+  router.get('/:businessId/proveedores/:id/cierre', async (req, res) => {
+    try {
+      const r = await db(req, 'rpc/party_account_close_preview', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: String(req.params.id).slice(0, 40) } });
+      if (!r.ok) return sendDbError(res, r);
+      return res.json({ cierre: r.data });
     } catch (err) {
       return res.status(502).json({ error: 'No se pudo conectar con la base de datos' });
     }
