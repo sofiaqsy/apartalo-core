@@ -68,6 +68,12 @@ const FORMS = Object.freeze({
     fn: 'admin_register_party_v4',
     fields: { nombre: 'p_name', rol: 'p_role', tipo: 'p_kind', documento: 'p_dni_or_ruc', telefono: 'p_phone', vende: 'p_sells', recogidoPor: 'p_collected_by', comunidad: 'p_community', area: 'p_area', codigo: 'p_service_code' },
   },
+  // Registrar proveedor in Finanzas (18 Nov 2026, owners): a provider like the contadora, with the account to transfer
+  // to, saved together (fincas 0089). No Agricultor or Comprador here.
+  proveedorFinanzas: {
+    fn: 'admin_register_finance_provider',
+    fields: { nombre: 'p_name', tipoCuenta: 'p_account_kind', numero: 'p_number', banco: 'p_bank', titular: 'p_holder', documento: 'p_dni_or_ruc', telefono: 'p_phone', tipo: 'p_kind' },
+  },
   // Editar proveedor and its payment accounts (3 Nov 2026, owners only, decided by the database). An account is
   // never edited in place: cuentaProveedor with reemplazaId archives the old one and adds the new one.
   editarProveedor: {
