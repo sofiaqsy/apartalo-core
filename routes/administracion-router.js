@@ -71,8 +71,8 @@ const FORMS = Object.freeze({
   // Registrar proveedor in Finanzas (18 Nov 2026, owners): a provider like the contadora, with the account to transfer
   // to, saved together (fincas 0089). No Agricultor or Comprador here.
   proveedorFinanzas: {
-    fn: 'admin_register_finance_provider',
-    fields: { nombre: 'p_name', tipoCuenta: 'p_account_kind', numero: 'p_number', banco: 'p_bank', titular: 'p_holder', documento: 'p_dni_or_ruc', telefono: 'p_phone', tipo: 'p_kind' },
+    fn: 'admin_register_finance_provider_v2', // with the day and the fixed amount of its monthly payment (fincas 0090)
+    fields: { nombre: 'p_name', tipoCuenta: 'p_account_kind', numero: 'p_number', banco: 'p_bank', titular: 'p_holder', documento: 'p_dni_or_ruc', telefono: 'p_phone', tipo: 'p_kind', dia: 'p_day', monto: 'p_amount' },
   },
   // Editar proveedor and its payment accounts (3 Nov 2026, owners only, decided by the database). An account is
   // never edited in place: cuentaProveedor with reemplazaId archives the old one and adds the new one.
@@ -135,8 +135,8 @@ const FORMS = Object.freeze({
   // Monthly services (General Manager, 16 Nov 2026; fincas 0081, owners only, decided by the database): mark a provider
   // as paid every month (Luz, day 15), stop it, and pay a month's bill with the amount from the bill.
   servicioMensual: {
-    fn: 'admin_set_monthly_service',
-    fields: { proveedorId: 'p_party_id', nombre: 'p_name', dia: 'p_day', categoria: 'p_category' },
+    fn: 'admin_set_monthly_service_v2', // with the fixed amount (fincas 0090)
+    fields: { proveedorId: 'p_party_id', nombre: 'p_name', dia: 'p_day', monto: 'p_amount', categoria: 'p_category' },
   },
   quitarMensual: {
     fn: 'admin_stop_monthly_service',
@@ -563,7 +563,7 @@ function createAdministracionRouter({
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list_v4', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -778,7 +778,7 @@ function createAdministracionRouter({
       const [r, mensual] = await Promise.all([
         db(req, 'rpc/party_detail_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: id } }),
         // Its monthly payment, if it has one (owners; fincas 0081, 16 Nov 2026).
-        db(req, 'rpc/monthly_service_of', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: id } }),
+        db(req, 'rpc/monthly_service_of_v2', { method: 'POST', body: { p_business_id: req.admin.farmId, p_party_id: id } }),
       ]);
       if (!r.ok) return sendDbError(res, r);
       return res.json({ proveedor: { ...(r.data || {}), pago_mensual: mensual.ok ? mensual.data || null : null } });
