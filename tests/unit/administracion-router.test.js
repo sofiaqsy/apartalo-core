@@ -735,6 +735,11 @@ describe('compras list and detail', () => {
       .toEqual({ p_business_id: 'farm-rosal', p_kind: 'purchase', p_ref: 'PU-0001' });
     await call(server, '/api/administracion/BIZ-002/finanzas/destino?tipo=adelanto&id=SOL-0002', { token: 't', method: 'GET' });
     expect(JSON.parse(fetchImpl.mock.calls.filter(c => c[0].includes('payment_target')).pop()[1].body)).toMatchObject({ p_kind: 'advance_request' });
+    // Pagar el mes (18 Nov 2026): a monthly bill asks payment_target_v3 for its provider.
+    await call(server, '/api/administracion/BIZ-002/finanzas/destino?tipo=mensual&id=MB-0001', { token: 't', method: 'GET' });
+    const ultima = fetchImpl.mock.calls.filter(c => c[0].includes('payment_target')).pop();
+    expect(ultima[0]).toContain('rpc/payment_target_v3');
+    expect(JSON.parse(ultima[1].body)).toMatchObject({ p_kind: 'monthly_bill', p_ref: 'MB-0001' });
     const n = fetchImpl.mock.calls.length;
     for (const q of ['tipo=otro&id=PU-1', 'tipo=gasto&id=1;drop', 'tipo=gasto']) {
       expect((await call(server, `/api/administracion/BIZ-002/finanzas/destino?${q}`, { token: 't', method: 'GET' })).status).toBe(400);
