@@ -538,7 +538,7 @@ function createAdministracionRouter({
     { key: 'produccion', area: 'production', fn: 'production_summary_v7' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
-    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v4' }, // money: the database answers only to owners
+    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v5' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
