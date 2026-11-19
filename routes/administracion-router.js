@@ -52,6 +52,11 @@ const FORMS = Object.freeze({
     fn: 'admin_cancel_expense',
     fields: { gastoId: 'p_expense_id', motivo: 'p_reason' },
   },
+  // Editar gasto → Cuándo se paga: A crédito (19 Nov 2026, fincas 0097).
+  gastoACredito: {
+    fn: 'admin_set_expense_credit',
+    fields: { gastoId: 'p_expense_id' },
+  },
   // Administración sets a person's areas (two or more allowed, one principal); the others are ended, not deleted.
   areasPersona: {
     fn: 'admin_set_person_areas',
