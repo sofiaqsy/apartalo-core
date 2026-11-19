@@ -43,6 +43,15 @@ const FORMS = Object.freeze({
     fn: 'admin_request_expense_credit_payment',
     fields: { gastoId: 'p_expense_id' },
   },
+  // Edit or cancel an unpaid gasto (19 Nov 2026, who registered it or an owner; fincas 0096).
+  editarGasto: {
+    fn: 'admin_edit_expense',
+    fields: { gastoId: 'p_expense_id', monto: 'p_amount', descripcion: 'p_description', categoria: 'p_category', proveedorId: 'p_supplier_id', fecha: 'p_date' },
+  },
+  anularGasto: {
+    fn: 'admin_cancel_expense',
+    fields: { gastoId: 'p_expense_id', motivo: 'p_reason' },
+  },
   // Administración sets a person's areas (two or more allowed, one principal); the others are ended, not deleted.
   areasPersona: {
     fn: 'admin_set_person_areas',
