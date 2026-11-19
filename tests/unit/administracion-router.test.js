@@ -49,7 +49,7 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual', 'vendedor', 'quitarVendedor', 'moverCliente', 'pagarComision', 'proveedorFinanzas', 'cerrarCuentas'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual', 'vendedor', 'quitarVendedor', 'moverCliente', 'pagarComision', 'proveedorFinanzas', 'cerrarCuentas', 'gastoCredito', 'solicitarPagoGasto'].sort());
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
@@ -655,7 +655,7 @@ describe('compras list and detail', () => {
     const r = await call(server, '/api/administracion/BIZ-002/gastos-area?area=farm&offset=20', { token: 't', method: 'GET' });
     expect(r.body.gastos).toHaveLength(20);
     expect(r.body.hayMas).toBe(true);
-    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v3'))[0];
+    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v4'))[0];
     expect(url).toContain('area=eq.farm');
     expect(url).toContain('offset=20');
     expect(url).toContain('limit=21');
@@ -694,7 +694,7 @@ describe('compras list and detail', () => {
     const { server, fetchImpl } = await servidor(['finance'], () => reply(200, { total: 21, filas: [{ id: 'EX-1', estado: 'Urgente' }] }));
     const r = await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=gastos&offset=20&limit=99', { token: 't', method: 'GET' });
     expect(r.body).toEqual({ filas: [{ id: 'EX-1', estado: 'Urgente' }], total: 21, hayMas: false });
-    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v5'))[1].body))
+    expect(JSON.parse(fetchImpl.mock.calls.find(c => c[0].includes('finance_list_v6'))[1].body))
       .toEqual({ p_business_id: 'farm-rosal', p_kind: 'gastos', p_offset: 20, p_limit: 50 });
     const n = fetchImpl.mock.calls.length;
     expect((await call(server, '/api/administracion/BIZ-002/finanzas/lista?tipo=otro', { token: 't', method: 'GET' })).status).toBe(400);

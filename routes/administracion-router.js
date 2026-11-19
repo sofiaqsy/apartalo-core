@@ -34,6 +34,15 @@ const FORMS = Object.freeze({
       parcelaId: 'p_plot_id', fecha: 'p_date',
     },
   },
+  // Gastos a crédito (19 Nov 2026, fincas 0095): marked when registered; Solicitar pago sends it to Finanzas.
+  gastoCredito: {
+    fn: 'admin_mark_expense_credit',
+    fields: { gastoId: 'p_expense_id' },
+  },
+  solicitarPagoGasto: {
+    fn: 'admin_request_expense_credit_payment',
+    fields: { gastoId: 'p_expense_id' },
+  },
   // Administración sets a person's areas (two or more allowed, one principal); the others are ended, not deleted.
   areasPersona: {
     fn: 'admin_set_person_areas',
@@ -568,7 +577,7 @@ function createAdministracionRouter({
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v6', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -953,7 +962,7 @@ function createAdministracionRouter({
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     try {
       if (!(await tieneArea(req, area))) return res.status(403).json({ error: 'Esa área no es de tus áreas.' });
-      const r = await db(req, `area_expenses_recent_v3?${new URLSearchParams({
+      const r = await db(req, `area_expenses_recent_v4?${new URLSearchParams({
         select: '*', business_id: `eq.${req.admin.farmId}`, area: `eq.${area}`, order: 'expense_date.desc,id.desc',
         offset: String(offset), limit: String(limit + 1),
       })}`);
