@@ -55,8 +55,25 @@ describe('resolveSession', () => {
     expect(await b.svc.resolveSession(id())).toEqual({
       status: 'active',
       profile: { id: P_OWNER, fullName: 'Ana', hasPhone: false, isAdmin: false },
-      businesses: [{ businessId: 'BIZ-002', name: 'Finca Rosal', address: 'Calle 1', city: 'Lima', role: 'owner' }],
+      businesses: [{ businessId: 'BIZ-002', farmId: 'farm-A', name: 'Finca Rosal', address: 'Calle 1', city: 'Lima', role: 'owner' }],
     });
+  });
+
+  test('active owner gets the stable farmId of each business (Buddy, R2)', async () => {
+    const b = build({
+      identities: [{ firebase_uid: 'uid-1', profile_id: P_OWNER, status: 'active' }],
+      members: [{ user_id: P_OWNER, farm_id: 'farm-A', role: 'owner' }],
+    });
+    const r = await b.svc.resolveSession(id());
+    expect(r.businesses).toHaveLength(1);
+    expect(r.businesses[0]).toMatchObject({ businessId: 'BIZ-002', farmId: 'farm-A', role: 'owner' });
+  });
+
+  test('a person with no business gets no_invitation and no farmId', async () => {
+    const b = build({ members: [] });
+    const r = await b.svc.resolveSession(id());
+    expect(r).toEqual({ status: 'no_invitation' });
+    expect(JSON.stringify(r)).not.toContain('farm');
   });
 
   test('revoked is reported as revoked', async () => {
