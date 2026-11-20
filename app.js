@@ -131,6 +131,10 @@ app.use('/api/ocr', ocrRouter);
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
 
+// Productos para apps de afuera: cada llamada verifica el login de Firebase y que la persona sea miembro del negocio.
+// Las rutas que usa hoy la app (/api/productos/...) no cambian.
+app.use('/api/v1/farms', require('./core/services/partner-products-instance').buildPartnerProductsRouter());
+
 // Administración (gastos, adelantos, entregas, pagos, pendientes): reenvía el login de la persona a fincas
 app.use('/api/administracion', createAdministracionRouter({
   getNegocio: id => negociosService.getById(id),
