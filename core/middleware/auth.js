@@ -19,7 +19,7 @@
 const MODES = ['off', 'observe', 'enforce'];
 
 /** Routes (relative to the mount point, usually /api) that stay public by design. */
-const DEFAULT_EXEMPT = ['/track'];
+const DEFAULT_EXEMPT = ['/track', '/public'];
 
 function resolveMode(raw, { canEnforce = false } = {}) {
   const value = String(raw == null || raw === '' ? 'off' : raw).trim().toLowerCase();

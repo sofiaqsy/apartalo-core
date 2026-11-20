@@ -131,6 +131,16 @@ app.use('/api/ocr', ocrRouter);
 // Upload de imágenes a Google Drive
 app.use('/api/upload', uploadRouter);
 
+// Productos y precios públicos de un negocio aprobado (sin login; cada cliente decide qué negocios muestra).
+{
+  const supabaseService = require('./core/services/supabase-service');
+  const { createPublicProductsRouter } = require('./routes/public-products-router');
+  app.use('/api/public/farms', createPublicProductsRouter({
+    getApprovedFarm: async id => (await supabaseService.get('farms', { id: `eq.${id}`, status: 'eq.approved', select: 'id', limit: 1 }))[0] || null,
+    listProducts: id => supabaseService.getProductsWithPresentations(id),
+  }));
+}
+
 // Productos para apps de afuera: cada llamada verifica el login de Firebase y que la persona sea miembro del negocio.
 // Las rutas que usa hoy la app (/api/productos/...) no cambian.
 app.use('/api/v1/farms', require('./core/services/partner-products-instance').buildPartnerProductsRouter());
