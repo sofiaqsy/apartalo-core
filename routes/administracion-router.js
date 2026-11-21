@@ -72,6 +72,11 @@ const FORMS = Object.freeze({
     fn: 'admin_pay_expense_v3',
     fields: { gastoId: 'p_expense_id', monto: 'p_amount', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
+  // Solicitar pago del resto (21 Nov 2026, fincas 0102): the rest of a gasto paid in part waits in its area until asked.
+  solicitarRestoGasto: {
+    fn: 'admin_request_expense_rest',
+    fields: { gastoId: 'p_expense_id' },
+  },
   // Several gastos of one provider with one payment, each with its amount (21 Nov 2026, fincas 0101).
   pagoGastos: {
     fn: 'admin_pay_expenses',
@@ -550,7 +555,7 @@ function createAdministracionRouter({
     { key: 'produccion', area: 'production', fn: 'production_summary_v7' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
-    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v6' }, // money: the database answers only to owners
+    { key: 'finanzas', area: 'finance', fn: 'finance_summary_v7' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
     try {
@@ -603,7 +608,7 @@ function createAdministracionRouter({
       if (!['compras', 'gastos', 'adelantos'].includes(tipo)) return res.status(400).json({ error: 'Elige compras, gastos o adelantos.' });
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
       const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-      const r = await db(req, 'rpc/finance_list_v7', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
+      const r = await db(req, 'rpc/finance_list_v8', { method: 'POST', body: { p_business_id: req.admin.farmId, p_kind: tipo, p_offset: offset, p_limit: limit } });
       if (!r.ok) return sendDbError(res, r);
       const total = (r.data && r.data.total) || 0;
       const filas = (r.data && r.data.filas) || [];
@@ -988,7 +993,7 @@ function createAdministracionRouter({
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     try {
       if (!(await tieneArea(req, area))) return res.status(403).json({ error: 'Esa área no es de tus áreas.' });
-      const r = await db(req, `area_expenses_recent_v5?${new URLSearchParams({
+      const r = await db(req, `area_expenses_recent_v6?${new URLSearchParams({
         select: '*', business_id: `eq.${req.admin.farmId}`, area: `eq.${area}`, order: 'expense_date.desc,id.desc',
         offset: String(offset), limit: String(limit + 1),
       })}`);
