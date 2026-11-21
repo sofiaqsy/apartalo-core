@@ -150,6 +150,12 @@ const FORMS = Object.freeze({
     fn: 'admin_pay_purchase_v2',
     fields: { compraId: 'p_purchase_id', monto: 'p_amount', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
   },
+  // Pagar varias compras de un proveedor con un solo pago (General Manager, 21 Nov 2026: one BCP transfer must stay one
+  // payment so it matches the bank line). Owners only, same provider, each with an open request (fincas 0100).
+  pagoVarias: {
+    fn: 'admin_pay_purchases',
+    fields: { compraIds: 'p_purchase_ids', metodo: 'p_method', operacion: 'p_bank_reference', fecha: 'p_date' },
+  },
   ingreso: {
     fn: 'admin_record_money_in',
     fields: { tipo: 'p_kind', monto: 'p_amount', metodo: 'p_method', descripcion: 'p_description', personaId: 'p_party_id', adelantoId: 'p_advance_id', operacion: 'p_bank_reference', fecha: 'p_date' },

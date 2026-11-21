@@ -49,7 +49,17 @@ describe('administración router', () => {
   });
   test('only the allowed forms exist', async () => {
     expect((await call(server, '/api/administracion/BIZ-002/registrar/borrar', { token: 't' })).status).toBe(404);
-    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual', 'vendedor', 'quitarVendedor', 'moverCliente', 'pagarComision', 'proveedorFinanzas', 'cerrarCuentas', 'gastoCredito', 'solicitarPagoGasto', 'editarGasto', 'anularGasto', 'gastoACredito'].sort());
+    expect(Object.keys(FORMS).sort()).toEqual(['adelanto', 'aprobarAdelanto', 'areasPersona', 'corregirArea', 'entrega', 'gasto', 'ingreso', 'pago', 'pagoGasto', 'precio', 'proveedor', 'rechazarAdelanto', 'pagoConAdelanto', 'retiro', 'solicitarPago', 'editarProveedor', 'cuentaProveedor', 'quitarCuenta', 'quitarEvidencia', 'pagoDesdeAdelantos', 'inversion', 'servicioMensual', 'quitarMensual', 'pagoMensual', 'vendedor', 'quitarVendedor', 'moverCliente', 'pagarComision', 'proveedorFinanzas', 'cerrarCuentas', 'gastoCredito', 'solicitarPagoGasto', 'editarGasto', 'anularGasto', 'gastoACredito', 'pagoVarias'].sort());
+  });
+  test('pagoVarias sends the list of compras to admin_pay_purchases', async () => {
+    fetchImpl.mockResolvedValue(reply(200, { payment_id: 'PY-0042', paid_now: 10000 }));
+    const r = await call(server, '/api/administracion/BIZ-002/registrar/pagoVarias', {
+      token: 't', body: { compraIds: ['PU-0017', 'PU-0018'], metodo: 'transfer', clientRef: 'pay-many-0001' },
+    });
+    expect(r.status).toBe(200);
+    const [url, opts] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://db.example/rest/v1/rpc/admin_pay_purchases');
+    expect(JSON.parse(opts.body)).toEqual({ p_business_id: expect.any(String), p_purchase_ids: ['PU-0017', 'PU-0018'], p_method: 'transfer', p_client_ref: 'pay-many-0001' });
   });
   test('a form forwards the person\'s own token (never a service key) and only allowed fields', async () => {
     fetchImpl.mockResolvedValue(reply(200, { expense_id: 'EX-0001', payment_id: 'PY-0001' }));
