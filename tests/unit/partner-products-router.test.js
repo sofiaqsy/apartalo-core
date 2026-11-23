@@ -36,7 +36,7 @@ describe('partner products router', () => {
     list: jest.fn(), getById: jest.fn(), create: jest.fn(), update: jest.fn(),
     getPresentation: jest.fn(), createPresentation: jest.fn(), updatePresentation: jest.fn(),
   };
-  const photos = { prepareUpload: jest.fn(), register: jest.fn() };
+  const photos = { prepareUpload: jest.fn(), register: jest.fn(), remove: jest.fn() };
   const log = { log: jest.fn(), error: jest.fn() };
 
   beforeAll(async () => {
@@ -209,6 +209,30 @@ describe('partner products router', () => {
       expect(photos.prepareUpload).toHaveBeenCalledWith(PROD_A, PRES_A, 'image/jpeg');
       const g = await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_A}/presentations/${PRES_A}/photos`, { method: 'POST', key: 'photo-0001', body: { path: s.body.path, mimeType: 'image/jpeg' } });
       expect(g).toEqual({ status: 201, body: { id: 'm1', url: 'https://s/p.jpg' } });
+    });
+
+    test('remove a wrong photo of the presentation', async () => {
+      photos.remove.mockResolvedValue();
+      const PHOTO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+      const r = await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_A}/presentations/${PRES_A}/photos/${PHOTO}`, { method: 'DELETE' });
+      expect(r).toEqual({ status: 200, body: { removed: true } });
+      expect(photos.remove).toHaveBeenCalledWith(PROD_A, PRES_A, PHOTO);
+    });
+
+    test('remove a photo: another farm, product or presentation never reaches the photos', async () => {
+      const PHOTO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+      expect((await call(server, `/api/v1/farms/${FARM_B}/products/${PROD_B}/presentations/${PRES_B}/photos/${PHOTO}`, { method: 'DELETE' })).status).toBe(403);
+      expect((await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_B}/presentations/${PRES_B}/photos/${PHOTO}`, { method: 'DELETE' })).status).toBe(404);
+      expect((await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_A}/presentations/${PRES_B}/photos/${PHOTO}`, { method: 'DELETE' })).status).toBe(404);
+      expect((await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_A}/presentations/${PRES_A}/photos/${PHOTO}`, { method: 'DELETE', token: null })).status).toBe(401);
+      expect(photos.remove).not.toHaveBeenCalled();
+    });
+
+    test('a photo that is not of this presentation answers 404', async () => {
+      const err = new Error('Foto no encontrada'); err.status = 404;
+      photos.remove.mockRejectedValue(err);
+      const r = await call(server, `/api/v1/farms/${FARM_A}/products/${PROD_A}/presentations/${PRES_A}/photos/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee`, { method: 'DELETE' });
+      expect(r.status).toBe(404);
     });
 
     test('a photo error keeps its status (for example the 3-photo limit)', async () => {

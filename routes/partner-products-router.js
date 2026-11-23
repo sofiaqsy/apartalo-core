@@ -7,6 +7,7 @@
  *   2. the person must be an active owner or staff member of :farmId, read from the same session as
  *      /api/auth/session (403 otherwise). It works whatever AUTH_MODE is.
  * Writes reuse the same product functions and rows as Apartalo (no copies).
+ * Removing a product or a size is never a delete: PATCH status 'archived' (product) or visible false (size).
  * POST needs an `Idempotency-Key` header: a retry with the same key returns the first answer and changes nothing.
  * Each person has a per-minute limit (429 when passed).
  * Logs never contain tokens, emails, phones or bodies.
@@ -252,6 +253,13 @@ function createPartnerProductsRouter({
     const f = await photos.register(req.params.productId, req.params.presentationId, b.path, b.mimeType);
     send(201, { id: f.id, url: f.url });
   })));
+
+  // Quitar foto (23 Nov 2026): a wrong photo is removed, the same way the Apartalo app does it. Only a photo of this
+  // presentation of this product; any other id answers 404.
+  router.delete('/:farmId/products/:productId/presentations/:presentationId/photos/:photoId', ...base, wrap(ownProduct), wrap(ownPresentation), wrap(async (req, res) => {
+    await photos.remove(req.params.productId, req.params.presentationId, req.params.photoId);
+    res.json({ removed: true });
+  }));
 
   return router;
 }

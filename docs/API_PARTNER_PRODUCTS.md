@@ -49,6 +49,11 @@ Every `POST` needs a header `Idempotency-Key` (8 to 100 characters, for example 
 1. `POST .../presentations/:presentationId/photos/sign` with `{ mimeType }` (`image/jpeg`, `image/png` or `image/webp`) → `{ signedUrl, path }`.
 2. `PUT` the image bytes to `signedUrl`.
 3. `POST .../presentations/:presentationId/photos` with `{ path, mimeType }` and an `Idempotency-Key` → `{ id, url }`.
+- **Remove a wrong photo:** `DELETE .../presentations/:presentationId/photos/:photoId` → `{ removed: true }`. The photo id comes in each presentation's `photos`. A photo of another presentation or product answers 404.
+
+### Removing a product or a size (nothing is deleted)
+- **Remove a product:** `PATCH /:farmId/products/:productId` with `{ "status": "archived" }`. It leaves the store and the public list at once. The owner list still returns it with `status: "archived"`, so your app decides: hide archived ones, or show them as "Oculto" with a way back (`{ "status": "active" }`).
+- **Remove a size (presentation):** `PATCH .../presentations/:presentationId` with `{ "visible": false }`. It leaves the store and the public list; `{ "visible": true }` brings it back.
 
 ### Public products (no login)
 - `GET /api/public/farms/:farmId/products?offset=0&limit=20` → `{ items, total, hasMore }`.
@@ -71,4 +76,4 @@ Every `POST` needs a header `Idempotency-Key` (8 to 100 characters, for example 
 
 ## 6. Not included yet
 
-Deleting photos or presentations, product categories and coffee details, orders and payments.
+Deleting products or presentations for good (use archived or visible false), product categories and coffee details, orders and payments.
