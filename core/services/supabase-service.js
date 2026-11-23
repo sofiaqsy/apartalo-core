@@ -136,7 +136,7 @@ async function getProductsWithPresentations(farmId) {
     }),
     get('media', {
       owner_id: `in.(${ids.join(',')})`,
-      select: 'owner_id,presentation_id,url,role,sort_order',
+      select: 'id,owner_id,presentation_id,url,role,sort_order',
       order: 'sort_order.asc'
     })
   ]);
@@ -144,8 +144,12 @@ async function getProductsWithPresentations(farmId) {
   // presentation_id set → image for that specific presentation
   // no presentation_id + role cover/profile → fallback product image
   const presImageMap = {};
+  const presPhotos = {};
   const productCoverMap = {};
   for (const m of mediaRows) {
+    if (m.presentation_id) {
+      (presPhotos[m.presentation_id] = presPhotos[m.presentation_id] || []).push({ id: m.id, url: m.url, orden: m.sort_order });
+    }
     if (m.presentation_id && !presImageMap[m.presentation_id]) {
       presImageMap[m.presentation_id] = m.url;
     } else if (!m.presentation_id && (m.role === 'cover' || m.role === 'profile') && !productCoverMap[m.owner_id]) {
@@ -215,7 +219,8 @@ async function getProductsWithPresentations(farmId) {
     presMap[pp.product_id].push({
       ...pp,
       stock: derivedStock,
-      image_url: presImageMap[pp.id] || null
+      image_url: presImageMap[pp.id] || null,
+      fotos: presPhotos[pp.id] || []
     });
   }
 
