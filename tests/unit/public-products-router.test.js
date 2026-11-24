@@ -74,6 +74,18 @@ describe('public products router', () => {
     expect(r.body.items[0]).toMatchObject({ available: false, presentations: [{ available: false, price: 25.9 }] });
   });
 
+  test('día and viaje do not use stock: available even with stock 0 (24 Nov 2026)', async () => {
+    listProducts.mockResolvedValue([prod({ presentations: [
+      pres({ id: 'd', unit: 'día', pack_size: 1, stock: 0 }),
+      pres({ id: 'v', unit: 'Viaje', pack_size: 1, stock: 0 }),
+      pres({ id: 'a', unit: 'dia', pack_size: 1, stock: 0 }),
+      pres({ id: 'u', unit: 'unidad', pack_size: 1, stock: 0 }),
+    ] })]);
+    const r = await get(server, `/api/public/farms/${FARM}/products`);
+    expect(r.body.items[0].presentations.map(x => [x.id, x.available])).toEqual([['d', true], ['v', true], ['a', true], ['u', false]]);
+    expect(r.body.items[0].available).toBe(true);
+  });
+
   test('long descriptions are cut', async () => {
     listProducts.mockResolvedValue([prod({ description: 'x'.repeat(1000) })]);
     const r = await get(server, `/api/public/farms/${FARM}/products`);

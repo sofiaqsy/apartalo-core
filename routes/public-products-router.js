@@ -19,12 +19,17 @@ const short = s => {
   return t.length > SHORT ? t.slice(0, SHORT - 1).trimEnd() + '…' : t;
 };
 
+// Services sold by the day or the trip do not use stock: always available (General Manager, 24 Nov 2026, for
+// Buddy's transport services). Accents and capitals do not matter ("dia", "Día").
+const SIN_STOCK = new Set(['dia', 'viaje']);
+const usesNoStock = unit => SIN_STOCK.has(String(unit || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+
 function toPublic(p) {
   const presentations = (p.presentations || [])
     .filter(pp => pp.is_visible !== false)
     .map(pp => ({
       id: pp.id, packSize: pp.pack_size, unit: pp.unit, price: (pp.price_cents || 0) / 100,
-      available: (pp.stock || 0) > 0, photoUrl: pp.image_url || null,
+      available: usesNoStock(pp.unit) || (pp.stock || 0) > 0, photoUrl: pp.image_url || null,
     }));
   if (!presentations.length) return null; // nothing to sell or no price: not shown
   return {

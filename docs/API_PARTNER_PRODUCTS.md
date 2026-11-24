@@ -59,6 +59,7 @@ Every `POST` needs a header `Idempotency-Key` (8 to 100 characters, for example 
 - `GET /api/public/farms/:farmId/products?offset=0&limit=20` → `{ items, total, hasMore }`.
 - Only approved businesses (404 otherwise), only `active` products and only visible presentations.
 - Each item: `id, name, description` (max 300 characters), `currency, photoUrl, available`, and `presentations: [{ id, packSize, unit, price, available, photoUrl }]`. It never includes stock numbers, wholesale prices, lots or sales.
+- `available` is false when `stock` is 0, except for sizes sold by `día` or `viaje` (services): they do not use stock and are always available.
 - Cached for 60 seconds. Max 120 calls per minute per IP.
 - Your app decides which businesses it shows: the API does not know your app.
 
