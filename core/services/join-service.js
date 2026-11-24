@@ -4,9 +4,8 @@
  *   owner creates a temporary code  ->  person enters it  ->  pending request
  *   owner approves  ->  only now are the profile, identity link and farm_members row created
  *
- * A business can opt in to join without approval (table farm_join_settings, VR Coffee 3 Nov 2026):
- * then entering its code gives staff access at once, and the request is saved as approved by the
- * code's creator. A code can also be a seller invitation (fincas 0087, General Manager 17 Nov 2026): whoever joins with it,
+ * Since 24 Nov 2026 every invitation gives staff access at once (before, only businesses with
+ * farm_join_settings, VR Coffee 3 Nov 2026), and the request is saved as approved by the code's creator. A code can also be a seller invitation (fincas 0087, General Manager 17 Nov 2026): whoever joins with it,
  * or is already in the team, becomes a seller with the % the owner chose. Without that row, a code identifies a business and never grants access by itself. Codes are stored hashed,
  * expire, can be revoked and have a use limit. Everything here assumes the caller already
  * proved who they are (verified Firebase identity).
@@ -85,15 +84,17 @@ function createJoinService({ get, post, patch, getNegocios, createProfile, log =
     if (code.length !== 8) throw new JoinError(400, 'invalid-code', 'Código no válido');
     const rows = await get('join_codes', { code_hash: `eq.${hashCode(code)}`, select: 'id,farm_id,role,max_uses,uses,expires_at,revoked_at,created_by', limit: 1 });
     const c = rows && rows[0];
-    // One generic answer for unknown, expired, revoked or used-up codes: no hints to guessers.
-    if (!c || c.revoked_at || new Date(c.expires_at) <= now() || c.uses >= c.max_uses) {
+    // One generic answer for unknown, expired or revoked codes: no hints to guessers.
+    if (!c || c.revoked_at || new Date(c.expires_at) <= now()) {
       throw new JoinError(400, 'invalid-code', 'Código no válido o vencido');
     }
+    const usedUp = c.uses >= c.max_uses;
 
     const profileId = await activeProfileId(identity.uid);
     if (profileId) {
       const m = await get('farm_members', { user_id: `eq.${profileId}`, farm_id: `eq.${c.farm_id}`, select: 'role', limit: 1 });
       if (m && m[0]) {
+        if (usedUp) throw new JoinError(400, 'invalid-code', 'Código no válido o vencido');
         // Someone of the team who opens a seller invitation becomes a seller (and uses the code).
         if (await isSellerInvitation(c.id)) {
           const taken = await patch('join_codes', { id: `eq.${c.id}`, uses: `eq.${c.uses}` }, { uses: c.uses + 1 });
@@ -104,8 +105,17 @@ function createJoinService({ get, post, patch, getNegocios, createProfile, log =
         return { status: 'already_member' };
       }
     }
-    const open = await get('join_requests', { farm_id: `eq.${c.farm_id}`, firebase_uid: `eq.${identity.uid}`, status: 'eq.pending', select: 'id', limit: 1 });
-    if (open && open[0]) return { status: 'join_pending', businessName: farmName(c.farm_id) };
+    // Who was left waiting with this same link (before 24 Nov 2026) gets in now, without using it again.
+    const mine = await get('join_requests', { code_id: `eq.${c.id}`, firebase_uid: `eq.${identity.uid}`, status: 'eq.pending', select: '*', limit: 1 });
+    if (mine && mine[0]) return grantAtOnce(mine[0], c);
+    if (usedUp) throw new JoinError(400, 'invalid-code', 'Código no válido o vencido');
+    // Waiting with another link of the same business: this valid link lets them in (it takes one use).
+    const open = await get('join_requests', { farm_id: `eq.${c.farm_id}`, firebase_uid: `eq.${identity.uid}`, status: 'eq.pending', select: '*', limit: 1 });
+    if (open && open[0]) {
+      const taken = await patch('join_codes', { id: `eq.${c.id}`, uses: `eq.${c.uses}` }, { uses: c.uses + 1 });
+      if (!taken || taken.length === 0) throw new JoinError(400, 'invalid-code', 'Código no válido o vencido');
+      return grantAtOnce(open[0], c);
+    }
 
     // Take one use only if nobody else did meanwhile.
     const taken = await patch('join_codes', { id: `eq.${c.id}`, uses: `eq.${c.uses}` }, { uses: c.uses + 1 });
@@ -117,22 +127,23 @@ function createJoinService({ get, post, patch, getNegocios, createProfile, log =
     });
     log.log('[JOIN] request created');
     const request = created && created[0];
-    if (request && await joinsWithoutApproval(c.farm_id)) {
-      try {
-        const g = await grant({ ...request, status: 'pending' }, c.farm_id, c.created_by || null);
-        log.log('[JOIN] joined without approval');
-        return { status: 'joined', businessName: farmName(c.farm_id), ...(g.vendedor ? { vendedor: true } : {}) };
-      } catch (err) {
-        // The request stays pending, so an owner can still approve it by hand.
-        log.error('[JOIN] could not join without approval:', err.code || err.message);
-      }
-    }
-    return { status: 'join_pending', businessName: farmName(c.farm_id) };
+    if (!request) return { status: 'join_pending', businessName: farmName(c.farm_id) };
+    return grantAtOnce(request, c);
   }
 
-  async function joinsWithoutApproval(farmId) {
-    const rows = await get('farm_join_settings', { farm_id: `eq.${farmId}`, select: 'join_without_approval', limit: 1 });
-    return !!(rows && rows[0] && rows[0].join_without_approval === true);
+  // The invitation is the owner's authorization (General Manager, 24 Nov 2026: "the link should work like an
+  // authorization to access"): whoever opens a valid link joins at once, in every business, and the request is
+  // saved as approved by the code's creator. Before, only businesses with farm_join_settings did.
+  async function grantAtOnce(request, c) {
+    try {
+      const g = await grant({ ...request, status: 'pending' }, c.farm_id, c.created_by || null);
+      log.log('[JOIN] joined with the invitation');
+      return { status: 'joined', businessName: farmName(c.farm_id), ...(g.vendedor ? { vendedor: true } : {}) };
+    } catch (err) {
+      // The request stays pending, so an owner can still approve it by hand.
+      log.error('[JOIN] could not join with the invitation:', err.code || err.message);
+      return { status: 'join_pending', businessName: farmName(c.farm_id) };
+    }
   }
 
   async function isSellerInvitation(codeId) {

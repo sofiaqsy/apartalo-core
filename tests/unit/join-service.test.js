@@ -71,13 +71,28 @@ describe('createCode', () => {
 });
 
 describe('submit', () => {
-  test('valid code creates a pending request and grants nothing', async () => {
-    const b = build();
-    expect(await b.svc.submit(newbie, 'abcd efgh')).toEqual({ status: 'join_pending', businessName: 'Finca A' });
-    expect(b.db.join_requests).toHaveLength(1);
-    expect(b.db.join_requests[0]).toMatchObject({ farm_id: 'farm-A', firebase_uid: 'new-uid', requested_role: 'staff' });
-    expect(b.db.farm_members).toHaveLength(2);                // unchanged
+  test('a valid code is the authorization: the person joins at once, in any business (24 Nov 2026)', async () => {
+    const b = build({ over: { created_by: 'p-owner' } });
+    expect(await b.svc.submit(newbie, 'abcd efgh')).toEqual({ status: 'joined', businessName: 'Finca A' });
+    expect(b.db.join_requests[0]).toMatchObject({ farm_id: 'farm-A', firebase_uid: 'new-uid', requested_role: 'staff', status: 'approved', decided_by: 'p-owner' });
+    expect(b.db.farm_members).toContainEqual(expect.objectContaining({ farm_id: 'farm-A', user_id: 'p-new', role: 'staff' }));
     expect(b.db.join_codes[0].uses).toBe(1);
+  });
+  test('who was left waiting with the same link gets in when opening it again, without another use', async () => {
+    const b = build({ over: { uses: 1, created_by: 'p-owner' } });
+    b.db.join_requests.push({ id: 'old', farm_id: 'farm-A', code_id: 'c1', firebase_uid: 'new-uid', email: 'luis@gmail.com',
+      display_name: 'Luis', requested_role: 'staff', status: 'pending' });
+    expect(await b.svc.submit(newbie, 'ABCD-EFGH')).toEqual({ status: 'joined', businessName: 'Finca A' });
+    expect(b.db.join_requests[0]).toMatchObject({ status: 'approved' });
+    expect(b.db.join_codes[0].uses).toBe(1);
+    // Someone else cannot use the spent link.
+    await expectErr(b.svc.submit({ uid: 'other-uid', email: 'x@gmail.com' }, 'ABCD-EFGH'), 400, 'invalid-code');
+  });
+  test('an expired link does not let a waiting person in', async () => {
+    const b = build({ over: { uses: 1, expires_at: '2026-10-21T11:00:00Z' } });
+    b.db.join_requests.push({ id: 'old', farm_id: 'farm-A', code_id: 'c1', firebase_uid: 'new-uid', email: 'l@g.com', requested_role: 'staff', status: 'pending' });
+    await expectErr(b.svc.submit(newbie, 'ABCD-EFGH'), 400, 'invalid-code');
+    expect(b.db.join_requests[0].status).toBe('pending');
   });
   test.each([
     ['wrong code', 'ZZZZ-ZZZZ', {}], ['too short', 'ABC', {}],
@@ -91,7 +106,8 @@ describe('submit', () => {
   });
   test('asking twice does not consume another use', async () => {
     const b = build({ over: { max_uses: 5 } });
-    await b.svc.submit(newbie, 'ABCD-EFGH'); await b.svc.submit(newbie, 'ABCD-EFGH');
+    await b.svc.submit(newbie, 'ABCD-EFGH');
+    expect(await b.svc.submit(newbie, 'ABCD-EFGH')).toEqual({ status: 'already_member' });
     expect(b.db.join_requests).toHaveLength(1); expect(b.db.join_codes[0].uses).toBe(1);
   });
   test('an existing member is told so', async () => {
@@ -105,7 +121,13 @@ describe('submit', () => {
 });
 
 describe('listRequests and decide', () => {
-  async function withRequest() { const b = build(); await b.svc.submit(newbie, 'ABCD-EFGH'); return b; }
+  // A request still waiting (made before 24 Nov 2026, or when joining at once failed).
+  async function withRequest() {
+    const b = build();
+    b.db.join_requests.push({ id: 'r1', farm_id: 'farm-A', code_id: 'c1', firebase_uid: 'new-uid', display_name: 'Luis',
+      email: 'luis@gmail.com', requested_role: 'staff', status: 'pending' });
+    return b;
+  }
 
   test('owner lists only their business requests', async () => {
     const b = await withRequest();
@@ -163,11 +185,10 @@ describe('join without approval (farm_join_settings)', () => {
     await b.svc.submit(newbie, 'ABCD-EFGH');
     await expectErr(b.svc.submit({ uid: 'other-uid', email: 'x@gmail.com' }, 'ABCD-EFGH'), 400, 'invalid-code');
   });
-  test('a business without the setting keeps owner approval', async () => {
+  test('a business without the setting also joins at once (24 Nov 2026)', async () => {
     const b = build({ settings: [{ farm_id: 'farm-B', join_without_approval: true }] });
-    expect((await b.svc.submit(newbie, 'ABCD-EFGH')).status).toBe('join_pending');
-    expect(b.db.farm_members).toHaveLength(2);
-    expect(b.db.join_requests[0].status).toBe('pending');
+    expect((await b.svc.submit(newbie, 'ABCD-EFGH')).status).toBe('joined');
+    expect(b.db.join_requests[0].status).toBe('approved');
   });
   test('if joining fails the request stays pending for an owner', async () => {
     const b = build({ settings: on });
