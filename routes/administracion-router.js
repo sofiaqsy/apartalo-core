@@ -552,7 +552,7 @@ function createAdministracionRouter({
   const PROCESOS = [
     { key: 'finca', area: 'farm', fn: 'farm_summary' },
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
-    { key: 'produccion', area: 'production', fn: 'production_summary_v7' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
+    { key: 'produccion', area: 'production', fn: 'production_summary_v8' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
     { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v7' }, // money: the database answers only to owners
@@ -1078,7 +1078,7 @@ function createAdministracionRouter({
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const numero = v => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
   const ref = v => (typeof v === 'string' ? v.slice(0, 80) : null);
-  // The detail of a green lot (4 Nov 2026): data, product, its compras with their estimated green (green_lot_detail_v3); its account statement comes a page at a time from /cuenta.
+  // The detail of a green lot (4 Nov 2026): data, product, its compras with their estimated green (green_lot_detail_v5: v3 plus the product of a lot made by a compra, 25 Nov 2026); its account statement comes a page at a time from /cuenta.
   // Tostar café (General Manager, 5 Nov 2026): the lot a product is roasted with, chosen by default in the start form:
   // its growing lot, its own lot, or the newest lot from its compras (product_green_lot, members).
   router.get('/:businessId/produccion/lote-del-producto', async (req, res) => {
@@ -1097,7 +1097,7 @@ function createAdministracionRouter({
     if (!UUID.test(String(req.params.id))) return res.status(400).json({ error: 'Lote no válido.' });
     try {
       if (!(await tieneArea(req, 'production'))) return res.status(403).json({ error: 'Producción no es de tus áreas.' });
-      const r = await db(req, 'rpc/green_lot_detail_v3', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
+      const r = await db(req, 'rpc/green_lot_detail_v5', { method: 'POST', body: { p_business_id: req.admin.farmId, p_green_lot_id: req.params.id } });
       if (!r.ok) return sendDbError(res, r);
       return res.json({ lote: r.data });
     } catch (err) {
