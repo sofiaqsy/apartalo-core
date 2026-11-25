@@ -87,6 +87,49 @@ async function getProductById(productId) {
 }
 
 
+// ─── GREEN LOT OF A PRODUCT ───────────────────────────────────────────────────
+// The lot a product's green coffee comes from now, the same rule as the database's product_green_lot (roasting):
+// its growing lot, then the product's own lot (products.green_lot_id), then the newest lot made by its compras
+// (green_lot_estimates of deliveries linked to the product); only available lots with coffee. If none has coffee,
+// the product's own lot. General Manager, 25 Nov 2026: Essential's lot L-8 ran out and its compra opened L-9, but
+// Nuevo pedido still read L-8 and showed Essential as sold out.
+// products: [{ id, green_lot_id }] -> { [productId]: { id, current_kg } }
+async function currentGreenLots(products) {
+  const conGreen = (products || []).filter(p => p && p.id);
+  if (!conGreen.length) return {};
+  const ids = conGreen.map(p => p.id);
+  const safe = async (path, params) => { try { return (await get(path, params)) || []; } catch (_) { return []; } };
+  const [growing, deliveries] = await Promise.all([
+    safe('green_lot_growing', { product_id: `in.(${ids.join(',')})`, select: 'product_id,green_lot_id,closes_on' }),
+    safe('deliveries', { linked_product_id: `in.(${ids.join(',')})`, select: 'id,business_id,linked_product_id' }),
+  ]);
+  const hoy = new Date().toISOString().slice(0, 10);
+  const productOf = {};
+  for (const d of deliveries) productOf[`${d.business_id}|${d.id}`] = d.linked_product_id;
+  const estimates = deliveries.length
+    ? await safe('green_lot_estimates', { delivery_id: `in.(${[...new Set(deliveries.map(d => d.id))].join(',')})`, status: 'eq.active', select: 'business_id,delivery_id,green_lot_id,created_at' })
+    : [];
+  const candidates = {}; // productId -> [{ lot, orden, cuando }]
+  const add = (pid, lot, orden, cuando) => { if (pid && lot) (candidates[pid] = candidates[pid] || []).push({ lot, orden, cuando }); };
+  for (const g of growing) if (!g.closes_on || g.closes_on >= hoy) add(g.product_id, g.green_lot_id, 1, '');
+  for (const p of conGreen) add(p.id, p.green_lot_id, 2, '');
+  for (const e of estimates) add(productOf[`${e.business_id}|${e.delivery_id}`], e.green_lot_id, 3, e.created_at || '');
+  const lotIds = [...new Set(Object.values(candidates).flat().map(c => c.lot))];
+  if (!lotIds.length) return {};
+  const lots = await safe('green_lots', { id: `in.(${lotIds.join(',')})`, select: 'id,current_kg,status' });
+  const byId = {};
+  for (const l of lots) byId[l.id] = l;
+  const out = {};
+  for (const p of conGreen) {
+    const list = (candidates[p.id] || [])
+      .filter(c => byId[c.lot] && byId[c.lot].status === 'available' && Number(byId[c.lot].current_kg) > 0)
+      .sort((a, b) => a.orden - b.orden || String(b.cuando).localeCompare(String(a.cuando)));
+    const lot = list.length ? byId[list[0].lot] : (p.green_lot_id && byId[p.green_lot_id]) || null;
+    if (lot) out[p.id] = { id: lot.id, current_kg: Number(lot.current_kg || 0) };
+  }
+  return out;
+}
+
 // ─── PRODUCT PRESENTATIONS ────────────────────────────────────────────────────
 
 const PRESENTATION_SELECT = 'id,product_id,pack_size,unit,price_cents,b2b_price_cents,min_qty_for_b2b,stock,min_order_qty,sort_order,is_default,is_visible,grind';
@@ -178,20 +221,10 @@ async function getProductsWithPresentations(farmId) {
 
   // Green coffee: stock comes from green_lots.current_kg (separate map, only for 'verde' grind)
   const greenKgByProduct = {};
-  const greenLotIds = products.filter(p => p.green_lot_id).map(p => p.green_lot_id);
-  if (greenLotIds.length > 0) {
-    try {
-      const glUrl = `${base()}/rest/v1/green_lots?id=in.(${greenLotIds.join(',')})&select=id,current_kg`;
-      const { data: glRows } = await axios.get(glUrl, { headers: headers() });
-      const glMap = {};
-      for (const gl of (glRows || [])) glMap[gl.id] = Number(gl.current_kg || 0);
-      for (const p of products) {
-        if (p.green_lot_id && glMap[p.green_lot_id] !== undefined) {
-          greenKgByProduct[p.id] = Math.max(0, glMap[p.green_lot_id]);
-        }
-      }
-    } catch (_) { /* non-fatal */ }
-  }
+  try {
+    const current = await currentGreenLots(products.filter(p => p.green_lot_id));
+    for (const [pid, lot] of Object.entries(current)) greenKgByProduct[pid] = Math.max(0, lot.current_kg);
+  } catch (_) { /* non-fatal */ }
 
   const presMap = {};
   for (const pp of presentations) {
@@ -398,11 +431,10 @@ async function createOrder({ customer, farmId, items, shippingAddress, notes, pa
 
     // 1a. Coffee (green): check green_lots.current_kg
     if (kgNeeded > 0 && item.grind === 'green' && item.productId) {
-      const prodRows = await get('products', { id: `eq.${item.productId}`, select: 'green_lot_id' });
-      const greenLotId = prodRows[0]?.green_lot_id;
-      if (greenLotId) {
-        const glRows = await get('green_lots', { id: `eq.${greenLotId}`, select: 'current_kg' });
-        const currentGreenKg = Number(glRows[0]?.current_kg || 0);
+      const prodRows = await get('products', { id: `eq.${item.productId}`, select: 'id,green_lot_id' });
+      const greenLot = prodRows[0]?.green_lot_id ? (await currentGreenLots(prodRows))[item.productId] : null;
+      if (greenLot) {
+        const currentGreenKg = Number(greenLot.current_kg || 0);
         if (kgNeeded > currentGreenKg + 0.001) {
           throw new Error(`Stock insuficiente para "${item.productName}" (disponible: ${currentGreenKg.toFixed(2)} kg, pedido: ${kgNeeded.toFixed(2)} kg)`);
         }
@@ -1040,9 +1072,8 @@ async function deductStockOnConfirm(supabaseOrderId) {
   const prodUrl = `${base()}/rest/v1/products?id=in.(${productIds.join(',')})&select=id,green_lot_id`;
   const { data: productRows } = await axios.get(prodUrl, { headers: headers() });
   const greenLotByProduct = {};
-  for (const p of (productRows || [])) {
-    if (p.green_lot_id) greenLotByProduct[p.id] = p.green_lot_id;
-  }
+  const currentLots = await currentGreenLots((productRows || []).filter(p => p.green_lot_id));
+  for (const [pid, lot] of Object.entries(currentLots)) greenLotByProduct[pid] = lot.id;
 
   // 3. Batch-fetch presentation grind (grind was moved to product_presentations in 0031)
   const presentationIds = [...new Set(items.map(i => i.presentation_id).filter(Boolean))];
@@ -1403,13 +1434,14 @@ async function getProductAvailableKgBreakdown(productId) {
       { headers: headers() }
     ).catch(() => ({ data: [] })),
     axios.get(
-      `${base()}/rest/v1/products?id=eq.${productId}&select=green_lot_id`,
+      `${base()}/rest/v1/products?id=eq.${productId}&select=id,green_lot_id`,
       { headers: headers() }
     ).catch(() => ({ data: [] })),
   ]);
 
-  // ── Green coffee: fetch green_lots.current_kg if linked ──────────────
-  const greenLotId = (productRes.data?.[0])?.green_lot_id || null;
+  // ── Green coffee: fetch green_lots.current_kg if linked (its current lot, 25 Nov 2026) ──
+  const prodRow = productRes.data?.[0];
+  const greenLotId = prodRow?.green_lot_id ? ((await currentGreenLots([prodRow]))[productId]?.id || prodRow.green_lot_id) : null;
   let greenKg = null, greenLotCode = null;
   if (greenLotId) {
     const glRes = await axios.get(
@@ -1498,6 +1530,7 @@ async function getProductAvailableKg(productId) {
 }
 
 module.exports = {
+  currentGreenLots,
   // Low-level REST helpers, exported so other services (ownership checks, identity)
   // reuse the same base URL and service-role headers instead of duplicating them.
   get, post, patch, deleteRow,
