@@ -993,7 +993,7 @@ function createAdministracionRouter({
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     try {
       if (!(await tieneArea(req, area))) return res.status(403).json({ error: 'Esa área no es de tus áreas.' });
-      const r = await db(req, `area_expenses_recent_v6?${new URLSearchParams({
+      const r = await db(req, `area_expenses_recent_v7?${new URLSearchParams({
         select: '*', business_id: `eq.${req.admin.farmId}`, area: `eq.${area}`, order: 'expense_date.desc,id.desc',
         offset: String(offset), limit: String(limit + 1),
       })}`);

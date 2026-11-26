@@ -665,7 +665,7 @@ describe('compras list and detail', () => {
     const r = await call(server, '/api/administracion/BIZ-002/gastos-area?area=farm&offset=20', { token: 't', method: 'GET' });
     expect(r.body.gastos).toHaveLength(20);
     expect(r.body.hayMas).toBe(true);
-    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v6'))[0];
+    const url = fetchImpl.mock.calls.find(c => c[0].includes('area_expenses_recent_v7'))[0];
     expect(url).toContain('area=eq.farm');
     expect(url).toContain('offset=20');
     expect(url).toContain('limit=21');
