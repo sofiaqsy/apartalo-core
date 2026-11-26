@@ -550,11 +550,11 @@ function createAdministracionRouter({
   // Only the processes of the person's own areas are sent (my_areas_v2: owners have every area), so hiding a
   // card in the app is never the only protection (General Manager, 3 Nov 2026).
   const PROCESOS = [
-    { key: 'finca', area: 'farm', fn: 'farm_summary' },
+    { key: 'finca', area: 'farm', fn: 'farm_summary_v2' }, // por pagar counts gastos paid together or in parts (fincas 0106)
     { key: 'compras', area: 'sourcing', fn: 'purchasing_summary_v2' },
     { key: 'produccion', area: 'production', fn: 'production_summary_v8' }, // by product, every open green lot with its product, the Blend lot's compras with their estimated green (4 Nov 2026), and each roasted lot with its own code T-YYMMDD-N (7 Nov 2026)
     { key: 'comercial', area: 'commercial', fn: 'apartalo_sales_by_month', wrap: data => ({ meses: data || [] }) },
-    { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary' },
+    { key: 'logistica', area: 'fulfillment', fn: 'logistics_summary_v2' }, // the same (fincas 0106)
     { key: 'finanzas', area: 'finance', fn: 'finance_summary_v7' }, // money: the database answers only to owners
   ];
   router.get('/:businessId/procesos', async (req, res) => {
